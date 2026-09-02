@@ -11,18 +11,18 @@ A diferencia del estándar estadounidense basado en encuestas de origen-destino 
 Para POIs de escala metropolitana (Aeropuertos AIR_, Universidades UNI_, Estadios):
 1. **Cuota Objetivo:** $ fijada empíricamente (fórmula AFAC para aeropuertos, matrícula SEP para universidades).
 2. **Distribución Espacial:** 
-   W_{ik} = 	ext{PEA}_i \cdot e^{-eta_{	ext{esp}} \cdot d_{ik}} \quad (eta_{	ext{esp}} = 0.04)
+   W_{ik} = \text{PEA}_i \cdot e^{-\beta_{\text{esp}} \cdot d_{ik}} \quad (\beta_{\text{esp}} = 0.04)
 3. **Asignación Multinomial:**
-   T_{i 	o k} \sim 	ext{Multinomial}\left(Q_k, rac{W_{ik}}{\sum_m W_{mk}}ight)
-4. **Descuento de Presupuesto:** $	ext{PEA}_i^{	ext{rem}} = 	ext{PEA}_i - \sum_k T_{i 	o k}$.
+   T_{i \to k} \sim \text{Multinomial}\left(Q_k, \frac{W_{ik}}{\sum_m W_{mk}}\right)
+4. **Descuento de Presupuesto:** $\text{PEA}_i^{\text{rem}} = \text{PEA}_i - \sum_k T_{i \to k}$.
 
 ### Capa 2: Modelo Gravitatorio Multinomial para Empleo Regular (DENUE)
 Para la PEA remanente y los destinos comerciales/industriales del DENUE:
-A_{ij} = E_j^{0.85} \cdot e^{-eta \cdot d_{ij}} \quad (eta = 0.12, \ d_{ij} \le 55	ext{ km})
-P_{ij} = rac{A_{ij}}{\sum_k A_{ik}}
-T_{i 	o j} \sim 	ext{Multinomial}\left(	ext{PEA}_i^{	ext{rem}}, P_{i \cdot}ight)
+A_{ij} = E_j^{0.85} \cdot e^{-\beta \cdot d_{ij}} \quad (\beta = 0.12, \ d_{ij} \le 55\text{ km})
+P_{ij} = \frac{A_{ij}}{\sum_k A_{ik}}
+T_{i \to j} \sim \text{Multinomial}\left(\text{PEA}_i^{\text{rem}}, P_{i \cdot}\right)
 
-**Aserción de Masa:** $\sum_{i,j} T_{ij} + \sum_{i,k} T_{ik} \equiv \sum_i 	ext{PEA}_i$.
+**Aserción de Masa:** $\sum_{i,j} T_{ij} + \sum_{i,k} T_{ik} \equiv \sum_i \text{PEA}_i$.
 
 ---
 
@@ -30,9 +30,9 @@ T_{i 	o j} \sim 	ext{Multinomial}\left(	ext{PEA}_i^{	ext{rem}}, P_{i \cdot}ight
 
 El DENUE subestima el empleo informal de micro-negocios pero mide con precisión a las grandes empresas. El motor aplica un factor de expansión acotado:
 
-	ext{Factor Micro} = 	ext{clamp}\left(rac{H001A - 	ext{Empleo Grande}}{	ext{Empleo Micro Base}}, \ 1.0, \ rac{1}{1 - TIL_1}ight)
+\text{Factor Micro} = \text{clamp}\left(\frac{H001A - \text{Empleo Grande}}{\text{Empleo Micro Base}}, \ 1.0, \ \frac{1}{1 - TIL_1}\right)
 
-* Grandes empresas ($>50$ trabajadores): Multiplicador fijo .000$ (sin inflar).
+* Grandes empresas (>50 trabajadores): Multiplicador fijo 1.000 (sin inflar).
 * Micro y pequeñas empresas: Multiplicador ajustado para satisfacer el control $ del Censo Económico 2024.
 
 ---
@@ -41,10 +41,10 @@ El DENUE subestima el empleo informal de micro-negocios pero mide con precisión
 
 Los tiempos de manejo (drivingSeconds) en el juego determinan la elección modal:
 
-	au(d) = 1.25 + 0.15 \cdot e^{-d / 10.0} \quad (	ext{Tortuosidad})
-V(d) = 18.0 + (65.0 - 18.0) \cdot \left(1 - e^{-d / 8.0}ight) \quad (	ext{Velocidad en km/h})
-	ext{drivingDistance} = \max(800, \ 	ext{int}(d 	imes 1000 	imes 	au))
-	ext{drivingSeconds} = \max\left(180, \ 	ext{int}\left(rac{	ext{drivingDistance}}{V(d) / 3.6}ight)ight)
+\tau(d) = 1.25 + 0.15 \cdot e^{-d / 10.0} \quad (\text{Tortuosidad})
+V(d) = 18.0 + (65.0 - 18.0) \cdot (1 - e^{-d / 8.0}) \quad (\text{Velocidad en km/h})
+\text{drivingDistance} = \max(800, \ \text{int}(d \times 1000 \times \tau))
+\text{drivingSeconds} = \max\left(180, \ \text{int}\left(\frac{\text{drivingDistance}}{V(d) / 3.6}\right)\right)
 
 ---
 
@@ -55,4 +55,4 @@ V(d) = 18.0 + (65.0 - 18.0) \cdot \left(1 - e^{-d / 8.0}ight) \quad (	ext{Veloc
 | **Conservación de Masa** | Asignación Multinomial Estricta | $\Delta = 0$ personas |
 | **POIs Especiales** | Cuota Objetivo Pura (Capa 1) | 100% de la cuota real en el tooltip |
 | **Esquema JSON** | Canónico de Subway Builder | 5 llaves en points, 6 en pops |
-| **Cámara Viewport** | Baricentro de Masa $\sum x_i(R_i + 1.5J_i)$ | Centrado sobre el núcleo metropolitano |
+| **Cámara Viewport** | Baricentro de Masa | Centrado sobre el núcleo metropolitano |
