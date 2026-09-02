@@ -20,23 +20,54 @@ macroeconomics:
   tasa_pea: 0.62                      # Tasa de participación laboral (ENOE)
   til_1_state: 0.45                   # Tasa de informalidad laboral estatal (ENOE)
   sample_threshold: 500               # Mínimo de muestra formal para calibrar municipio
-  default_growth_factor: 1.0          # Factor de proyección demográfica (1.0 = 2020)
+  default_growth_factor: 1.05         # Factor de proyección demográfica base (1.00 = Censo 2020 puro)
   gravity_beta: 0.12                  # Coeficiente de fricción espacial (0.10 a 0.14 recomendado)
   max_distance_km: 55.0               # Límite máximo de distancia para viajes urbanos
   max_pop_size: 150                   # Tamaño máximo por cohorte de viaje (recomendado 150-200)
 
-  # Opcional: Proyecciones demográficas específicas por clave municipal (EEMMM)
+  # Proyecciones demográficas municipales oficiales (CONAPO / INEGI):
+  # Factor = (Población Proyectada CONAPO Año Actual / Población Censo CPV 2020)
+  # Claves en formato EEMMM (Entidad 2 dígitos + Municipio 3 dígitos)
   growth_factors:
-    "23005": 1.08                     # 8% de crecimiento en Benito Juárez
+    "23005": 1.07                     # Benito Juárez (Cancún): +7% (968k vs 904k)
+    "23003": 1.05                     # Isla Mujeres: +5%
 
+# ==============================================================================
+# GENERADORES ESPECIALES (POIs) - REGLAS Y TAXONOMÍA:
+#
+# 1. Prefijos de ID Nativos del Juego:
+#    - AIR_* : Aeropuertos -> Activa horario 24/7 (dampening = 0.5) y flujo simétrico.
+#    - UNI_* : Universidades -> Activa horario estudiantil (dampening = 0.3).
+#    - SPO_* : Estadios y complejos deportivos.
+#    - TOU_* : Anclas turísticas y centros de convenciones.
+#    - MED_* : Complejos médicos y hospitales de alta especialidad.
+#    - TRA_* : Terminales centrales de autobuses o trenes interurbanos.
+#
+# 2. Modos de Asignación:
+#    - MAX     : (Recomendado) Garantiza una cuota objetivo absorbiendo los negocios
+#                locales del DENUE en su radio y añadiendo la diferencia.
+#    - BOOST   : Suma la cuota como empleo exógeno puro encima del censo.
+#    - REPLACE : Sobrescribe y reemplaza totalmente los empleos del DENUE en el radio.
+#
+# 3. Regla para Clusters Comerciales / Corredores (ej. Zona Hotelera):
+#    - NO crear un solo mega-POI que concentre todo el corredor en 1 punto.
+#    - Usar POIs puntuales para anclas específicas con radio acotado (radius_m: 500-800).
+# ==============================================================================
 pois:
-  - id: "AIR_Aeropuerto"
+  - id: "AIR_Aeropuerto_Internacional"
     loc: [-86.874, 21.036]
-    jobs: 32000
-    radius_m: 2500
-    mode: "MAX"                       # MAX: piso sobre el censo / BOOST: suma exógena / REPLACE: sobrescritura
-  - id: "UNI_CampusPrincipal"
+    jobs: 32000                       # Cuota objetivo basada en pasajeros y personal
+    radius_m: 2500                    # Radio físico del polígono aeroportuario
+    mode: "MAX"                       # Absorbe DENUE local y fija piso de 32k
+
+  - id: "UNI_Campus_Metropolitano"
     loc: [-86.840, 21.150]
-    jobs: 8000
-    radius_m: 800
-    mode: "BOOST"
+    jobs: 8000                        # Matrícula estudiantil + personal docente
+    radius_m: 800                     # Radio del campus
+    mode: "MAX"
+
+  - id: "TOU_Centro_Convenciones"
+    loc: [-86.748, 21.134]
+    jobs: 6000                        # Flujo de visitantes/turistas en nodo ancla
+    radius_m: 600                     # Radio acotado (no cubre todo el corredor)
+    mode: "MAX"

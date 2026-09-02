@@ -29,6 +29,11 @@ def main():
         default=".",
         help="Directorio de trabajo / salida de los archivos generados (default: .)"
     )
+    parser.add_argument(
+        "--data-dir",
+        default=None,
+        help="Directorio donde se ubican los datos fuente del INEGI y OSM (default: igual a --output-dir)"
+    )
 
     args = parser.parse_args()
 
@@ -36,7 +41,8 @@ def main():
         execute_pipeline(
             config_path=args.config,
             skip_map=args.skip_map,
-            output_dir=args.output_dir
+            output_dir=args.output_dir,
+            data_dir=args.data_dir
         )
     except Exception as e:
         print(f"\n[ERROR] Falló la ejecución del pipeline: {e}")

@@ -1,4 +1,4 @@
-"""
+﻿"""
 sb_mexico.pipeline
 ==================
 Orquestador principal del proceso de generación de mapas y demanda.
@@ -13,7 +13,7 @@ import zipfile
 import yaml
 import numpy as np
 import geopandas as gpd
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from rich.console import Console
 from rich.table import Table
@@ -24,18 +24,32 @@ from sb_mexico.inegi import (
     load_cpv_demography,
     calibrate_denue_employment,
     parse_enoe_indicators,
-    parse_ce2024_municipal
+    parse_ce2024_municipal,
+    parse_conapo_projections
 )
-from sb_mexico.gravity import build_demand_grid, simulate_gravity_demand
+from sb_mexico.gravity import build_demand_grid, simulate_gravity_demand, sanitize_demand_points
 from sb_mexico.cartography import build_city_map
 
 console = Console()
 
 
+def _dedup_glob(patterns: List[str]) -> List[str]:
+    """Expande y desduplica rutas de archivos existentes."""
+    seen = set()
+    result = []
+    for pat in patterns:
+        for f in glob.glob(pat):
+            abs_f = os.path.abspath(f)
+            if abs_f not in seen and os.path.isfile(abs_f):
+                seen.add(abs_f)
+                result.append(abs_f)
+    return result
+
+
 def load_city_config(config_path: str) -> Dict[str, Any]:
-    """Carga y valida el archivo de configuración YAML de la ciudad."""
+    """Carga y valida el archivo YAML de configuración de la ciudad."""
     if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Archivo de configuración no encontrado: {config_path}")
+        raise FileNotFoundError(f"No se encontró el archivo de configuración en '{config_path}'")
 
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
@@ -52,12 +66,17 @@ def load_city_config(config_path: str) -> Dict[str, Any]:
 def execute_pipeline(
     config_path: str,
     skip_map: bool = False,
-    output_dir: str = "."
+    output_dir: str = ".",
+    data_dir: Optional[str] = None
 ) -> str:
     """
     Ejecuta el pipeline completo de principio a fin de manera determinista y autovalidada.
     """
     console.print(Panel.fit("[bold green]SUBWAY BUILDER MÉXICO v6.0[/bold green]\n[cyan]Pipeline Integral y Autovalidado[/cyan]"))
+
+    src_dir = os.path.abspath(data_dir or output_dir)
+    out_dir = os.path.abspath(output_dir)
+    os.makedirs(out_dir, exist_ok=True)
 
     cfg = load_city_config(config_path)
     city_info = cfg["city"]
@@ -78,13 +97,20 @@ def execute_pipeline(
     # =========================================================================
     if not skip_map:
         console.print(f"\n[bold yellow]1. Compilación Cartográfica ({city_code})[/bold yellow]")
+        pbf_candidates = _dedup_glob([
+            os.path.join(src_dir, "*.osm.pbf"),
+            os.path.join(out_dir, "*.osm.pbf"),
+            "*.osm.pbf"
+        ])
+        osm_pbf = pbf_candidates[0] if pbf_candidates else None
         build_city_map(
             city_code=city_code,
             bbox=bbox_list,
+            osm_pbf_path=osm_pbf,
             building_filter_size=city_info.get("building_filter_size", 15.0),
             building_simplification=city_info.get("building_simplification", 0.2),
             include_ocean=city_info.get("include_ocean", False),
-            output_dir=output_dir
+            output_dir=out_dir
         )
     else:
         console.print(f"\n[dim]1. Compilación Cartográfica omitida por parámetro.[/dim]")
@@ -94,11 +120,31 @@ def execute_pipeline(
     # =========================================================================
     console.print(f"\n[bold yellow]2. Ingesta y Calibración INEGI[/bold yellow]")
 
-    # Detección automática o rutas configuradas
-    denue_files = glob.glob(os.path.join(output_dir, "*denue*.csv"))
-    cpv_files = glob.glob(os.path.join(output_dir, "*RESAGEBURB*.csv")) + glob.glob(os.path.join(output_dir, "*censo*.csv")) + glob.glob(os.path.join(output_dir, "*censo*.xlsx"))
-    ce_files = glob.glob(os.path.join(output_dir, "*SAIC*.csv")) + glob.glob(os.path.join(output_dir, "*cenu24*.csv"))
-    enoe_files = glob.glob(os.path.join(output_dir, "*2026_trim*.csv")) + glob.glob(os.path.join(output_dir, "*enoe*.csv"))
+    # Detección automática en src_dir o rutas configuradas con desduplicación
+    denue_files = _dedup_glob([os.path.join(src_dir, "*denue*.csv")])
+    cpv_files = _dedup_glob([
+        os.path.join(src_dir, "*RESAGEBURB*.csv"),
+        os.path.join(src_dir, "*censo*.csv"),
+        os.path.join(src_dir, "*censo*.xlsx")
+    ])
+    ce_files = _dedup_glob([
+        os.path.join(src_dir, "*SAIC*.csv"),
+        os.path.join(src_dir, "*cenu24*.csv"),
+        os.path.join(src_dir, "*tr_ce*.csv"),
+        os.path.join(src_dir, "*ce_*.csv")
+    ])
+    enoe_files = _dedup_glob([
+        os.path.join(src_dir, "*2026_trim*.csv"),
+        os.path.join(src_dir, "*2024_trim*.csv"),
+        os.path.join(src_dir, "*2025_trim*.csv"),
+        os.path.join(src_dir, "*trim*.csv"),
+        os.path.join(src_dir, "*enoe*.csv")
+    ])
+    conapo_files = _dedup_glob([
+        os.path.join(src_dir, "*conapo*.csv"),
+        os.path.join(src_dir, "data-*.csv"),
+        os.path.join(src_dir, "*proyeccion*.csv")
+    ])
 
     # A. Macroeconomía (ENOE)
     tasa_pea = macro.get("tasa_pea")
@@ -149,21 +195,28 @@ def execute_pipeline(
             cve,
             data.get("nombre", "-"),
             f"{int(data['jobs_formal']):,}",
-            f"{int(data['h001a']):,}" if data['h001a'] else "-",
+            f"{int(data['h001a']):,}" if data.get('h001a') else "-",
             f"{data['factor']:.3f}",
             data["status"]
         )
     console.print(tabla_calib)
 
-    # D. Carga y Georreferenciación CPV 2020
+    # D. Carga y Georreferenciación CPV 2020 con Proyecciones CONAPO
     if not cpv_files:
         raise FileNotFoundError("No se encontró archivo de Censo CPV 2020 (*RESAGEBURB*.csv o *censo*).")
+
+    growth_factors = macro.get("growth_factors", {}).copy()
+    if conapo_files:
+        conapo_projs = parse_conapo_projections(conapo_files[0])
+        if conapo_projs:
+            console.print(f"-> Proyecciones CONAPO cargadas automáticamente: [green]{len(conapo_projs)}[/green] municipios ({os.path.basename(conapo_files[0])}).")
+
     df_cpv = load_cpv_demography(
         cpv_paths=cpv_files,
         df_denue=df_denue,
         bbox=bbox_dict,
         tasa_pea=tasa_pea,
-        growth_factors=macro.get("growth_factors", {}),
+        growth_factors=growth_factors,
         default_growth=macro.get("default_growth_factor", 1.0)
     )
     console.print(f"-> Censo CPV cargado y georreferenciado: [cyan]{len(df_cpv):,}[/cyan] manzanas habitadas.")
@@ -173,9 +226,11 @@ def execute_pipeline(
     # =========================================================================
     console.print(f"\n[bold yellow]3. Malla Espacial y Snapping Vial[/bold yellow]")
 
-    roads_path = os.path.join(output_dir, "roads.geojson")
+    roads_path = os.path.join(out_dir, "roads.geojson")
+    if not os.path.exists(roads_path) and os.path.exists(os.path.join(src_dir, "roads.geojson")):
+        roads_path = os.path.join(src_dir, "roads.geojson")
     if not os.path.exists(roads_path):
-        raise FileNotFoundError("roads.geojson no encontrado. Compila el mapa primero.")
+        raise FileNotFoundError(f"roads.geojson no encontrado en '{out_dir}' ni en '{src_dir}'. Compila el mapa primero.")
 
     roads_gdf = gpd.read_file(roads_path)
 
@@ -206,7 +261,7 @@ def execute_pipeline(
         console.print(tabla_poi)
 
     # =========================================================================
-    # 4. MODELO GRAVITATORIO MULTINOMIAL
+    # 4. MODELO GRAVITATORIO Y GENERACIÓN DE COHORTES (MULTINOMIAL)
     # =========================================================================
     console.print(f"\n[bold yellow]4. Modelo Gravitatorio y Generación de Cohortes (Multinomial)[/bold yellow]")
 
@@ -242,9 +297,13 @@ def execute_pipeline(
         center_lon = (bbox_dict["min_lon"] + bbox_dict["max_lon"]) / 2.0
         center_lat = (bbox_dict["min_lat"] + bbox_dict["max_lat"]) / 2.0
 
+    clean_demand_points = sanitize_demand_points(demand_points)
+    cfg_out_path = os.path.join(out_dir, "config.json")
+    demand_out_path = os.path.join(out_dir, "demand_data.json")
+
     try:
         from depot.demand import DemandData
-        dd = DemandData({"points": demand_points, "pops": pops})
+        dd = DemandData({"points": clean_demand_points, "pops": pops})
         dd.sanitize()
         # Generar config.json con viewport calculado por depot
         dd.generate_config(
@@ -253,15 +312,27 @@ def execute_pipeline(
             description=city_info["description"][:80],
             creator=city_info.get("creator", "Subway Builder México v6.0"),
             version="6.0.0",
-            filename=os.path.join(output_dir, "config.json")
+            filename=cfg_out_path
         )
-        dd.save(os.path.join(output_dir, "demand_data.json"))
+        # Asegurar centrado baricéntrico inteligente
+        if os.path.exists(cfg_out_path):
+            with open(cfg_out_path, "r", encoding="utf-8") as f:
+                cfg_json = json.load(f)
+            if "initialViewState" not in cfg_json or not isinstance(cfg_json["initialViewState"], dict):
+                cfg_json["initialViewState"] = {}
+            cfg_json["initialViewState"]["latitude"] = round(center_lat, 5)
+            cfg_json["initialViewState"]["longitude"] = round(center_lon, 5)
+            cfg_json["initialViewState"]["zoom"] = city_info.get("initial_zoom", 12.0)
+            with open(cfg_out_path, "w", encoding="utf-8") as f:
+                json.dump(cfg_json, f, indent=2, ensure_ascii=False)
+
+        dd.save(demand_out_path)
         console.print("[green]✓[/green] Sanitización y exportación mediante [bold]depot.demand.DemandData[/bold] exitosa.")
     except Exception as e:
         console.print(f"[yellow]Nota: depot.demand fallback nativo ({e}). Exportando directamente...[/yellow]")
         # Exportación manual de respaldo
-        with open(os.path.join(output_dir, "demand_data.json"), "w", encoding="utf-8") as f:
-            json.dump({"points": demand_points, "pops": pops}, f, separators=(',', ':'))
+        with open(demand_out_path, "w", encoding="utf-8") as f:
+            json.dump({"points": clean_demand_points, "pops": pops}, f, separators=(',', ':'))
 
         config_data = {
             "name": city_info["name"],
@@ -278,14 +349,23 @@ def execute_pipeline(
             "creator": city_info.get("creator", "Subway Builder México v6.0"),
             "version": "6.0.0"
         }
-        with open(os.path.join(output_dir, "config.json"), "w", encoding="utf-8") as f:
+        with open(cfg_out_path, "w", encoding="utf-8") as f:
             json.dump(config_data, f, indent=2, ensure_ascii=False)
 
     # =========================================================================
     # 6. EMPAQUETADO EN ARCHIVO ZIP FINAL
     # =========================================================================
     zip_name = f"{city_code}.zip"
-    zip_path = os.path.join(output_dir, zip_name)
+    zip_path = os.path.join(out_dir, zip_name)
+
+    # Validación estricta de artefactos obligatorios
+    mandatory_files = ["config.json", "demand_data.json", f"{city_code}.pmtiles", "roads.geojson"]
+    missing_mandatory = [f for f in mandatory_files if not os.path.exists(os.path.join(out_dir, f))]
+    if missing_mandatory:
+        raise RuntimeError(
+            f"No se puede generar el archivo {zip_name}. Faltan artefactos obligatorios en '{out_dir}': "
+            f"{', '.join(missing_mandatory)}"
+        )
 
     files_to_pack = [
         "config.json",
@@ -299,7 +379,7 @@ def execute_pipeline(
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
         for fname in files_to_pack:
-            fpath = os.path.join(output_dir, fname)
+            fpath = os.path.join(out_dir, fname)
             if os.path.exists(fpath):
                 zipf.write(fpath, arcname=fname)
                 console.print(f"  + Empaquetado: [dim]{fname}[/dim]")

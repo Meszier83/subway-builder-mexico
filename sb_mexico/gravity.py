@@ -55,11 +55,11 @@ def build_demand_grid(
             else:
                 radius_m = DEFAULT_RADIUS_METERS["DEFAULT"]
 
-        radius_deg = radius_m / 111_000.0  # ~111km por grado
+        cos_lat = math.cos(math.radians(poi["loc"][1]))
         pois_resolved.append({
             **poi,
             "radius_m": radius_m,
-            "radius_deg": radius_deg,
+            "cos_lat": cos_lat,
             "mode": poi.get("mode", "MAX").upper(),
             "denue_jobs_absorbidos": 0.0,
             "jobs_declarados": int(poi.get("jobs", 0))
@@ -70,14 +70,19 @@ def build_demand_grid(
     def get_grid_key(lon: float, lat: float) -> str:
         return f"{int(math.floor(lon / grid_size))}_{int(math.floor(lat / grid_size))}"
 
-    for _, row in df_denue.iterrows():
-        r_lon, r_lat, r_jobs = row['lon'], row['lat'], row['calibrated_jobs']
+    denue_records = df_denue[['lon', 'lat', 'calibrated_jobs']].to_dict('records')
+    for rec in denue_records:
+        r_lon = float(rec['lon'])
+        r_lat = float(rec['lat'])
+        r_jobs = float(rec['calibrated_jobs'])
         
-        # Verificar si cae dentro de algún POI especial
+        # Verificar si cae dentro de algún POI especial (distancia métrica precisa)
         matched_poi = None
         for poi in pois_resolved:
-            dist = math.hypot(r_lon - poi["loc"][0], r_lat - poi["loc"][1])
-            if dist <= poi["radius_deg"]:
+            d_lon_m = (r_lon - poi["loc"][0]) * 111_320.0 * poi["cos_lat"]
+            d_lat_m = (r_lat - poi["loc"][1]) * 110_574.0
+            dist_m = math.hypot(d_lon_m, d_lat_m)
+            if dist_m <= poi["radius_m"]:
                 matched_poi = poi
                 break
 
@@ -85,23 +90,30 @@ def build_demand_grid(
             matched_poi["denue_jobs_absorbidos"] += r_jobs
             continue  # No se suma a la malla regular para evitar doble conteo
 
-        # Sumar a la malla regular
+        # Sumar a la malla regular con acumulación O(1) de memoria
         k = get_grid_key(r_lon, r_lat)
         if k not in grid:
-            grid[k] = {"lons": [], "lats": [], "jobs": 0.0, "residents": 0.0, "pea": 0.0}
-        grid[k]["lons"].append(r_lon)
-        grid[k]["lats"].append(r_lat)
-        grid[k]["jobs"] += r_jobs
+            grid[k] = {"sum_lon": 0.0, "sum_lat": 0.0, "count": 0, "jobs": 0.0, "residents": 0.0, "pea": 0.0}
+        cell = grid[k]
+        cell["sum_lon"] += r_lon
+        cell["sum_lat"] += r_lat
+        cell["count"] += 1
+        cell["jobs"] += r_jobs
 
     # 3. Sumar Población del Censo a la Malla
-    for _, row in df_cpv.iterrows():
-        k = get_grid_key(row['lon'], row['lat'])
+    cpv_records = df_cpv[['lon', 'lat', 'pobtot_adj', 'pea_real']].to_dict('records')
+    for rec in cpv_records:
+        r_lon = float(rec['lon'])
+        r_lat = float(rec['lat'])
+        k = get_grid_key(r_lon, r_lat)
         if k not in grid:
-            grid[k] = {"lons": [], "lats": [], "jobs": 0.0, "residents": 0.0, "pea": 0.0}
-        grid[k]["lons"].append(row['lon'])
-        grid[k]["lats"].append(row['lat'])
-        grid[k]["residents"] += row['pobtot_adj']
-        grid[k]["pea"] += row['pea_real']
+            grid[k] = {"sum_lon": 0.0, "sum_lat": 0.0, "count": 0, "jobs": 0.0, "residents": 0.0, "pea": 0.0}
+        cell = grid[k]
+        cell["sum_lon"] += r_lon
+        cell["sum_lat"] += r_lat
+        cell["count"] += 1
+        cell["residents"] += float(rec['pobtot_adj'])
+        cell["pea"] += float(rec['pea_real'])
 
     # 4. Preparar Snapping Vial con STRtree
     if roads_gdf.crs is None:
@@ -120,7 +132,10 @@ def build_demand_grid(
     ]
 
     points_to_snap = [
-        Point(float(np.mean(cell["lons"])), float(np.mean(cell["lats"])))
+        Point(
+            float(cell["sum_lon"] / max(1, cell["count"])),
+            float(cell["sum_lat"] / max(1, cell["count"]))
+        )
         for _, cell in valid_cells
     ]
 
@@ -275,26 +290,32 @@ def simulate_gravity_demand(
         a = np.sin(dlat / 2.0)**2 + np.cos(orig_coords[:, 1]) * np.cos(sp_coord[1]) * np.sin(dlon / 2.0)**2
         dist_km = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
 
-        # Ponderación de accesibilidad metropolitana suave (beta = 0.04)
-        sp_weights = np.maximum(0, orig_pea).astype(np.float64) * np.exp(-0.04 * dist_km)
-        total_w = sp_weights.sum()
-        if total_w <= 0:
-            sp_probs = np.ones(len(origins)) / len(origins)
-        else:
+        # Asignación multinomial acotada por capacidad remanente (Bounded Multinomial Allocation)
+        remaining_quota = target_quota
+        sp_assigned = np.zeros(len(origins), dtype=np.int64)
+
+        while remaining_quota > 0 and np.any(orig_pea > 0):
+            active_mask = orig_pea > 0
+            sp_weights = np.zeros(len(origins), dtype=np.float64)
+            sp_weights[active_mask] = orig_pea[active_mask].astype(np.float64) * np.exp(-0.04 * dist_km[active_mask])
+            total_w = sp_weights.sum()
+            if total_w <= 0:
+                break
             sp_probs = sp_weights / total_w
+            draw = rng.multinomial(remaining_quota, sp_probs)
+            actual_alloc = np.minimum(draw, orig_pea)
+            sp_assigned += actual_alloc
+            orig_pea -= actual_alloc
+            remaining_quota = target_quota - int(sp_assigned.sum())
+            if np.all(draw == actual_alloc) or remaining_quota <= 0:
+                break
 
-        # Sorteo multinomial de la cuota exacta del POI
-        sp_assigned = rng.multinomial(target_quota, sp_probs)
-
-        # Generar cohortes y descontar de la PEA disponible
+        # Generar cohortes a partir de los viajeros efectivamente asignados
         for i, count in enumerate(sp_assigned):
             if count <= 0:
                 continue
 
             orig = origins[i]
-            # Descontar del presupuesto del origen
-            orig_pea[i] = max(0, orig_pea[i] - count)
-
             d_km = float(dist_km[i])
             dist_m, driving_seconds = calculate_commute_impedance(d_km)
 
@@ -321,7 +342,7 @@ def simulate_gravity_demand(
     if regular_dests and np.any(orig_pea > 0):
         dest_coords = np.radians([d["location"] for d in regular_dests])
         dest_jobs = np.array([d["jobs"] for d in regular_dests], dtype=np.float64)
-        dest_ids = [d["id"] for d in regular_dests]
+        dest_id_to_idx = {d["id"]: idx for idx, d in enumerate(regular_dests)}
 
         # Matriz NxM de distancias
         dlat = dest_coords[:, 1][np.newaxis, :] - orig_coords[:, 1][:, np.newaxis]
@@ -335,11 +356,10 @@ def simulate_gravity_demand(
         friction[dist_km_mat > max_distance_km] = 0.0
         weights = attraction * friction
 
-        # Anular auto-viajes
+        # Anular auto-viajes (búsqueda O(1))
         for i, orig in enumerate(origins):
-            if orig["id"] in dest_ids:
-                j = dest_ids.index(orig["id"])
-                weights[i, j] = 0.0
+            if orig["id"] in dest_id_to_idx:
+                weights[i, dest_id_to_idx[orig["id"]]] = 0.0
 
         # Normalizar probabilidades
         row_sums = weights.sum(axis=1, keepdims=True)
@@ -383,11 +403,22 @@ def simulate_gravity_demand(
                     pop_id += 1
                     pax_count -= chunk
 
-    # =========================================================================
-    # SANITIZACIÓN ESTRICTA DEL ESQUEMA JSON (LIMPIEZA DE ATRIBUTOS INTERNOS)
-    # =========================================================================
-    for p in demand_points:
-        p.pop("pea_15ymas", None)
-        p.pop("is_special", None)
-
     return pops
+
+
+def sanitize_demand_points(demand_points: List[Dict]) -> List[Dict]:
+    """
+    Devuelve una copia limpia de los puntos de demanda conforme al esquema canónico
+    de Subway Builder (id, location, jobs, residents, popIds).
+    No muta los diccionarios originales en memoria.
+    """
+    clean_points = []
+    for p in demand_points:
+        clean_points.append({
+            "id": str(p["id"]),
+            "location": [float(p["location"][0]), float(p["location"][1])],
+            "jobs": int(p["jobs"]),
+            "residents": int(p["residents"]),
+            "popIds": list(p.get("popIds", []))
+        })
+    return clean_points

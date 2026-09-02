@@ -67,13 +67,15 @@ def build_city_map(
     osm_pbf_name = os.path.basename(osm_pbf_path)
     cores, ram_mb = get_optimal_hardware_resources()
 
-    if os.path.exists(native_build_dir):
-        shutil.rmtree(native_build_dir)
     os.makedirs(native_build_dir, exist_ok=True)
+    target_pbf_path = os.path.join(native_build_dir, osm_pbf_name)
     
-    # Copiar PBF al directorio de compilación nativa ext4 para evitar cuellos de botella en WSL/NTFS
-    print(f"-> Copiando {osm_pbf_name} a {native_build_dir}...")
-    shutil.copyfile(osm_pbf_path, os.path.join(native_build_dir, osm_pbf_name))
+    # Copiar PBF al directorio de compilación solo si no existe o cambió de tamaño
+    if not os.path.exists(target_pbf_path) or os.path.getsize(target_pbf_path) != os.path.getsize(osm_pbf_path):
+        print(f"-> Copiando {osm_pbf_name} a {native_build_dir}...")
+        shutil.copyfile(osm_pbf_path, target_pbf_path)
+    else:
+        print(f"-> Reutilizando {osm_pbf_name} existente en {native_build_dir}.")
 
     build_output_dir = os.path.join(native_build_dir, city_code)
     os.makedirs(build_output_dir, exist_ok=True)
@@ -123,6 +125,10 @@ def build_city_map(
             generated_files[filename] = dst
             print(f"  ✓ Archivo cartográfico copiado: {filename}")
         else:
+            if filename == "ocean_depth_index.json.gz" and not include_ocean:
+                continue
+            if filename == "runways_taxiways.geojson":
+                continue
             print(f"  ⚠ Advertencia: no se encontró {filename} en {native_build_dir}")
 
     return generated_files

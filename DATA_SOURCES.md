@@ -28,3 +28,12 @@ Para generar cualquier ciudad o zona metropolitana de México, el motor requiere
 * **Fuente:** INEGI - Encuesta Nacional de Ocupación y Empleo (Indicadores Estratégicos).
 * **Enlace:** https://www.inegi.org.mx/programas/enoe/15ymas/
 * **Archivo:** *_Entidad_*.csv.
+
+## 6. Proyección Demográfica Intercensal: CONAPO (2020 ➔ 2026+)
+* **Fuente:** CONAPO (Consejo Nacional de Población) - Proyecciones de la Población de los Municipios de México 2020-2050.
+* **Enlace Oficial:** https://datos.gob.mx/busca/dataset/proyecciones-de-la-poblacion-de-mexico-y-de-las-entidades-federativas-2020-2050
+* **Importancia:** Como el Censo universal de manzanas (CPV) se realiza cada 10 años (2020, 2030), el parámetro `growth_factors` en el archivo YAML actualiza la población al año presente o de estudio.
+* **Fórmula de Cálculo:**
+  $$\text{Factor Municipal} = \frac{\text{Población Proyectada CONAPO (Año Deseado)}}{\text{Población Censo CPV 2020}}$$
+  * *Ejemplo Cancún (Benito Juárez 23005):* $\frac{968,000 \text{ hab. (2026)}}{904,684 \text{ hab. (2020)}} = 1.07$ (+7.0%).
+  * *Si se desea modelar el año 2020 puro:* usar `1.00`.

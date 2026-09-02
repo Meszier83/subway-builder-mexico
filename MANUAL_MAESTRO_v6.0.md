@@ -89,11 +89,15 @@ El script genera automáticamente el archivo `<CODIGO_CIUDAD>.zip` en tu carpeta
 | `macroeconomics` | `til_1_state` | Tasa de informalidad laboral estatal (ej. `0.4497`). |
 | `macroeconomics` | `gravity_beta` | Coeficiente de decaimiento por distancia (default `0.12`). |
 | `macroeconomics` | `max_pop_size` | Tamaño máximo de cohorte de viaje (default `150` pax para fluidez en el juego). |
-| `pois` | `id` | Nombre del nodo (usar prefijo `AIR_` para aeropuertos y `UNI_` para universidades). |
-| `pois` | `loc` | `[lon, lat]` exacto del punto de interés. |
+| `pois` | `id` | Nombre del nodo. **Prefijos obligatorios:** `AIR_*` (Aeropuertos, 24/7 dampening=0.5), `UNI_*` (Universidades, horario estudiantil dampening=0.3), `SPO_*`, `TOU_*`, `MED_*`. |
+| `pois` | `loc` | `[lon, lat]` exacto del punto de interés sobre la malla urbana. |
 | `pois` | `jobs` | Cantidad de empleos o capacidad de atracción del nodo. |
-| `pois` | `radius_m` | Radio de absorción en metros para fusionar con el DENUE. |
-| `pois` | `mode` | `MAX` (piso censal), `BOOST` (suma demanda exógena), `REPLACE` (sobrescritura estricta). |
+| `pois` | `radius_m` | Radio de absorción en metros (`2000-3000m` para aeropuertos, `800-1200m` para universidades, `500-800m` para anclas en clusters). |
+| `pois` | `mode` | `MAX` (recomendado: garantiza cuota absorbiendo DENUE local), `BOOST` (suma exógena), `REPLACE` (sobrescritura). |
+
+> [!TIP]
+> **Regla de Clusters Comerciales (ej. Zona Hotelera o Paseo de la Reforma):**
+> Nunca crees un solo mega-POI para todo un corredor lineal, ya que concentrará miles de empleos en una sola estación dejando el resto del corredor desierto. Deja que el DENUE distribuya los empleos orgánicamente a lo largo de las avenidas, o crea POIs de anclaje puntuales con `radius_m: 500-800m`.
 
 ---
 

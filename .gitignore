@@ -18,6 +18,8 @@ __pycache__/
 venv/
 .env/
 
-# Build temporales
+# Build temporales y datos locales
 build/
 dist/
+data/
+*.html

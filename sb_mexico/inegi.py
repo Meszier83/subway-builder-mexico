@@ -6,6 +6,7 @@ de fuentes estadísticas oficiales del INEGI (CPV 2020, DENUE, CE 2024, ENOE).
 """
 
 import os
+import csv
 import glob
 import math
 import numpy as np
@@ -24,12 +25,33 @@ DENUE_ESTRATOS = {
 }
 
 
-def format_cve_mun(cve_mun_raw, cve_ent_raw) -> str:
-    """Homologa claves municipales y estatales al estándar INEGI de 5 dígitos (EEMMM)."""
+def format_cve_mun(cve_mun_raw, cve_ent_raw=None) -> str:
+    """
+    Homologa claves municipales y estatales al estándar INEGI de 5 dígitos (EEMMM).
+    Soporta:
+    - Claves municipales de 5 dígitos completas (ej. '23005' -> '23005')
+    - Claves municipales de 4 dígitos (ej. '1001' -> '01001')
+    - Claves separadas municipio + entidad (ej. '005', '23' -> '23005' o '5', '1' -> '01005')
+    """
+    if cve_mun_raw is None:
+        return "-1"
     s_mun = str(cve_mun_raw).strip()
-    s_ent = str(cve_ent_raw).strip().zfill(2)
     if not s_mun or s_mun.lower() == 'nan' or s_mun == '-1':
         return "-1"
+
+    # Caso 1: Si s_mun ya contiene la clave completa de 4 o 5 dígitos numéricos
+    if s_mun.isdigit() and len(s_mun) in (4, 5):
+        try:
+            num = int(s_mun)
+            ent = num // 1000
+            mun = num % 1000
+            if 1 <= ent <= 32 and mun >= 1:
+                return f"{num:05d}"
+        except (ValueError, TypeError):
+            pass
+
+    # Caso 2: Combinar municipio con clave de entidad
+    s_ent = str(cve_ent_raw).strip().zfill(2) if cve_ent_raw is not None else "00"
     if not s_ent or s_ent == '00' or s_ent.lower() == 'nan':
         return "-1"
     try:
@@ -46,6 +68,7 @@ def parse_enoe_indicators(enoe_path: str) -> Dict[str, float]:
     """
     Parsea el archivo CSV de Indicadores Estratégicos de la ENOE para una entidad.
     Extrae la Tasa de Participación Laboral (Tasa PEA) y la Tasa de Informalidad Laboral 1 (TIL1).
+    Maneja separadores de coma o punto decimal y celdas entrecomilladas.
     """
     if not os.path.exists(enoe_path):
         raise FileNotFoundError(f"Archivo ENOE no encontrado: {enoe_path}")
@@ -54,23 +77,28 @@ def parse_enoe_indicators(enoe_path: str) -> Dict[str, float]:
     til_1 = None
 
     with open(enoe_path, mode='r', encoding='utf-8-sig', errors='ignore') as f:
-        for line in f:
-            parts = [p.strip().replace('"', '') for p in line.split(',')]
+        reader = csv.reader(f)
+        for row in reader:
+            if not row:
+                continue
+            row_str = " ".join(row)
             # Buscar Tasa de participación
-            if any("Tasa de participación" in p for p in parts):
-                for val in parts:
+            if "Tasa de participación" in row_str:
+                for val in row:
+                    clean_val = val.strip().replace(',', '.')
                     try:
-                        v = float(val)
+                        v = float(clean_val)
                         if 30.0 <= v <= 90.0:  # Rango lógico de participación %
                             tasa_pea = v / 100.0
                             break
                     except ValueError:
                         continue
             # Buscar TIL1
-            if any("Tasa de informalidad laboral 1" in p for p in parts) or any("TIL1" in p for p in parts):
-                for val in parts:
+            if "Tasa de informalidad laboral 1" in row_str or "TIL1" in row_str:
+                for val in row:
+                    clean_val = val.strip().replace(',', '.')
                     try:
-                        v = float(val)
+                        v = float(clean_val)
                         if 10.0 <= v <= 90.0:  # Rango lógico de informalidad %
                             til_1 = v / 100.0
                             break
@@ -85,8 +113,8 @@ def parse_enoe_indicators(enoe_path: str) -> Dict[str, float]:
 
 def parse_ce2024_municipal(ce_path: str) -> Dict[str, Dict]:
     """
-    Parsea el tabulado de los Censos Económicos 2024 (SAIC).
-    Extrae el personal ocupado total (H001A) para el año más reciente (2023) por municipio.
+    Parsea el tabulado de los Censos Económicos 2024 (SAIC o Microdatos tr_ce).
+    Extrae el personal ocupado total (H001A) por municipio.
     """
     if not os.path.exists(ce_path):
         return {}
@@ -99,7 +127,7 @@ def parse_ce2024_municipal(ce_path: str) -> Dict[str, Dict]:
                 temp_df = pd.read_csv(ce_path, encoding=enc, skiprows=skip, dtype=str)
                 cols = [str(c).strip().replace('"', '') for c in temp_df.columns]
                 has_h001a = any('H001A' in c or 'Personal' in c for c in cols)
-                has_mun = any('Municipio' in c or 'municipio' in c for c in cols)
+                has_mun = any('Municipio' in c or 'municipio' in c or c == 'E04' for c in cols)
                 if has_h001a and has_mun:
                     df = temp_df
                     df.columns = cols
@@ -112,6 +140,37 @@ def parse_ce2024_municipal(ce_path: str) -> Dict[str, Dict]:
     if df is None:
         return {}
 
+    # Formato A: Tabulado de Microdatos Oficial INEGI (E03 = Entidad, E04 = Municipio, H001A = Empleos)
+    if 'E04' in df.columns and any('H001A' in c for c in df.columns):
+        col_h001a = [c for c in df.columns if 'H001A' in c][0]
+        df_valid = df[df['E04'].notna()].copy()
+        
+        # Filtrar a totales de sector
+        if 'CODIGO' in df_valid.columns:
+            df_valid = df_valid[df_valid['CODIGO'].astype(str).str.contains('TOTAL', case=False, na=False)]
+        
+        # Filtrar a nivel agregado municipal (ID_ESTRATO nulo o total)
+        if 'ID_ESTRATO' in df_valid.columns:
+            df_valid = df_valid[df_valid['ID_ESTRATO'].isna() | df_valid['ID_ESTRATO'].astype(str).str.strip().isin(['', 'nan', '99'])]
+
+        for _, row in df_valid.iterrows():
+            e04_str = str(row['E04']).strip()
+            if not e04_str.isdigit():
+                continue
+            e03_str = str(row.get('E03', '23')).strip()
+            cve_5 = f"{int(e03_str):02d}{int(e04_str):03d}"
+            try:
+                h001a_val = float(str(row[col_h001a]).replace(',', '').strip())
+                if h001a_val > 0:
+                    benchmarks[cve_5] = {
+                        "nombre": f"Municipio {cve_5}",
+                        "empleos_ce": h001a_val
+                    }
+            except (ValueError, TypeError):
+                continue
+        return benchmarks
+
+    # Formato B: Consulta Exportada de SAIC
     col_mun = [c for c in df.columns if 'Municipio' in c or 'municipio' in c][0]
     col_h001a = [c for c in df.columns if 'H001A' in c or 'Personal' in c][0]
     col_ent = ([c for c in df.columns if 'Entidad' in c or 'entidad' in c] + [None])[0]
@@ -154,6 +213,38 @@ def parse_ce2024_municipal(ce_path: str) -> Dict[str, Dict]:
             continue
 
     return benchmarks
+
+
+def parse_conapo_projections(conapo_path: str) -> Dict[str, float]:
+    """
+    Parsea las proyecciones oficiales de población municipal de CONAPO (data-*.csv o *conapo*.csv).
+    Retorna un diccionario {cve_mun: poblacion_proyectada} (ej. {"23005": 1026725.0}).
+    """
+    if not os.path.exists(conapo_path):
+        return {}
+
+    for enc in ['utf-8-sig', 'utf-8', 'latin1', 'cp1252']:
+        try:
+            df = pd.read_csv(conapo_path, encoding=enc, dtype=str)
+            cols = [c.strip().upper() for c in df.columns]
+            df.columns = cols
+            if 'CLAVE' in cols and any('POB' in c for c in cols):
+                col_pob = [c for c in cols if 'POB_MIT_MUN' in c or 'POB_TOTAL' in c or 'POBTOT' in c or c.startswith('POB')][0]
+                projections = {}
+                for _, row in df.iterrows():
+                    cve = str(row['CLAVE']).strip()
+                    if cve.isdigit():
+                        cve_5 = f"{int(cve):05d}"
+                        try:
+                            pob_val = float(str(row[col_pob]).replace(',', '').strip())
+                            if pob_val > 0:
+                                projections[cve_5] = pob_val
+                        except ValueError:
+                            continue
+                return projections
+        except Exception:
+            continue
+    return {}
 
 
 def load_denue(denue_paths: Union[str, List[str]], bbox: Dict[str, float]) -> pd.DataFrame:
@@ -200,6 +291,7 @@ def load_denue(denue_paths: Union[str, List[str]], bbox: Dict[str, float]) -> pd
     ]
 
     col_per = 'per_ocu' if 'per_ocu' in df_denue.columns else 'personal_ocupado'
+    df_denue[col_per] = df_denue[col_per].astype(str).str.strip()
     df_denue['jobs_formal'] = df_denue[col_per].map(DENUE_ESTRATOS).fillna(2.24)
     
     # Clasificación de tamaño de empresa (Micro/Pequeño vs Grande)
@@ -262,6 +354,10 @@ def calibrate_denue_employment(
             factor_micro = (h001a - jobs_large) / jobs_micro
             factor_clamped = float(np.clip(factor_micro, 1.0, techo_teorico))
             status = "CALIBRADO" if 1.0 <= factor_micro <= techo_teorico else ("CLAMPED_TECHO" if factor_micro > techo_teorico else "CLAMPED_PISO")
+        elif jobs_large >= h001a and h001a > 0:
+            # Si el empleo en grandes empresas ya iguala o excede el total censal, no inflar microempresas
+            factor_clamped = 1.0
+            status = "EXCESO_FORMAL_BASE"
         else:
             factor_clamped = 1.0 + til_1
             status = "AJUSTE_GLOBAL"
@@ -291,7 +387,7 @@ def load_cpv_demography(
 ) -> pd.DataFrame:
     """
     Carga e imputa georreferenciación de población (CPV 2020) por manzana.
-    Aplica tasa PEA y resuelve coordenadas mediante cruce jerárquico con el DENUE.
+    Aplica tasa PEA y resuelve coordenadas mediante cruce jerárquico resiliente en 4 niveles con el DENUE.
     Soporta múltiples archivos para zonas metropolitanas multi-estado.
     """
     if isinstance(cpv_paths, str):
@@ -348,12 +444,12 @@ def load_cpv_demography(
     df_censo['pob15_adj'] = df_censo['pob15_num'] * df_censo['growth']
     df_censo['pea_real'] = df_censo['pob15_adj'] * tasa_pea
 
-    # ==========================================
-    # Georreferenciación Jerárquica vía DENUE
-    # ==========================================
-    # Nivel 1: Centroide de Manzana
+    # =========================================================================
+    # Georreferenciación Jerárquica Vía DENUE
+    # =========================================================================
+    # Nivel 1: Centroide de Manzana (si hay comercios en esa manzana)
     mza_coords = df_denue.groupby(['cve_mun_clean', 'ageb_clean', 'mza_clean'])[['lon', 'lat']].mean().reset_index()
-    # Nivel 2: Centroide de AGEB
+    # Nivel 2: Centroide de AGEB (si hay comercios en ese AGEB dentro del BBOX)
     ageb_coords = df_denue.groupby(['cve_mun_clean', 'ageb_clean'])[['lon', 'lat']].mean().reset_index().rename(
         columns={'lon': 'lon_ageb', 'lat': 'lat_ageb'}
     )
@@ -361,14 +457,18 @@ def load_cpv_demography(
     df_geo = pd.merge(df_censo, mza_coords, on=['cve_mun_clean', 'ageb_clean', 'mza_clean'], how='left')
     df_geo = pd.merge(df_geo, ageb_coords, on=['cve_mun_clean', 'ageb_clean'], how='left')
     
-    # Imputar nivel 1 -> nivel 2
+    # Imputar Nivel 1 (Manzana) -> Nivel 2 (AGEB)
+    # NOTA CRÍTICA: NO imputar a nivel estatal o centro de BBOX. Las manzanas que no caen
+    # en un AGEB del DENUE dentro del BBOX pertenecen a otros municipios del estado
+    # (ej. Chetumal, Cozumel, Playa del Carmen) y deben ser excluidas de la zona metropolitana.
     df_geo['lon'] = df_geo['lon'].fillna(df_geo['lon_ageb'])
     df_geo['lat'] = df_geo['lat'].fillna(df_geo['lat_ageb'])
 
-    # Nivel 3: Si aún hay nulos, fallback a centro de BBOX o descarte seguro
+    # Filtro espacial estricto dentro de BBOX y descarte de manzanas fuera del área
+    df_geo = df_geo.dropna(subset=['lon', 'lat']).copy()
     df_geo = df_geo[
         (df_geo['lon'] >= bbox["min_lon"]) & (df_geo['lon'] <= bbox["max_lon"]) &
         (df_geo['lat'] >= bbox["min_lat"]) & (df_geo['lat'] <= bbox["max_lat"])
-    ].dropna(subset=['lon', 'lat']).copy()
+    ].copy()
 
     return df_geo
