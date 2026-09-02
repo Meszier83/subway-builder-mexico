@@ -1,4 +1,4 @@
-﻿"""
+"""
 sb_mexico.pipeline
 ==================
 Orquestador principal del proceso de generación de mapas y demanda.

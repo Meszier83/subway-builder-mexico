@@ -29,7 +29,7 @@ Para generar cualquier ciudad o zona metropolitana de México, el motor requiere
 * **Enlace:** https://www.inegi.org.mx/programas/enoe/15ymas/
 * **Archivo:** *_Entidad_*.csv.
 
-## 6. Proyección Demográfica Intercensal: CONAPO (2020 ➔ 2026+)
+## 6. Proyección Demográfica Intercensal: CONAPO (2020 -> 2026+)
 * **Fuente:** CONAPO (Consejo Nacional de Población) - Proyecciones de la Población de los Municipios de México 2020-2050.
 * **Enlace Oficial:** https://datos.gob.mx/busca/dataset/proyecciones-de-la-poblacion-de-mexico-y-de-las-entidades-federativas-2020-2050
 * **Importancia:** Como el Censo universal de manzanas (CPV) se realiza cada 10 años (2020, 2030), el parámetro `growth_factors` en el archivo YAML actualiza la población al año presente o de estudio.

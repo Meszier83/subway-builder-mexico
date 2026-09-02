@@ -1,0 +1,13 @@
+# Enforce UTF-8 and LF line endings across all platforms and GitHub
+* text=auto eol=lf
+*.md text eol=lf diff=markdown
+*.py text eol=lf diff=python
+*.yaml text eol=lf
+*.json text eol=lf
+*.csv text eol=lf
+*.geojson text eol=lf
+*.html text eol=lf
+*.pbf binary
+*.pmtiles binary
+*.gz binary
+*.zip binary

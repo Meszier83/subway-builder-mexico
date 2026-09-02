@@ -1,1 +1,1 @@
-﻿"""Subway Builder Mexico Tests"""
+"""Subway Builder Mexico Tests"""
