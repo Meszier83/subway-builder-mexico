@@ -1,0 +1,1603 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Subway Builder México - POI Studio v6.0</title>
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <style>
+        :root {
+            --bg-main: #0b0f19;
+            --bg-panel: rgba(15, 23, 42, 0.94);
+            --bg-card: rgba(30, 41, 59, 0.75);
+            --bg-card-hover: rgba(51, 65, 85, 0.85);
+            --border-color: rgba(255, 255, 255, 0.1);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent-cyan: #38bdf8;
+            --accent-green: #4ade80;
+            --accent-amber: #fbbf24;
+            --accent-purple: #c084fc;
+            --accent-red: #f87171;
+            --accent-blue: #60a5fa;
+            --shadow-lg: 0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body, html { height: 100%; width: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg-main); color: var(--text-main); overflow: hidden; }
+
+        #app-container { display: flex; height: 100vh; width: 100vw; position: relative; }
+        #map { flex: 1; height: 100%; background: #0f172a; z-index: 1; }
+
+        /* Sidebar Styling */
+        #sidebar {
+            width: 450px;
+            height: 100%;
+            background: var(--bg-panel);
+            backdrop-filter: blur(14px);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            z-index: 1000;
+            box-shadow: var(--shadow-lg);
+            transition: transform 0.3s ease;
+        }
+
+        .sidebar-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(11, 15, 25, 0.85);
+        }
+
+        .brand-title {
+            font-size: 16px;
+            font-weight: 800;
+            color: var(--accent-cyan);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            letter-spacing: -0.5px;
+        }
+
+        .brand-badge {
+            font-size: 10px;
+            font-weight: 700;
+            background: rgba(56, 189, 248, 0.2);
+            color: var(--accent-cyan);
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid rgba(56, 189, 248, 0.4);
+        }
+
+        /* City Selector Bar */
+        .city-selector-bar {
+            padding: 12px 18px;
+            background: rgba(15, 23, 42, 0.6);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        select.city-dropdown {
+            flex: 1;
+            background: rgba(30, 41, 59, 0.9);
+            border: 1px solid var(--border-color);
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+            outline: none;
+            cursor: pointer;
+        }
+        select.city-dropdown:focus { border-color: var(--accent-cyan); }
+
+        .btn {
+            background: rgba(30, 41, 59, 0.9);
+            border: 1px solid var(--border-color);
+            color: #fff;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+            outline: none;
+        }
+        .btn:hover { background: var(--bg-card-hover); border-color: rgba(255, 255, 255, 0.3); }
+        .btn-primary { background: #0284c7; border-color: #38bdf8; }
+        .btn-primary:hover { background: #0369a1; }
+        .btn-success { background: #16a34a; border-color: #4ade80; }
+        .btn-success:hover { background: #15803d; }
+        .btn-danger { background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.4); color: #fca5a5; }
+        .btn-danger:hover { background: rgba(239, 68, 68, 0.4); }
+        .btn-amber { background: rgba(251, 191, 36, 0.2); border-color: rgba(251, 191, 36, 0.4); color: #fde68a; }
+        .btn-amber:hover { background: rgba(251, 191, 36, 0.35); }
+        .btn-sm { padding: 4px 8px; font-size: 11px; border-radius: 6px; }
+
+        /* Tabs Navigation */
+        .tab-bar {
+            display: flex;
+            background: rgba(11, 15, 25, 0.5);
+            border-bottom: 1px solid var(--border-color);
+        }
+        .tab-btn {
+            flex: 1;
+            padding: 10px 8px;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        .tab-btn.active {
+            color: var(--accent-cyan);
+            border-bottom-color: var(--accent-cyan);
+            background: rgba(56, 189, 248, 0.05);
+        }
+
+        /* Tab Contents */
+        .tab-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: none;
+        }
+        .tab-content.active { display: block; }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+
+        /* POI Card in List */
+        .poi-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 12px 14px;
+            margin-bottom: 10px;
+            transition: all 0.2s;
+            position: relative;
+        }
+        .poi-card:hover { border-color: rgba(255,255,255,0.25); background: var(--bg-card-hover); }
+        .poi-card.active { border-color: var(--accent-cyan); box-shadow: 0 0 12px rgba(56, 189, 248, 0.25); }
+
+        .poi-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 6px;
+        }
+        .poi-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .poi-badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        .badge-air { background: rgba(192, 132, 252, 0.2); color: var(--accent-purple); border: 1px solid rgba(192, 132, 252, 0.4); }
+        .badge-uni { background: rgba(96, 165, 250, 0.2); color: var(--accent-blue); border: 1px solid rgba(96, 165, 250, 0.4); }
+        .badge-spo { background: rgba(74, 222, 128, 0.2); color: var(--accent-green); border: 1px solid rgba(74, 222, 128, 0.4); }
+        .badge-tou { background: rgba(251, 191, 36, 0.2); color: var(--accent-amber); border: 1px solid rgba(251, 191, 36, 0.4); }
+        .badge-med { background: rgba(248, 113, 113, 0.2); color: var(--accent-red); border: 1px solid rgba(248, 113, 113, 0.4); }
+        .badge-tra { background: rgba(56, 189, 248, 0.2); color: var(--accent-cyan); border: 1px solid rgba(56, 189, 248, 0.4); }
+        .badge-custom { background: rgba(148, 163, 184, 0.2); color: var(--text-muted); border: 1px solid rgba(148, 163, 184, 0.4); }
+
+        .poi-meta {
+            font-size: 11px;
+            color: var(--text-muted);
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+        .poi-meta span strong { color: #e2e8f0; }
+
+        .poi-actions {
+            display: flex;
+            gap: 6px;
+            justify-content: flex-end;
+        }
+
+        /* Form Controls */
+        .form-group {
+            margin-bottom: 12px;
+        }
+        .form-label {
+            display: block;
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-muted);
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .form-input, .form-select {
+            width: 100%;
+            background: rgba(30, 41, 59, 0.9);
+            border: 1px solid var(--border-color);
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .form-input:focus, .form-select:focus { border-color: var(--accent-cyan); }
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .range-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .range-slider {
+            flex: 1;
+            accent-color: var(--accent-cyan);
+            cursor: pointer;
+        }
+        .range-val {
+            min-width: 60px;
+            text-align: right;
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--accent-cyan);
+        }
+
+        /* Live Absorption Inspector Card */
+        .absorption-hud-card {
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            border-radius: 10px;
+            padding: 12px 14px;
+            margin-top: 14px;
+            margin-bottom: 14px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+        .absorption-header {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--accent-cyan);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .absorption-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            font-size: 11px;
+            margin-bottom: 10px;
+        }
+        .stat-mini {
+            background: rgba(30, 41, 59, 0.7);
+            padding: 6px 8px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .stat-mini span { color: var(--text-muted); }
+        .stat-mini strong { font-size: 13px; color: #fff; }
+        .absorption-diagnosis {
+            font-size: 11px;
+            padding: 6px 10px;
+            border-radius: 6px;
+            background: rgba(56, 189, 248, 0.1);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            color: #bae6fd;
+            line-height: 1.4;
+        }
+
+        /* Validation Alerts */
+        .alert-box {
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            line-height: 1.4;
+        }
+        .alert-warning { background: rgba(251, 191, 36, 0.15); border: 1px solid rgba(251, 191, 36, 0.4); color: #fde68a; }
+        .alert-error { background: rgba(248, 113, 113, 0.15); border: 1px solid rgba(248, 113, 113, 0.4); color: #fecaca; }
+        .alert-info { background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); color: #bae6fd; }
+
+        /* YAML Preview */
+        .yaml-code {
+            background: #060911;
+            color: #38bdf8;
+            padding: 12px;
+            border-radius: 8px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            white-space: pre;
+            overflow-x: auto;
+            border: 1px solid var(--border-color);
+            max-height: 400px;
+        }
+
+        /* Floating HUD over Map */
+        .map-hud {
+            position: absolute;
+            top: 75px;
+            right: 20px;
+            z-index: 990;
+            background: var(--bg-panel);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 12px 16px;
+            box-shadow: var(--shadow-lg);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            min-width: 220px;
+        }
+        .map-hud-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+        .map-hud-stat {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+        }
+        .map-hud-stat strong { color: var(--accent-cyan); }
+
+        /* Estilos Oscuros para Controles Leaflet */
+        .leaflet-control-layers {
+            background: rgba(15, 23, 42, 0.92) !important;
+            backdrop-filter: blur(10px) !important;
+            border: 1px solid rgba(255, 255, 255, 0.15) !important;
+            border-radius: 10px !important;
+            color: #f8fafc !important;
+            box-shadow: var(--shadow-lg) !important;
+            margin-top: 15px !important;
+            margin-right: 20px !important;
+        }
+        .leaflet-control-layers-expanded {
+            padding: 10px 14px !important;
+            font-size: 12px !important;
+        }
+        .leaflet-control-layers-base label {
+            margin-bottom: 4px;
+            cursor: pointer;
+        }
+        .leaflet-control-layers-toggle {
+            background-color: rgba(15, 23, 42, 0.9) !important;
+            border: 1px solid rgba(255, 255, 255, 0.15) !important;
+            border-radius: 8px !important;
+        }
+        .leaflet-bar a {
+            background-color: rgba(15, 23, 42, 0.9) !important;
+            color: #f8fafc !important;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+        }
+        .leaflet-bar a:hover {
+            background-color: rgba(30, 41, 59, 0.95) !important;
+            color: var(--accent-cyan) !important;
+        }
+
+        /* Floating Map Toolbar */
+        .map-toolbar {
+            position: absolute;
+            top: 20px;
+            left: 470px;
+            z-index: 1000;
+            display: flex;
+            gap: 8px;
+        }
+        .tool-btn {
+            background: var(--bg-panel);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border-color);
+            color: #fff;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: var(--shadow-lg);
+            transition: all 0.2s;
+        }
+        .tool-btn:hover { background: var(--bg-card-hover); border-color: rgba(255,255,255,0.3); }
+        .tool-btn.active {
+            background: #0284c7;
+            border-color: #38bdf8;
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.4);
+        }
+
+        /* Area Selection Floating Result HUD */
+        #area-measure-hud {
+            position: absolute;
+            bottom: 30px;
+            left: 470px;
+            z-index: 1000;
+            background: var(--bg-panel);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--accent-amber);
+            border-radius: 12px;
+            padding: 14px 18px;
+            box-shadow: var(--shadow-lg);
+            min-width: 280px;
+            display: none;
+        }
+        .measure-title {
+            font-size: 12px;
+            font-weight: 800;
+            color: var(--accent-amber);
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Quick helper tooltip bar */
+        .map-crosshair-tip {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: rgba(15, 23, 42, 0.9);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--accent-cyan);
+            border-radius: 30px;
+            padding: 8px 18px;
+            font-size: 12px;
+            color: #fff;
+            display: none;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+
+        /* Leaflet custom marker */
+        .poi-marker-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: rgba(15, 23, 42, 0.9);
+            border: 2px solid #fff;
+            color: #fff;
+            font-size: 13px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+            transition: transform 0.2s;
+        }
+        .poi-marker-icon:hover { transform: scale(1.15); }
+    </style>
+</head>
+<body>
+    <div id="app-container">
+        <!-- Sidebar -->
+        <div id="sidebar">
+            <div class="sidebar-header">
+                <div class="brand-title">
+                    <i class="fa-solid fa-train-subway"></i>
+                    <span>POI STUDIO</span>
+                    <span class="brand-badge">v6.0</span>
+                </div>
+                <button class="btn btn-sm btn-success" id="btn-save-yaml" title="Guardar cambios en archivo YAML">
+                    <i class="fa-solid fa-floppy-disk"></i> Guardar
+                </button>
+            </div>
+
+            <!-- City Selection -->
+            <div class="city-selector-bar">
+                <select id="city-select" class="city-dropdown">
+                    <option value="">Cargando ciudades...</option>
+                </select>
+                <button class="btn btn-sm" id="btn-refresh-cities" title="Recargar lista de ciudades">
+                    <i class="fa-solid fa-arrows-rotate"></i>
+                </button>
+            </div>
+
+            <!-- Tabs -->
+            <div class="tab-bar">
+                <button class="tab-btn active" data-tab="tab-list">
+                    <i class="fa-solid fa-list-check"></i> POIs (<span id="poi-count-badge">0</span>)
+                </button>
+                <button class="tab-btn" data-tab="tab-editor">
+                    <i class="fa-solid fa-pen-to-square"></i> Editor
+                </button>
+                <button class="tab-btn" data-tab="tab-validation">
+                    <i class="fa-solid fa-shield-halved"></i> Validar (<span id="val-issue-badge">0</span>)
+                </button>
+                <button class="tab-btn" data-tab="tab-yaml">
+                    <i class="fa-solid fa-code"></i> YAML
+                </button>
+            </div>
+
+            <!-- TAB 1: LIST -->
+            <div id="tab-list" class="tab-content active">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <div style="font-size: 12px; color: var(--text-muted);">Generadores Especiales de Demanda</div>
+                    <button class="btn btn-sm btn-primary" id="btn-new-poi">
+                        <i class="fa-solid fa-plus"></i> Nuevo POI
+                    </button>
+                </div>
+                <div id="pois-container">
+                    <!-- POI cards will be inserted here dynamically -->
+                </div>
+            </div>
+
+            <!-- TAB 2: EDITOR -->
+            <div id="tab-editor" class="tab-content">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                    <h3 id="editor-title" style="font-size: 14px; color: var(--accent-cyan);">Nuevo POI</h3>
+                    <button class="btn btn-sm" id="btn-cancel-edit"><i class="fa-solid fa-xmark"></i> Cancelar</button>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Tipo / Taxonomía</label>
+                    <select id="edit-category" class="form-select">
+                        <option value="AIR">✈️ Aeropuerto (AIR_*) - 24/7 (2500m)</option>
+                        <option value="UNI">🎓 Universidad / Campus (UNI_*) - Estudiantil (800m)</option>
+                        <option value="SPO">🏟️ Estadio / Polideportivo (SPO_*) (800m)</option>
+                        <option value="TOU">🏖️ Ancla Turística / Convenciones (TOU_*) (600m)</option>
+                        <option value="MED">🏥 Complejo Médico / Hospital (MED_*) (700m)</option>
+                        <option value="TRA">🚌 Terminal Central / Tren (TRA_*) (1000m)</option>
+                        <option value="CUSTOM">🏢 Centro Comercial / Distrito Especial (750m)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Identificador (ID)</label>
+                    <input type="text" id="edit-id" class="form-input" placeholder="AIR_Cancún" />
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Coordenadas [Longitud, Latitud]</label>
+                    <div class="form-row">
+                        <input type="number" step="0.00001" id="edit-lon" class="form-input" placeholder="Longitud (ej. -86.874)" />
+                        <input type="number" step="0.00001" id="edit-lat" class="form-input" placeholder="Latitud (ej. 21.036)" />
+                    </div>
+                    <button class="btn btn-sm" id="btn-pick-coords" style="margin-top: 6px; width: 100%;">
+                        <i class="fa-solid fa-crosshairs"></i> Seleccionar punto en el mapa
+                    </button>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Radio de Absorción DENUE (Metros)</label>
+                    <div class="range-container">
+                        <input type="range" min="100" max="4000" step="50" id="edit-radius" class="range-slider" value="750" />
+                        <span id="radius-display" class="range-val">750 m</span>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Cuota Objetivo de Empleos / Viajes</label>
+                    <input type="number" id="edit-jobs" class="form-input" placeholder="ej. 15000" value="5000" />
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Modo de Asignación</label>
+                    <select id="edit-mode" class="form-select">
+                        <option value="MAX">MAX (Recomendado: Absorbe DENUE y fija cuota piso)</option>
+                        <option value="BOOST">BOOST (Suma exógena sobre el empleo censal)</option>
+                        <option value="REPLACE">REPLACE (Sobrescribe y fuerza el valor manual)</option>
+                    </select>
+                </div>
+
+                <!-- LIVE ABSORPTION INSPECTOR -->
+                <div class="absorption-hud-card" id="poi-absorption-stats">
+                    <div class="absorption-header">
+                        <i class="fa-solid fa-chart-pie"></i>
+                        <span>Impacto en Demanda Orgánica</span>
+                    </div>
+                    <div class="absorption-grid">
+                        <div class="stat-mini"><span>Empleos DENUE en Radio:</span><strong id="stat-absorbed-jobs">0</strong></div>
+                        <div class="stat-mini"><span>Población en Radio:</span><strong id="stat-absorbed-pop">0</strong></div>
+                        <div class="stat-mini"><span>Nodos Absorbidos:</span><strong id="stat-absorbed-nodes">0</strong></div>
+                        <div class="stat-mini"><span>Resultado Proyectado:</span><strong id="stat-final-jobs" style="color:var(--accent-green)">0</strong></div>
+                    </div>
+                    <div class="absorption-diagnosis" id="stat-diagnosis">
+                        <i class="fa-solid fa-circle-info"></i> <span>Calculando absorción...</span>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 8px; margin-top: 15px;">
+                    <button class="btn btn-primary" id="btn-save-poi" style="flex: 1;">
+                        <i class="fa-solid fa-check"></i> Aplicar al Mapa
+                    </button>
+                    <button class="btn btn-danger" id="btn-delete-poi" style="display: none;">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- TAB 3: VALIDATION -->
+            <div id="tab-validation" class="tab-content">
+                <div style="font-size: 13px; font-weight: 700; margin-bottom: 10px; color: var(--accent-cyan);">
+                    Auditoría Preventiva de Calidad (Pre-flight Checks)
+                </div>
+                <div id="validation-container">
+                    <!-- Validation alerts will appear here -->
+                </div>
+            </div>
+
+            <!-- TAB 4: YAML PREVIEW -->
+            <div id="tab-yaml" class="tab-content">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <span style="font-size: 12px; color: var(--text-muted);">Sincronización YAML</span>
+                    <button class="btn btn-sm" id="btn-copy-yaml"><i class="fa-solid fa-copy"></i> Copiar</button>
+                </div>
+                <div class="yaml-code" id="yaml-preview"># Cargando YAML...</div>
+            </div>
+        </div>
+
+        <!-- Floating Map Toolbar -->
+        <div class="map-toolbar">
+            <button class="tool-btn" id="btn-toggle-box-select" title="Selecciona un área rectangular arrastrando sobre el mapa para sumar empleos y población">
+                <i class="fa-solid fa-vector-square" style="color:var(--accent-amber)"></i>
+                <span>Medir Área / Empleos</span>
+            </button>
+        </div>
+
+        <!-- Area Selection Floating Result HUD -->
+        <div id="area-measure-hud">
+            <div class="measure-title">
+                <span><i class="fa-solid fa-draw-polygon"></i> Resumen del Área</span>
+                <button class="btn btn-sm btn-danger" id="btn-clear-measure" style="padding:2px 6px;">✕ Cerrar</button>
+            </div>
+            <div class="absorption-grid" style="margin-bottom:0;">
+                <div class="stat-mini"><span>Empleos Censados:</span><strong id="meas-jobs" style="color:var(--accent-green); font-size:15px;">0</strong></div>
+                <div class="stat-mini"><span>Población Habitante:</span><strong id="meas-pop" style="color:var(--accent-cyan); font-size:15px;">0</strong></div>
+                <div class="stat-mini"><span>Nodos en Zona:</span><strong id="meas-nodes">0</strong></div>
+                <div class="stat-mini"><span>Área Estimada:</span><strong id="meas-area">0 km²</strong></div>
+            </div>
+        </div>
+
+        <!-- Map Container -->
+        <div id="map"></div>
+
+        <!-- Floating HUD -->
+        <div class="map-hud">
+            <div class="map-hud-title" id="hud-city-name">Metrópoli</div>
+            <div class="map-hud-stat"><span>POIs Activos:</span> <strong id="hud-poi-count">0</strong></div>
+            <div class="map-hud-stat"><span>Empleos Especiales:</span> <strong id="hud-total-jobs">0</strong></div>
+            <div class="map-hud-stat"><span>BBox:</span> <strong id="hud-bbox-status">Óptimo</strong></div>
+            <div style="margin-top: 6px; border-top: 1px solid var(--border-color); padding-top: 6px; display: flex; flex-direction: column; gap: 4px;">
+                <div style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Capas de Demanda</div>
+                <label style="font-size: 11px; color: #bae6fd; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="checkbox" id="chk-toggle-residents" checked /> 🔵 Residencial (Población)
+                </label>
+                <label style="font-size: 11px; color: #fca5a5; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="checkbox" id="chk-toggle-jobs" checked /> 🔴 Empleo (DENUE)
+                </label>
+            </div>
+        </div>
+
+        <!-- Interactive Map Click Bar -->
+        <div class="map-crosshair-tip" id="map-pick-tip">
+            <i class="fa-solid fa-location-crosshairs fa-fade" style="color: var(--accent-cyan);"></i>
+            <span>Haz clic en el mapa para situar las coordenadas del POI</span>
+            <button class="btn btn-sm btn-danger" id="btn-cancel-pick" style="margin-left: 8px;">Cancelar</button>
+        </div>
+    </div>
+
+    <script>
+        // Global State
+        let currentCityFile = "";
+        let currentCityData = null;
+        let pois = [];
+        let map = null;
+        let bboxLayer = null;
+        let poiLayers = new Map(); // id -> { marker, circle }
+        let densityPoints = []; // Array of { id, location: [lon, lat], jobs, residents }
+        let residentsLayerGroup = L.layerGroup();
+        let jobsLayerGroup = L.layerGroup();
+        let layerControl = null;
+        let isPickingLocation = false;
+        let activeEditingPoiId = null;
+
+        // Area Selection State
+        let isBoxSelectActive = false;
+        let isMouseDownForBox = false;
+        let boxStartLatLng = null;
+        let boxSelectionLayer = null;
+
+        const CATEGORY_COLORS = {
+            "AIR": "#c084fc",
+            "UNI": "#60a5fa",
+            "SPO": "#4ade80",
+            "TOU": "#fbbf24",
+            "MED": "#f87171",
+            "TRA": "#38bdf8",
+            "CUSTOM": "#94a3b8"
+        };
+
+        const CATEGORY_ICONS = {
+            "AIR": "fa-plane",
+            "UNI": "fa-graduation-cap",
+            "SPO": "fa-trophy",
+            "TOU": "fa-umbrella-beach",
+            "MED": "fa-hospital",
+            "TRA": "fa-bus-simple",
+            "CUSTOM": "fa-building"
+        };
+
+        // Initialize App
+        document.addEventListener("DOMContentLoaded", () => {
+            initMap();
+            setupEvents();
+            setupBoxSelection();
+            loadCityList();
+        });
+
+        function initMap() {
+            map = L.map('map', {
+                center: [21.15, -86.85],
+                zoom: 11,
+                zoomControl: false
+            });
+
+            L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+            // Capa Oscura Limpia (Esri Dark Gray Canvas - sin marca de agua)
+            const esriDark = L.layerGroup([
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{x}/{y}', {
+                    attribution: 'Tiles &copy; Esri, HERE, Garmin, &copy; OpenStreetMap contributors',
+                    maxZoom: 16
+                }),
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: '',
+                    maxZoom: 16
+                })
+            ]);
+
+            // Capa Satelital de Alta Resolución
+            const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+                maxZoom: 19
+            });
+
+            // Capa Estándar de Calles
+            const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap contributors',
+                maxZoom: 19
+            });
+
+            esriDark.addTo(map);
+
+            const baseMaps = {
+                "🌙 Modo Oscuro (Esri Canvas)": esriDark,
+                "🛰️ Satelital HD (Esri World)": esriSat,
+                "🗺️ Calles y Nombres (OSM)": osm
+            };
+
+            const overlayMaps = {
+                "🔵 Nodos Residenciales (Población)": residentsLayerGroup,
+                "🔴 Nodos de Empleo (DENUE)": jobsLayerGroup
+            };
+
+            layerControl = L.control.layers(baseMaps, overlayMaps, { position: 'topright' }).addTo(map);
+
+            // Map Click Event for Coords Picking
+            map.on('click', (e) => {
+                if (isPickingLocation) {
+                    const lat = parseFloat(e.latlng.lat.toFixed(5));
+                    const lon = parseFloat(e.latlng.lng.toFixed(5));
+                    document.getElementById('edit-lat').value = lat;
+                    document.getElementById('edit-lon').value = lon;
+                    stopPickingLocation();
+                    updatePoiPreviewFromForm();
+                }
+            });
+        }
+
+        function setupEvents() {
+            // Tab switching
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                    btn.classList.add('active');
+                    document.getElementById(btn.dataset.tab).classList.add('active');
+                    if (btn.dataset.tab === 'tab-yaml') updateYamlPreview();
+                    if (btn.dataset.tab === 'tab-validation') runValidations();
+                });
+            });
+
+            // City dropdown
+            document.getElementById('city-select').addEventListener('change', (e) => {
+                if (e.target.value) loadCity(e.target.value);
+            });
+
+            document.getElementById('btn-refresh-cities').addEventListener('click', loadCityList);
+
+            // New POI
+            document.getElementById('btn-new-poi').addEventListener('click', () => {
+                openEditorForNew();
+            });
+
+            document.getElementById('btn-cancel-edit').addEventListener('click', () => {
+                switchTab('tab-list');
+                renderAllPois();
+            });
+
+            // Category select preset
+            document.getElementById('edit-category').addEventListener('change', (e) => {
+                const cat = e.target.value;
+                const idInput = document.getElementById('edit-id');
+                const radInput = document.getElementById('edit-radius');
+                const radDisplay = document.getElementById('radius-display');
+
+                if (cat === "AIR") { radInput.value = 2500; if (!idInput.value || idInput.value.includes("_")) idInput.value = "AIR_Cancún"; }
+                else if (cat === "UNI") { radInput.value = 800; if (!idInput.value || idInput.value.includes("_")) idInput.value = "UNI_Universidad"; }
+                else if (cat === "SPO") { radInput.value = 800; if (!idInput.value || idInput.value.includes("_")) idInput.value = "SPO_Estadio"; }
+                else if (cat === "TOU") { radInput.value = 600; if (!idInput.value || idInput.value.includes("_")) idInput.value = "TOU_Centro"; }
+                else if (cat === "MED") { radInput.value = 700; if (!idInput.value || idInput.value.includes("_")) idInput.value = "MED_Hospital"; }
+                else if (cat === "TRA") { radInput.value = 1000; if (!idInput.value || idInput.value.includes("_")) idInput.value = "TRA_Terminal"; }
+                else { radInput.value = 750; }
+
+                radDisplay.innerText = `${radInput.value} m`;
+                updatePoiPreviewFromForm();
+            });
+
+            // Radius Slider
+            document.getElementById('edit-radius').addEventListener('input', (e) => {
+                document.getElementById('radius-display').innerText = `${e.target.value} m`;
+                updatePoiPreviewFromForm();
+            });
+
+            // Inputs change
+            ['edit-jobs', 'edit-mode', 'edit-lon', 'edit-lat'].forEach(id => {
+                document.getElementById(id).addEventListener('input', updatePoiPreviewFromForm);
+            });
+
+            // Picking Coords
+            document.getElementById('btn-pick-coords').addEventListener('click', startPickingLocation);
+            document.getElementById('btn-cancel-pick').addEventListener('click', stopPickingLocation);
+
+            // Save POI button
+            document.getElementById('btn-save-poi').addEventListener('click', savePoiFromForm);
+
+            // Delete POI button
+            document.getElementById('btn-delete-poi').addEventListener('click', deleteCurrentPoi);
+
+            // Save YAML button
+            document.getElementById('btn-save-yaml').addEventListener('click', saveAllToDisk);
+
+            // Copy YAML button
+            document.getElementById('btn-copy-yaml').addEventListener('click', () => {
+                const text = document.getElementById('yaml-preview').innerText;
+                navigator.clipboard.writeText(text).then(() => {
+                    alert("¡YAML copiado al portapapeles!");
+                });
+            });
+
+            // Toggle Demand Density Independently
+            document.getElementById('chk-toggle-residents').addEventListener('change', (e) => {
+                if (e.target.checked) map.addLayer(residentsLayerGroup);
+                else map.removeLayer(residentsLayerGroup);
+            });
+
+            document.getElementById('chk-toggle-jobs').addEventListener('change', (e) => {
+                if (e.target.checked) map.addLayer(jobsLayerGroup);
+                else map.removeLayer(jobsLayerGroup);
+            });
+
+            // Sync Leaflet layer control clicks with HUD checkboxes
+            map.on('overlayadd', (e) => {
+                if (e.layer === residentsLayerGroup) document.getElementById('chk-toggle-residents').checked = true;
+                if (e.layer === jobsLayerGroup) document.getElementById('chk-toggle-jobs').checked = true;
+            });
+
+            map.on('overlayremove', (e) => {
+                if (e.layer === residentsLayerGroup) document.getElementById('chk-toggle-residents').checked = false;
+                if (e.layer === jobsLayerGroup) document.getElementById('chk-toggle-jobs').checked = false;
+            });
+
+            // Area Selection toggle button
+            document.getElementById('btn-toggle-box-select').addEventListener('click', toggleBoxSelectMode);
+            document.getElementById('btn-clear-measure').addEventListener('click', clearAreaSelection);
+        }
+
+        // =========================================================================
+        // AREA BOX SELECTION TOOL (Drag & Measure)
+        // =========================================================================
+        function toggleBoxSelectMode() {
+            isBoxSelectActive = !isBoxSelectActive;
+            const btn = document.getElementById('btn-toggle-box-select');
+            btn.classList.toggle('active', isBoxSelectActive);
+
+            if (isBoxSelectActive) {
+                map.dragging.disable();
+                document.getElementById('map').style.cursor = 'crosshair';
+            } else {
+                map.dragging.enable();
+                document.getElementById('map').style.cursor = '';
+            }
+        }
+
+        function setupBoxSelection() {
+            const mapContainer = map.getContainer();
+
+            map.on('mousedown', (e) => {
+                if (isBoxSelectActive || e.originalEvent.shiftKey) {
+                    isMouseDownForBox = true;
+                    boxStartLatLng = e.latlng;
+                    map.dragging.disable();
+
+                    if (boxSelectionLayer) {
+                        map.removeLayer(boxSelectionLayer);
+                        boxSelectionLayer = null;
+                    }
+                }
+            });
+
+            map.on('mousemove', (e) => {
+                if (isMouseDownForBox && boxStartLatLng) {
+                    const bounds = L.latLngBounds(boxStartLatLng, e.latlng);
+                    if (!boxSelectionLayer) {
+                        boxSelectionLayer = L.rectangle(bounds, {
+                            color: '#fbbf24',
+                            weight: 2,
+                            dashArray: '4, 4',
+                            fillColor: '#f59e0b',
+                            fillOpacity: 0.2
+                        }).addTo(map);
+                    } else {
+                        boxSelectionLayer.setBounds(bounds);
+                    }
+                    calculateAreaSelectionStats(bounds);
+                }
+            });
+
+            map.on('mouseup', (e) => {
+                if (isMouseDownForBox) {
+                    isMouseDownForBox = false;
+                    if (!isBoxSelectActive && !e.originalEvent.shiftKey) {
+                        map.dragging.enable();
+                    }
+                }
+            });
+        }
+
+        function calculateAreaSelectionStats(bounds) {
+            let totalJobs = 0;
+            let totalPop = 0;
+            let count = 0;
+
+            densityPoints.forEach(p => {
+                const lat = p.location[1];
+                const lon = p.location[0];
+                if (bounds.contains([lat, lon])) {
+                    totalJobs += (p.jobs || 0);
+                    totalPop += (p.residents || 0);
+                    count++;
+                }
+            });
+
+            // Calculate Approximate Area in km²
+            const sw = bounds.getSouthWest();
+            const ne = bounds.getNorthEast();
+            const widthKm = (ne.lng - sw.lng) * 111.32 * Math.cos((sw.lat + ne.lat) / 2 * Math.PI / 180);
+            const heightKm = (ne.lat - sw.lat) * 110.57;
+            const areaKm2 = Math.max(0.01, Math.abs(widthKm * heightKm));
+
+            document.getElementById('meas-jobs').innerText = totalJobs.toLocaleString();
+            document.getElementById('meas-pop').innerText = totalPop.toLocaleString();
+            document.getElementById('meas-nodes').innerText = count.toLocaleString();
+            document.getElementById('meas-area').innerText = `${areaKm2.toFixed(2)} km²`;
+            document.getElementById('area-measure-hud').style.display = 'block';
+        }
+
+        function clearAreaSelection() {
+            if (boxSelectionLayer) {
+                map.removeLayer(boxSelectionLayer);
+                boxSelectionLayer = null;
+            }
+            document.getElementById('area-measure-hud').style.display = 'none';
+            if (isBoxSelectActive) toggleBoxSelectMode();
+        }
+
+        // =========================================================================
+        // CITY & POI MANAGEMENT
+        // =========================================================================
+        async function loadCityList() {
+            try {
+                const res = await fetch('/api/cities');
+                const data = await res.json();
+                const select = document.getElementById('city-select');
+                select.innerHTML = '';
+
+                data.cities.forEach((c) => {
+                    const opt = document.createElement('option');
+                    opt.value = c.path;
+                    opt.innerText = `${c.code} - ${c.name} (${c.poi_count} POIs)`;
+                    select.appendChild(opt);
+                });
+
+                if (data.cities.length > 0) {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const requested = urlParams.get('city');
+                    const target = data.cities.find(c => c.path.includes(requested)) || data.cities[0];
+                    select.value = target.path;
+                    loadCity(target.path);
+                }
+            } catch (err) {
+                console.error("Error al cargar lista de ciudades:", err);
+            }
+        }
+
+        async function loadCity(filePath) {
+            try {
+                currentCityFile = filePath;
+                const res = await fetch(`/api/city?file=${encodeURIComponent(filePath)}`);
+                const data = await res.json();
+                currentCityData = data;
+
+                pois = JSON.parse(JSON.stringify(data.pois || []));
+                updateHud();
+                renderBbox(data.city.bbox);
+                renderAllPois();
+                renderPoiList();
+                runValidations();
+                updateYamlPreview();
+
+                // Fetch real demand density nodes
+                await loadDemandDensity(filePath);
+            } catch (err) {
+                console.error("Error al cargar ciudad:", err);
+                alert("Error al cargar la configuración de la ciudad: " + err);
+            }
+        }
+
+        function updateHud() {
+            if (!currentCityData) return;
+            const city = currentCityData.city;
+            document.getElementById('hud-city-name').innerText = `${city.name} (${city.code})`;
+            document.getElementById('hud-poi-count').innerText = pois.length;
+            const totalJobs = pois.reduce((acc, p) => acc + (parseInt(p.jobs) || 0), 0);
+            document.getElementById('hud-total-jobs').innerText = totalJobs.toLocaleString();
+            document.getElementById('poi-count-badge').innerText = pois.length;
+        }
+
+        function renderBbox(bbox) {
+            if (bboxLayer) map.removeLayer(bboxLayer);
+
+            const bounds = [
+                [bbox[1], bbox[0]], // South-West
+                [bbox[3], bbox[2]]  // North-East
+            ];
+
+            bboxLayer = L.rectangle(bounds, {
+                color: "#38bdf8",
+                weight: 2,
+                dashArray: "6, 6",
+                fillColor: "#0284c7",
+                fillOpacity: 0.04
+            }).addTo(map);
+
+            map.fitBounds(bounds, { padding: [40, 40] });
+        }
+
+        function getPoiCategory(id) {
+            if (id.startsWith("AIR_")) return "AIR";
+            if (id.startsWith("UNI_")) return "UNI";
+            if (id.startsWith("SPO_")) return "SPO";
+            if (id.startsWith("TOU_")) return "TOU";
+            if (id.startsWith("MED_")) return "MED";
+            if (id.startsWith("TRA_")) return "TRA";
+            return "CUSTOM";
+        }
+
+        function createPoiIcon(cat) {
+            const color = CATEGORY_COLORS[cat] || CATEGORY_COLORS.CUSTOM;
+            const iconClass = CATEGORY_ICONS[cat] || "fa-building";
+            return L.divIcon({
+                className: 'custom-poi-marker',
+                html: `<div class="poi-marker-icon" style="background:${color};"><i class="fa-solid ${iconClass}"></i></div>`,
+                iconSize: [32, 32],
+                iconAnchor: [16, 16]
+            });
+        }
+
+        function renderAllPois() {
+            poiLayers.forEach(({ marker, circle }) => {
+                map.removeLayer(marker);
+                map.removeLayer(circle);
+            });
+            poiLayers.clear();
+
+            pois.forEach(poi => {
+                const cat = getPoiCategory(poi.id);
+                const color = CATEGORY_COLORS[cat];
+                const radius = poi.radius_m || 750;
+                const loc = [poi.loc[1], poi.loc[0]];
+
+                const circle = L.circle(loc, {
+                    radius: radius,
+                    color: color,
+                    weight: 1.5,
+                    fillColor: color,
+                    fillOpacity: 0.18
+                }).addTo(map);
+
+                const marker = L.marker(loc, {
+                    icon: createPoiIcon(cat),
+                    draggable: true
+                }).addTo(map);
+
+                marker.bindTooltip(`<b>${poi.id}</b><br>Cuota: ${(poi.jobs || 0).toLocaleString()} | Radio: ${radius}m`, {
+                    direction: 'top',
+                    offset: [0, -16]
+                });
+
+                marker.on('drag', (e) => {
+                    const newPos = e.target.getLatLng();
+                    circle.setLatLng(newPos);
+                    poi.loc = [parseFloat(newPos.lng.toFixed(5)), parseFloat(newPos.lat.toFixed(5))];
+                    
+                    if (activeEditingPoiId === poi.id) {
+                        document.getElementById('edit-lat').value = poi.loc[1];
+                        document.getElementById('edit-lon').value = poi.loc[0];
+                        updatePoiPreviewFromForm();
+                    }
+                    updateYamlPreview();
+                    runValidations();
+                });
+
+                marker.on('click', () => {
+                    openEditorForPoi(poi.id);
+                });
+
+                poiLayers.set(poi.id, { marker, circle });
+            });
+        }
+
+        function renderPoiList() {
+            const container = document.getElementById('pois-container');
+            container.innerHTML = '';
+
+            if (pois.length === 0) {
+                container.innerHTML = '<div style="color:var(--text-muted); font-size:12px; text-align:center; padding:20px;">No hay POIs definidos. Agrega uno haciendo clic en "+ Nuevo POI".</div>';
+                return;
+            }
+
+            pois.forEach(poi => {
+                const cat = getPoiCategory(poi.id);
+                const card = document.createElement('div');
+                card.className = `poi-card ${activeEditingPoiId === poi.id ? 'active' : ''}`;
+                card.id = `card-${poi.id}`;
+
+                card.innerHTML = `
+                    <div class="poi-header">
+                        <div class="poi-title">
+                            <i class="fa-solid ${CATEGORY_ICONS[cat]}" style="color:${CATEGORY_COLORS[cat]}"></i>
+                            <span>${poi.id}</span>
+                        </div>
+                        <span class="poi-badge badge-${cat.toLowerCase()}">${poi.mode || 'MAX'}</span>
+                    </div>
+                    <div class="poi-meta">
+                        <span>Empleos: <strong>${(poi.jobs || 0).toLocaleString()}</strong></span>
+                        <span>Radio: <strong>${poi.radius_m || 750} m</strong></span>
+                        <span>Coords: <strong>${poi.loc[1]}, ${poi.loc[0]}</strong></span>
+                    </div>
+                    <div class="poi-actions">
+                        <button class="btn btn-sm" onclick="zoomToPoi('${poi.id}')"><i class="fa-solid fa-magnifying-glass-location"></i> Ver</button>
+                        <button class="btn btn-sm btn-primary" onclick="openEditorForPoi('${poi.id}')"><i class="fa-solid fa-pen"></i> Editar</button>
+                        <button class="btn btn-sm btn-danger" onclick="deletePoi('${poi.id}')"><i class="fa-solid fa-trash"></i></button>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        window.zoomToPoi = function(id) {
+            const poi = pois.find(p => p.id === id);
+            if (poi && map) {
+                map.flyTo([poi.loc[1], poi.loc[0]], 14);
+                const layers = poiLayers.get(id);
+                if (layers) layers.marker.openTooltip();
+            }
+        };
+
+        window.openEditorForPoi = function(id) {
+            activeEditingPoiId = id;
+            const poi = pois.find(p => p.id === id);
+            if (!poi) return;
+
+            const cat = getPoiCategory(poi.id);
+            document.getElementById('editor-title').innerText = `Editar: ${poi.id}`;
+            document.getElementById('edit-category').value = cat;
+            document.getElementById('edit-id').value = poi.id;
+            document.getElementById('edit-lon').value = poi.loc[0];
+            document.getElementById('edit-lat').value = poi.loc[1];
+            document.getElementById('edit-radius').value = poi.radius_m || 750;
+            document.getElementById('radius-display').innerText = `${poi.radius_m || 750} m`;
+            document.getElementById('edit-jobs').value = poi.jobs || 5000;
+            document.getElementById('edit-mode').value = poi.mode || "MAX";
+
+            document.getElementById('btn-delete-poi').style.display = 'inline-flex';
+            switchTab('tab-editor');
+            zoomToPoi(id);
+            renderPoiList();
+            updatePoiPreviewFromForm();
+        };
+
+        function openEditorForNew() {
+            activeEditingPoiId = null;
+            document.getElementById('editor-title').innerText = "Nuevo POI Especial";
+            document.getElementById('edit-category').value = "AIR";
+            document.getElementById('edit-id').value = "AIR_Cancún";
+            
+            if (currentCityData && currentCityData.city && currentCityData.city.bbox) {
+                const b = currentCityData.city.bbox;
+                document.getElementById('edit-lon').value = ((b[0] + b[2]) / 2).toFixed(5);
+                document.getElementById('edit-lat').value = ((b[1] + b[3]) / 2).toFixed(5);
+            }
+            
+            document.getElementById('edit-radius').value = 2500;
+            document.getElementById('radius-display').innerText = "2500 m";
+            document.getElementById('edit-jobs').value = 15000;
+            document.getElementById('edit-mode').value = "MAX";
+
+            document.getElementById('btn-delete-poi').style.display = 'none';
+            switchTab('tab-editor');
+            updatePoiPreviewFromForm();
+        }
+
+        // Live calculation of absorbed organic nodes inside radius
+        function updatePoiPreviewFromForm() {
+            const lon = parseFloat(document.getElementById('edit-lon').value);
+            const lat = parseFloat(document.getElementById('edit-lat').value);
+            const radius = parseInt(document.getElementById('edit-radius').value) || 750;
+            const jobsManual = parseInt(document.getElementById('edit-jobs').value) || 0;
+            const mode = document.getElementById('edit-mode').value;
+            const cat = document.getElementById('edit-category').value;
+            const color = CATEGORY_COLORS[cat] || CATEGORY_COLORS.CUSTOM;
+
+            if (isNaN(lon) || isNaN(lat)) return;
+
+            // Live update layers if editing
+            if (activeEditingPoiId && poiLayers.has(activeEditingPoiId)) {
+                const { marker, circle } = poiLayers.get(activeEditingPoiId);
+                marker.setLatLng([lat, lon]);
+                circle.setLatLng([lat, lon]);
+                circle.setRadius(radius);
+                circle.setStyle({ color: color, fillColor: color });
+            }
+
+            // Real-time Absorption Metrics against loaded density points
+            let absorbedJobs = 0;
+            let absorbedPop = 0;
+            let absorbedNodesCount = 0;
+
+            densityPoints.forEach(p => {
+                const d = getDistanceMeters(lon, lat, p.location[0], p.location[1]);
+                if (d <= radius) {
+                    absorbedJobs += (p.jobs || 0);
+                    absorbedPop += (p.residents || 0);
+                    absorbedNodesCount++;
+                }
+            });
+
+            // Calculate final jobs based on engine logic (sb_mexico/gravity.py)
+            let finalJobs = 0;
+            let diagnosis = "";
+
+            if (mode === "MAX") {
+                finalJobs = Math.max(jobsManual, absorbedJobs);
+                if (absorbedJobs >= jobsManual) {
+                    diagnosis = `Piso DENUE alcanzado (${absorbedJobs.toLocaleString()} empleos locales superan la cuota manual de ${jobsManual.toLocaleString()}).`;
+                } else {
+                    diagnosis = `Cuota manual fijada (${jobsManual.toLocaleString()} empleos: absorbe ${absorbedJobs.toLocaleString()} del DENUE e inyecta ${(jobsManual - absorbedJobs).toLocaleString()} exógenos).`;
+                }
+            } else if (mode === "BOOST") {
+                finalJobs = jobsManual + absorbedJobs;
+                diagnosis = `Suma exógena (+${absorbedJobs.toLocaleString()} empleos locales sumados encima de la cuota).`;
+            } else if (mode === "REPLACE") {
+                finalJobs = jobsManual;
+                diagnosis = `Sobrescritura forzada (${jobsManual.toLocaleString()} empleos fijos; el DENUE local es reemplazado).`;
+            }
+
+            document.getElementById('stat-absorbed-jobs').innerText = absorbedJobs.toLocaleString();
+            document.getElementById('stat-absorbed-pop').innerText = absorbedPop.toLocaleString();
+            document.getElementById('stat-absorbed-nodes').innerText = absorbedNodesCount.toLocaleString();
+            document.getElementById('stat-final-jobs').innerText = finalJobs.toLocaleString();
+            document.getElementById('stat-diagnosis').innerHTML = `<i class="fa-solid fa-circle-info"></i> <span>${diagnosis}</span>`;
+        }
+
+        function savePoiFromForm() {
+            const id = document.getElementById('edit-id').value.trim();
+            const lon = parseFloat(document.getElementById('edit-lon').value);
+            const lat = parseFloat(document.getElementById('edit-lat').value);
+            const radius = parseInt(document.getElementById('edit-radius').value);
+            const jobs = parseInt(document.getElementById('edit-jobs').value);
+            const mode = document.getElementById('edit-mode').value;
+
+            if (!id) { alert("Por favor ingresa un ID para el POI."); return; }
+            if (isNaN(lon) || isNaN(lat)) { alert("Por favor ingresa coordenadas válidas [lon, lat]."); return; }
+
+            const poiObj = {
+                id: id,
+                loc: [lon, lat],
+                jobs: isNaN(jobs) ? 5000 : jobs,
+                radius_m: radius,
+                mode: mode
+            };
+
+            if (activeEditingPoiId) {
+                const idx = pois.findIndex(p => p.id === activeEditingPoiId);
+                if (idx >= 0) pois[idx] = poiObj;
+            } else {
+                const exists = pois.some(p => p.id === id);
+                if (exists) { alert(`Ya existe un POI con el ID '${id}'. Elige un ID único.`); return; }
+                pois.push(poiObj);
+            }
+
+            activeEditingPoiId = null;
+            renderAllPois();
+            renderPoiList();
+            updateHud();
+            runValidations();
+            updateYamlPreview();
+            switchTab('tab-list');
+        }
+
+        window.deletePoi = function(id) {
+            if (confirm(`¿Seguro que deseas eliminar el POI '${id}'?`)) {
+                pois = pois.filter(p => p.id !== id);
+                if (activeEditingPoiId === id) activeEditingPoiId = null;
+                renderAllPois();
+                renderPoiList();
+                updateHud();
+                runValidations();
+                updateYamlPreview();
+                switchTab('tab-list');
+            }
+        };
+
+        function deleteCurrentPoi() {
+            if (activeEditingPoiId) {
+                deletePoi(activeEditingPoiId);
+            }
+        }
+
+        function startPickingLocation() {
+            isPickingLocation = true;
+            document.getElementById('map-pick-tip').style.display = 'flex';
+            document.getElementById('map').style.cursor = 'crosshair';
+        }
+
+        function stopPickingLocation() {
+            isPickingLocation = false;
+            document.getElementById('map-pick-tip').style.display = 'none';
+            document.getElementById('map').style.cursor = '';
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.tab === tabId);
+            });
+            document.querySelectorAll('.tab-content').forEach(c => {
+                c.classList.toggle('active', c.id === tabId);
+            });
+            if (tabId === 'tab-yaml') updateYamlPreview();
+            if (tabId === 'tab-validation') runValidations();
+        }
+
+        function getDistanceMeters(lon1, lat1, lon2, lat2) {
+            const R = 6371000;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+
+        function runValidations() {
+            const container = document.getElementById('validation-container');
+            container.innerHTML = '';
+            let issues = [];
+
+            if (!currentCityData) return;
+            const bbox = currentCityData.city.bbox;
+
+            // 1. Check BBox
+            pois.forEach(p => {
+                const [lon, lat] = p.loc;
+                if (lon < bbox[0] || lon > bbox[2] || lat < bbox[1] || lat > bbox[3]) {
+                    issues.push({
+                        type: 'error',
+                        msg: `<b>${p.id}</b> está fuera del Bounding Box de la ciudad. Coords: [${lon}, ${lat}].`
+                    });
+                }
+            });
+
+            // 2. Check Overlaps
+            for (let i = 0; i < pois.length; i++) {
+                for (let j = i + 1; j < pois.length; j++) {
+                    const p1 = pois[i];
+                    const p2 = pois[j];
+                    const dist = getDistanceMeters(p1.loc[0], p1.loc[1], p2.loc[0], p2.loc[1]);
+                    const sumRadii = (p1.radius_m || 750) + (p2.radius_m || 750);
+                    if (dist < sumRadii * 0.5) {
+                        issues.push({
+                            type: 'warning',
+                            msg: `Solapamiento severo (~${Math.round(dist)}m) entre <b>${p1.id}</b> y <b>${p2.id}</b>. Podrían absorber las mismas unidades DENUE.`
+                        });
+                    }
+                }
+            }
+
+            // 3. Check Large Radius
+            pois.forEach(p => {
+                if (!p.id.startsWith("AIR_") && (p.radius_m || 0) > 2500) {
+                    issues.push({
+                        type: 'warning',
+                        msg: `Radio muy amplio (${p.radius_m}m) en <b>${p.id}</b>. Para no-aeropuertos se recomienda entre 500m y 1200m.`
+                    });
+                }
+            });
+
+            // 4. Duplicate IDs
+            const seenIds = new Set();
+            pois.forEach(p => {
+                if (seenIds.has(p.id)) {
+                    issues.push({
+                        type: 'error',
+                        msg: `ID duplicado encontrado: <b>${p.id}</b>.`
+                    });
+                }
+                seenIds.add(p.id);
+            });
+
+            document.getElementById('val-issue-badge').innerText = issues.length;
+            document.getElementById('hud-bbox-status').innerText = issues.some(i => i.type === 'error') ? '⚠️ Alertas' : 'Óptimo';
+
+            if (issues.length === 0) {
+                container.innerHTML = `
+                    <div class="alert-box alert-info">
+                        <i class="fa-solid fa-circle-check" style="color:var(--accent-green); font-size:16px;"></i>
+                        <div><strong>¡Todo en orden!</strong> Todos los POIs cumplen con la taxonomía, se encuentran dentro del BBox y sus radios no presentan colisiones críticas.</div>
+                    </div>
+                `;
+            } else {
+                issues.forEach(iss => {
+                    const box = document.createElement('div');
+                    box.className = `alert-box alert-${iss.type}`;
+                    const icon = iss.type === 'error' ? 'fa-triangle-exclamation' : 'fa-circle-exclamation';
+                    box.innerHTML = `<i class="fa-solid ${icon}"></i><div>${iss.msg}</div>`;
+                    container.appendChild(box);
+                });
+            }
+        }
+
+        function updateYamlPreview() {
+            let yaml = "pois:\n";
+            pois.forEach(p => {
+                yaml += `  - id: "${p.id}"\n`;
+                yaml += `    loc: [${p.loc[0]}, ${p.loc[1]}]\n`;
+                yaml += `    jobs: ${p.jobs}\n`;
+                yaml += `    radius_m: ${p.radius_m || 750}\n`;
+                yaml += `    mode: "${p.mode || 'MAX'}"\n\n`;
+            });
+            document.getElementById('yaml-preview').innerText = yaml;
+        }
+
+        async function saveAllToDisk() {
+            if (!currentCityFile) return;
+            const btn = document.getElementById('btn-save-yaml');
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Guardando...';
+            btn.disabled = true;
+
+            try {
+                const res = await fetch('/api/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        file: currentCityFile,
+                        pois: pois
+                    })
+                });
+                const resp = await res.json();
+                if (resp.status === 'ok') {
+                    alert(`¡Configuración de POIs guardada exitosamente en ${currentCityFile}!`);
+                } else {
+                    alert(`Error al guardar: ${resp.error}`);
+                }
+            } catch (err) {
+                alert(`Error de red al guardar: ${err}`);
+            } finally {
+                btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Guardar';
+                btn.disabled = false;
+            }
+        }
+
+        async function loadDemandDensity(cityFile) {
+            residentsLayerGroup.clearLayers();
+            jobsLayerGroup.clearLayers();
+            densityPoints = [];
+
+            try {
+                const res = await fetch(`/api/density?file=${encodeURIComponent(cityFile)}`);
+                const data = await res.json();
+                if (data.points && data.points.length > 0) {
+                    densityPoints = data.points;
+                    densityPoints.forEach(pt => {
+                        const isJobDominant = (pt.jobs || 0) > (pt.residents || 0);
+                        const radius = Math.max(3, Math.min(10, Math.sqrt((pt.residents || 0) + (pt.jobs || 0)) * 0.25));
+                        const cm = L.circleMarker([pt.location[1], pt.location[0]], {
+                            radius: radius,
+                            fillColor: isJobDominant ? "#ef4444" : "#38bdf8",
+                            color: "#fff",
+                            weight: 0.5,
+                            opacity: 0.6,
+                            fillOpacity: 0.45
+                        });
+                        cm.bindPopup(`
+                            <b>${pt.id}</b><br>
+                            👥 <b>Habitantes:</b> ${(pt.residents || 0).toLocaleString()}<br>
+                            🏢 <b>Empleos:</b> ${(pt.jobs || 0).toLocaleString()}
+                        `);
+
+                        if (isJobDominant) jobsLayerGroup.addLayer(cm);
+                        else residentsLayerGroup.addLayer(cm);
+                    });
+
+                    if (document.getElementById('chk-toggle-residents').checked) {
+                        residentsLayerGroup.addTo(map);
+                    }
+                    if (document.getElementById('chk-toggle-jobs').checked) {
+                        jobsLayerGroup.addTo(map);
+                    }
+                }
+            } catch (e) {
+                console.log("No hay capa de demanda precargada:", e);
+            }
+        }
+    </script>
+</body>
+</html>

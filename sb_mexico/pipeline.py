@@ -81,7 +81,7 @@ def execute_pipeline(
     cfg = load_city_config(config_path)
     city_info = cfg["city"]
     macro = cfg["macroeconomics"]
-    pois_cfg = cfg.get("pois", [])
+    pois_cfg = cfg.get("pois") or []
 
     city_code = city_info["code"]
     bbox_list = city_info["bbox"]  # [min_lon, min_lat, max_lon, max_lat]

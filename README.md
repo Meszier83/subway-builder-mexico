@@ -36,14 +36,21 @@ Descarga los 4 archivos estadísticos del estado y el PBF de México (ver [DATA_
 5. `*_Entidad_*.csv` (ENOE)
 6. `*conapo*.csv` o `data-*.csv` (Proyecciones de Población CONAPO)
 
-### 3. Compilar la Ciudad
+### 3. Diseñar y Calibrar POIs Visualmente (POI Studio)
+Antes de compilar, puedes visualizar el Bounding Box y colocar/calibrar POIs especiales (aeropuertos, universidades, estadios) en un mapa interactivo con soporte satelital:
+
+```bash
+python tools/poi_studio.py --city cities/cancun.yaml
+```
+
+### 4. Compilar la Ciudad
 
 ```bash
 # Compilación completa (Cartografía + Demanda)
-python3 build.py cities/cancun.yaml
+python build.py cities/cancun.yaml
 
 # Solo demanda (si ya tienes el mapa):
-python3 build.py cities/cancun.yaml --skip-map
+python build.py cities/cancun.yaml --skip-map
 ```
 
 ¡Listo! El paquete final se genera en `CUN.zip` (o en `--output-dir dist/cancun/`).
@@ -63,6 +70,8 @@ python3 build.py cities/cancun.yaml --skip-map
 │   └── pipeline.py          # Orquestador integral y empaquetado
 ├── tests/                   # Suite formal de pruebas unitarias
 ├── tools/                   # Utilidades y scripts auxiliares
+│   ├── poi_studio.py        # Editor visual de POIs y calibrador en mapa satelital
+│   └── demo_preview.py      # Generador rápido de vistas previas
 ├── build.py                 # CLI de ejecución principal
 ├── visualize.py             # Visor HTML interactivo de demanda
 ├── DATA_SOURCES.md          # Dónde y cómo descargar datos oficiales

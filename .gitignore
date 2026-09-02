@@ -23,3 +23,4 @@ build/
 dist/
 data/
 *.html
+!tools/templates/*.html

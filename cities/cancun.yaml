@@ -27,42 +27,39 @@ macroeconomics:
 
   growth_factors:
     "23005": 1.07                      # Benito Juárez (Cancún)
-    "23003": 1.05                      # Isla Mujeres
-    "23011": 1.08                      # Puerto Morelos
-
 pois:
-  - id: "AIR_Aeropuerto_CUN"
-    loc: [-86.874, 21.036]
-    jobs: 32000
-    radius_m: 2500
+  - id: "AIR_Cancún"
+    loc: [-86.87508, 21.04045]
+    jobs: 31991
+    radius_m: 1500
     mode: "MAX"
 
-  - id: "UNI_Universidad_Caribe"
-    loc: [-86.851, 21.198]
+  - id: "UNI_Universidad del Caribe"
+    loc: [-86.82306, 21.20066]
     jobs: 7500
-    radius_m: 800
+    radius_m: 300
     mode: "BOOST"
 
-  - id: "UNI_Tec_Cancun"
-    loc: [-86.848, 21.144]
+  - id: "UNI_Tecnológico de Cancún"
+    loc: [-86.83486, 21.13911]
     jobs: 6000
     radius_m: 600
     mode: "BOOST"
 
-  - id: "Plaza_Las_Americas"
-    loc: [-86.824, 21.147]
+  - id: "Plaza Las Américas"
+    loc: [-86.82302, 21.14679]
     jobs: 8500
-    radius_m: 750
+    radius_m: 350
     mode: "MAX"
 
-  - id: "Zona_Hotelera_Punta_Cancun"
-    loc: [-86.747, 21.137]
+  - id: "Zona Hotelera (Punta Cancún)"
+    loc: [-86.74700, 21.13700]
     jobs: 22000
     radius_m: 1500
     mode: "MAX"
 
-  - id: "Zona_Hotelera_Punta_Nizuc"
-    loc: [-86.784, 21.042]
+  - id: "Zona Hotelera (Punta Nizuc)"
+    loc: [-86.78400, 21.04200]
     jobs: 14000
     radius_m: 1500
     mode: "MAX"
