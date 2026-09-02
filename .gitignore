@@ -1,0 +1,23 @@
+# Subway Builder México - Git Ignore
+# ==================================
+*.csv
+*.xlsx
+*.osm.pbf
+*.pmtiles
+*.geojson
+*.bin.gz
+*.json.gz
+*.zip
+demand_data.json
+config.json
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+.env/
+
+# Build temporales
+build/
+dist/

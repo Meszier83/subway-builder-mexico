@@ -1,0 +1,108 @@
+# MANUAL MAESTRO: SUBWAY BUILDER MÉXICO (v6.0)
+**Arquitectura de Compilación y Modelado de Demanda Geoespacial (INEGI & Depot)**
+
+---
+
+## 1. INTRODUCCIÓN Y FILOSOFÍA v6.0
+
+La versión 6.0 abandona el antiguo paradigma de "copiar y pegar bloques de código en múltiples checkpoints" en favor de una **arquitectura declarativa y automatizada**:
+
+1. **Un solo comando:** La compilación cartográfica, el cruce censal, el modelo gravitatorio y el empaquetado se ejecutan de inicio a fin con un solo comando:
+   ```bash
+   python build.py cities/cancun.yaml
+   ```
+2. **Modelo Gravitatorio Puro:** Implementación de asignación multinomial directa con conservación matemática estricta de la PEA a priori (sin sesgos, sin inflaciones ni rellenos artificiales).
+3. **Integración Nativa con Depot:** Uso completo de `depot.maps.MapGen` para vector tiles optimizados y `depot.demand.DemandData` para sanitización formal y cálculo del viewport de `config.json`.
+4. **La IA como Asistente de Investigación:** Tu asistente de IA ya no genera scripts propensos a errores; su función es investigar la ciudad que elijas y entregarte su archivo `ciudad.yaml` listo para correr.
+
+---
+
+## 2. ESTRUCTURA DEL PROYECTO
+
+```text
+MANUAL SB/
+├── cities/                          # Archivos de configuración de cada ciudad (.yaml)
+│   ├── _template.yaml               # Plantilla maestra documentada
+│   ├── cancun.yaml                  # Configuración de Cancún / Q. Roo
+│   └── ...                          # Tus próximas ciudades
+├── sb_mexico/                       # Motor de procesamiento en Python
+│   ├── inegi.py                     # Ingesta y conciliación de CPV, DENUE, CE 2024 y ENOE
+│   ├── gravity.py                   # Modelo de fricción β=0.12 y asignación multinomial
+│   ├── cartography.py               # Generador cartográfico con depot.maps.MapGen
+│   └── pipeline.py                  # Orquestador del flujo completo y autovalidaciones
+├── build.py                         # CLI ejecutable
+└── *.csv / *.osm.pbf                # Datos fuente del INEGI y OpenStreetMap
+```
+
+---
+
+## 3. FUENTES DE DATOS DEL INEGI (LA CUATRIFECTA)
+
+El motor detecta y procesa automáticamente los archivos oficiales que coloques en el directorio de trabajo:
+
+1. **CPV 2020 (`*RESAGEBURB*.csv` o `*censo*.csv/.xlsx`):**  
+   Población y personas de 15 años y más (`P_15YMAS`) a nivel de manzana urbana (`MZA > 0`). Maneja el secreto estadístico (`*`) de forma automática.
+2. **DENUE (`*denue*.csv`):**  
+   Directorio georreferenciado de unidades económicas (coordenadas GPS puntuales y estratos de personal ocupado).
+3. **Censos Económicos 2024 (`*SAIC*.csv` o `*cenu24*.csv`):**  
+   Control total de personal ocupado municipal (`H001A`) para calibrar asimétricamente los micronegocios.
+4. **ENOE (`*2026_trim*.csv` o `*enoe*.csv`):**  
+   Tasa de participación laboral (Tasa PEA) y tasa de informalidad laboral (`TIL_1`).
+5. **OpenStreetMap (`*.osm.pbf`):**  
+   Geometrías de vialidades, edificios 3D, costas y toponimia (descargado de Geofabrik).
+
+---
+
+## 4. FLUJO DE TRABAJO: CÓMO CREAR UNA CIUDAD NUEVA
+
+### Paso 1: Pedirle a la IA el archivo `.yaml` de la ciudad
+Cuando quieras mapear una nueva ciudad (ej. Querétaro, Monterrey, Guadalajara), simplemente pídele a la IA:
+> *"Quiero hacer el mapa de Guadalajara. Genérame su archivo `guadalajara.yaml` con su BBOX metropolitano, códigos municipales del INEGI, tasas de la ENOE/CE2024 de Jalisco y sus 10 POIs más importantes (Aeropuerto, Universidades, Parques Industriales, Plazas).*
+
+### Paso 2: Guardar y Ejecutar
+Guarda el archivo en `cities/guadalajara.yaml` y ejecuta en tu terminal de WSL / Linux:
+```bash
+# Compilación completa (Mapa + Demanda + ZIP)
+python build.py cities/guadalajara.yaml
+
+# O si solo modificaste los POIs / factores y ya tienes el mapa compilado:
+python build.py cities/guadalajara.yaml --skip-map
+```
+
+### Paso 3: Importar en el Juego
+El script genera automáticamente el archivo `<CODIGO_CIUDAD>.zip` en tu carpeta.
+1. Abre **Kronifer's Map Manager / Railyard**.
+2. Selecciona **ADD A MAP** y carga el archivo ZIP.
+3. ¡Listo para diseñar tu red de metro!
+
+---
+
+## 5. PARÁMETROS DEL ARCHIVO YAML
+
+| Sección | Parámetro | Descripción / Valor Recomendado |
+| :--- | :--- | :--- |
+| `city` | `code` | Código IATA o sigla única de 3 letras (ej. `GDL`, `MTY`, `CUN`). |
+| `city` | `bbox` | `[min_lon, min_lat, max_lon, max_lat]` del área metropolitana. |
+| `city` | `grid_size` | Tamaño de celda de demanda: `0.0018` (fino), `0.0025` (estándar), `0.0035` (metrópolis gigante). |
+| `city` | `building_filter_size` | Filtro de edificios 3D para `MapGen` (default `15.0` para optimizar FPS). |
+| `macroeconomics` | `tasa_pea` | Tasa de participación laboral sobre población 15+ (ej. `0.6644`). |
+| `macroeconomics` | `til_1_state` | Tasa de informalidad laboral estatal (ej. `0.4497`). |
+| `macroeconomics` | `gravity_beta` | Coeficiente de decaimiento por distancia (default `0.12`). |
+| `macroeconomics` | `max_pop_size` | Tamaño máximo de cohorte de viaje (default `150` pax para fluidez en el juego). |
+| `pois` | `id` | Nombre del nodo (usar prefijo `AIR_` para aeropuertos y `UNI_` para universidades). |
+| `pois` | `loc` | `[lon, lat]` exacto del punto de interés. |
+| `pois` | `jobs` | Cantidad de empleos o capacidad de atracción del nodo. |
+| `pois` | `radius_m` | Radio de absorción en metros para fusionar con el DENUE. |
+| `pois` | `mode` | `MAX` (piso censal), `BOOST` (suma demanda exógena), `REPLACE` (sobrescritura estricta). |
+
+---
+
+## 6. FORMULACIÓN MATEMÁTICA INTERNA (REFERENCIA)
+
+1. **Fricción Espacial:**
+   $$f(d_{ij}) = e^{-\beta \cdot d_{ij}} \quad \text{donde } \beta = 0.12, \ d_{ij} \le 55\text{ km}$$
+2. **Atracción y Probabilidad O-D:**
+   $$P_{ij} = \frac{(E_j)^{0.85} \cdot f(d_{ij})}{\sum_{k} (E_k)^{0.85} \cdot f(d_{ik})}$$
+3. **Distribución Multinomial de Viajes (Conservación Estricta de Masa):**
+   $$\mathbf{Viajes}_i \sim \text{Multinomial}\left( \text{PEA}_i, \ [P_{i1}, P_{i2}, \dots, P_{in}] \right)$$
+   Garantiza que $\sum \text{Viajeros} \equiv \sum \text{PEA}$ sin artefactos de inflado ni rellenos.

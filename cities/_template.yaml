@@ -1,0 +1,42 @@
+# ==============================================================================
+# PLANTILLA DE CONFIGURACIÓN DE CIUDAD - SUBWAY BUILDER MÉXICO v6.0
+# ==============================================================================
+
+city:
+  code: "XXX"                         # Código IATA o clave de 3 letras (ej. CUN, MTY, GDL)
+  name: "Nombre Completo de la Ciudad" # Nombre oficial de la zona metropolitana
+  description: "Descripción breve"    # Menor a 80 caracteres para el juego
+  bbox: [-87.00, 21.00, -86.70, 21.30] # [min_lon, min_lat, max_lon, max_lat]
+  creator: "TuNombre"                 # Nombre o alias del creador
+  grid_size: 0.0025                   # Tamaño de celda (~250m: 0.0025, ~180m: 0.0018, ~380m: 0.0035)
+  min_residents: 10                   # Mínimo de habitantes para activar nodo de origen
+  min_jobs: 3                         # Mínimo de empleos para activar nodo de destino
+  initial_zoom: 11.5                  # Nivel de zoom inicial en el juego
+  building_filter_size: 15.0          # Filtro de edificios 3D (10-20, mayor = mejor rendimiento)
+  building_simplification: 0.2        # Simplificación de geometría de edificios
+  include_ocean: false                # true si es ciudad costera con océano modelado
+
+macroeconomics:
+  tasa_pea: 0.62                      # Tasa de participación laboral (ENOE)
+  til_1_state: 0.45                   # Tasa de informalidad laboral estatal (ENOE)
+  sample_threshold: 500               # Mínimo de muestra formal para calibrar municipio
+  default_growth_factor: 1.0          # Factor de proyección demográfica (1.0 = 2020)
+  gravity_beta: 0.12                  # Coeficiente de fricción espacial (0.10 a 0.14 recomendado)
+  max_distance_km: 55.0               # Límite máximo de distancia para viajes urbanos
+  max_pop_size: 150                   # Tamaño máximo por cohorte de viaje (recomendado 150-200)
+
+  # Opcional: Proyecciones demográficas específicas por clave municipal (EEMMM)
+  growth_factors:
+    "23005": 1.08                     # 8% de crecimiento en Benito Juárez
+
+pois:
+  - id: "AIR_Aeropuerto"
+    loc: [-86.874, 21.036]
+    jobs: 32000
+    radius_m: 2500
+    mode: "MAX"                       # MAX: piso sobre el censo / BOOST: suma exógena / REPLACE: sobrescritura
+  - id: "UNI_CampusPrincipal"
+    loc: [-86.840, 21.150]
+    jobs: 8000
+    radius_m: 800
+    mode: "BOOST"
