@@ -78,17 +78,18 @@ def build_demand_grid(
         
         # Verificar si cae dentro de algún POI especial (distancia métrica precisa)
         matched_poi = None
+        best_dist = float('inf')
         for poi in pois_resolved:
             d_lon_m = (r_lon - poi["loc"][0]) * 111_320.0 * poi["cos_lat"]
             d_lat_m = (r_lat - poi["loc"][1]) * 110_574.0
             dist_m = math.hypot(d_lon_m, d_lat_m)
-            if dist_m <= poi["radius_m"]:
+            if dist_m <= poi["radius_m"] and dist_m < best_dist:
                 matched_poi = poi
-                break
+                best_dist = dist_m
 
         if matched_poi is not None:
             matched_poi["denue_jobs_absorbidos"] += r_jobs
-            continue  # No se suma a la malla regular para evitar doble conteo
+            continue  # Se absorbe por el POI más cercano para evitar doble conteo
 
         # Sumar a la malla regular con acumulación O(1) de memoria
         k = get_grid_key(r_lon, r_lat)
@@ -115,13 +116,27 @@ def build_demand_grid(
         cell["residents"] += float(rec['pobtot_adj'])
         cell["pea"] += float(rec['pea_real'])
 
-    # 4. Preparar Snapping Vial con STRtree
+    # 4. Preparar Snapping Vial con STRtree (Filtrando vías peatonales / urbanas accesibles)
     if roads_gdf.crs is None:
         roads_gdf = roads_gdf.set_crs(epsg=4326)
     elif roads_gdf.crs.to_epsg() != 4326:
         roads_gdf = roads_gdf.to_crs(epsg=4326)
 
-    road_geoms = [g for g in roads_gdf.geometry if g is not None and not g.is_empty]
+    if "highway" in roads_gdf.columns:
+        accessible_highways = {
+            "residential", "primary", "secondary", "tertiary",
+            "unclassified", "service", "living_street", "pedestrian",
+            "footway", "path", "track", "trunk", "trunk_link",
+            "primary_link", "secondary_link", "tertiary_link"
+        }
+        roads_subset = roads_gdf[roads_gdf["highway"].isin(accessible_highways)]
+        if len(roads_subset) > 0:
+            road_geoms = [g for g in roads_subset.geometry if g is not None and not g.is_empty]
+        else:
+            road_geoms = [g for g in roads_gdf.geometry if g is not None and not g.is_empty]
+    else:
+        road_geoms = [g for g in roads_gdf.geometry if g is not None and not g.is_empty]
+
     tree = STRtree(road_geoms) if len(road_geoms) > 0 else None
 
     # 5. Construir lista de demand_points regulares

@@ -28,10 +28,10 @@ class TestPoiStudio(unittest.TestCase):
 
     def test_save_and_reload_pois(self):
         data = load_city_data("cities/cancun.yaml")
+        tmp_path = os.path.join(os.path.dirname(__file__), "tmp_test_city.yaml")
         
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False, encoding="utf-8") as tf:
-            yaml.safe_dump(data, tf)
-            tmp_path = tf.name
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(data, f)
 
         try:
             new_test_pois = [
@@ -64,5 +64,12 @@ class TestPoiStudio(unittest.TestCase):
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
+    def test_path_traversal_security(self):
+        with self.assertRaises(PermissionError):
+            load_city_data("../../../etc/shadow.yaml")
+        with self.assertRaises(PermissionError):
+            load_city_data("cities/../../../windows/system32/cmd.exe")
+
 if __name__ == "__main__":
     unittest.main()
+

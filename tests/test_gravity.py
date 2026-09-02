@@ -66,5 +66,31 @@ class TestGravity(unittest.TestCase):
         self.assertEqual(poi_audit[0]["id"], "UNI_Test")
         self.assertEqual(poi_audit[0]["absorbed"], 40)
 
+    def test_overlapping_pois_argmin(self):
+        # Dos POIs con radios solapados
+        pois = [
+            {"id": "POI_A", "loc": [-86.85, 21.15], "jobs": 500, "radius_m": 1000, "mode": "MAX"},
+            {"id": "POI_B", "loc": [-86.86, 21.15], "jobs": 500, "radius_m": 1000, "mode": "MAX"},
+        ]
+        # Establecimiento más cercano a POI_B (-86.858 está a ~220m de POI_B y a ~880m de POI_A)
+        df_denue = pd.DataFrame([
+            {"lon": -86.858, "lat": 21.15, "calibrated_jobs": 50.0}
+        ])
+        df_cpv = pd.DataFrame([
+            {"lon": -86.85, "lat": 21.15, "pobtot_adj": 10.0, "pea_real": 5.0}
+        ])
+        roads_gdf = gpd.GeoDataFrame({"geometry": [LineString([(-86.90, 21.10), (-86.80, 21.20)])]}, crs="EPSG:4326")
+
+        _, poi_audit = build_demand_grid(
+            df_denue=df_denue,
+            df_cpv=df_cpv,
+            special_pois=pois,
+            roads_gdf=roads_gdf
+        )
+        audit_dict = {p["id"]: p["absorbed"] for p in poi_audit}
+        self.assertEqual(audit_dict["POI_B"], 50)
+        self.assertEqual(audit_dict["POI_A"], 0)
+
 if __name__ == "__main__":
     unittest.main()
+

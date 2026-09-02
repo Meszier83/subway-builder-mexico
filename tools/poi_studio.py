@@ -57,16 +57,28 @@ def get_available_cities() -> List[Dict[str, Any]]:
 
 
 def _resolve_city_path(rel_or_abs_path: str) -> str:
-    """Resuelve la ruta a un archivo de ciudad de forma flexible."""
+    """Resuelve la ruta a un archivo de ciudad de forma flexible y segura contra Path Traversal."""
     candidates = [
         os.path.abspath(os.path.join(ROOT_DIR, rel_or_abs_path)),
         os.path.abspath(rel_or_abs_path),
         os.path.abspath(os.path.join(ROOT_DIR, "cities", os.path.basename(rel_or_abs_path)))
     ]
+    resolved = None
     for p in candidates:
         if os.path.exists(p):
-            return p
-    return os.path.abspath(os.path.join(ROOT_DIR, rel_or_abs_path))
+            resolved = p
+            break
+
+    if resolved is None:
+        resolved = os.path.abspath(os.path.join(ROOT_DIR, rel_or_abs_path))
+
+    # Seguridad: Restringir a archivos dentro del workspace y con extensión yaml
+    norm_root = os.path.normcase(os.path.realpath(ROOT_DIR))
+    norm_target = os.path.normcase(os.path.realpath(resolved))
+    if not (norm_target.startswith(norm_root) and (resolved.endswith(".yaml") or resolved.endswith(".yml"))):
+        raise PermissionError(f"Acceso denegado: ruta fuera del workspace o extensión inválida ({rel_or_abs_path})")
+
+    return resolved
 
 
 def load_city_data(rel_or_abs_path: str) -> Dict[str, Any]:
