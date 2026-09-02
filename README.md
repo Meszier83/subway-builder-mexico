@@ -1,4 +1,4 @@
-# Subway Builder México (v6.1) 🚇🇲🇽
+# Subway Builder México (v6.3) 🚇🇲🇽
 **Pipeline Integral, Declarativo y Riguroso para Generación de Mapas de México**
 
 ---
@@ -36,14 +36,21 @@ Descarga los 4 archivos estadísticos del estado y el PBF de México (ver [DATA_
 5. `*_Entidad_*.csv` (ENOE)
 6. `*conapo*.csv` o `data-*.csv` (Proyecciones de Población CONAPO)
 
-### 3. Diseñar y Calibrar POIs Visualmente (POI Studio)
-Antes de compilar, puedes visualizar el Bounding Box y colocar/calibrar POIs especiales (aeropuertos, universidades, estadios) en un mapa interactivo con soporte satelital:
+### 3. Asistente Visual Integral (Wizard Studio) o POI Studio
+Puedes iniciar el asistente gráfico completo con interfaz inspirada en la señalética del Metro de la CDMX (soporte para subida de archivos, calibración de BBOX, toponimia y compilación en vivo con streaming):
 
+```bash
+# Iniciar el Wizard Integral
+python tools/wizard.py
+# o en Windows haciendo doble clic en wizard.bat
+```
+
+O si solo deseas inspeccionar y calibrar radios de POIs en mapa satelital:
 ```bash
 python tools/poi_studio.py --city cities/cancun.yaml
 ```
 
-### 4. Compilar la Ciudad
+### 4. Compilar la Ciudad por CLI
 
 ```bash
 # Compilación completa (Cartografía + Demanda)
@@ -72,10 +79,12 @@ python build.py cities/cancun.yaml --skip-map
 │   └── pipeline.py          # Orquestador integral y empaquetado
 ├── tests/                   # Suite formal de pruebas unitarias
 ├── tools/                   # Utilidades y scripts auxiliares
+│   ├── wizard.py            # Servidor web del asistente integral interactivo
 │   ├── poi_studio.py        # Editor visual de POIs y calibrador en mapa satelital
 │   ├── preview_toponymy.py  # Visor geoespacial de capas toponímicas
 │   └── demo_preview.py      # Generador rápido de vistas previas
 ├── build.py                 # CLI de ejecución principal
+├── wizard.bat               # Lanzador directo de Wizard en Windows
 ├── visualize.py             # Visor HTML interactivo de demanda
 ├── DATA_SOURCES.md          # Dónde y cómo descargar datos oficiales
 ├── METHODOLOGY.md           # Justificación matemática y científica
@@ -88,7 +97,7 @@ python build.py cities/cancun.yaml --skip-map
 
 * [**Guía de Fuentes de Datos (DATA_SOURCES.md)**](DATA_SOURCES.md): Enlaces y pasos para descargar datos de cualquier estado en 3 minutos.
 * [**Libro Blanco y Metodología (METHODOLOGY.md)**](METHODOLOGY.md): Formulación matemática y justificación técnica.
-* [**Manual Maestro (MANUAL_MAESTRO_v6.1.md)**](MANUAL_MAESTRO_v6.1.md): Guía de referencia paso a paso.
+* [**Manual Maestro (MANUAL_MAESTRO_v6.3.md)**](MANUAL_MAESTRO_v6.3.md): Guía de referencia paso a paso.
 
 ---
 

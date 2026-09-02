@@ -1,19 +1,21 @@
-# MANUAL MAESTRO: SUBWAY BUILDER MÉXICO (v6.1)
+# MANUAL MAESTRO: SUBWAY BUILDER MÉXICO (v6.3)
 **Arquitectura de Compilación y Modelado de Demanda Geoespacial (INEGI & Depot)**
 
 ---
 
-## 1. INTRODUCCIÓN Y FILOSOFÍA v6.1
+## 1. INTRODUCCIÓN Y FILOSOFÍA v6.3
 
-La versión 6.1 amplía la arquitectura declarativa y automatizada con módulos de toponimia enriquecida, validación de demanda especial y herramientas interactivas:
+La versión 6.3 amplía la arquitectura declarativa y automatizada con la suite visual interactiva Wizard Studio (estilo Metro CDMX / Wyman), streaming SSE de compilación, módulos de toponimia enriquecida, validación de demanda especial y resolución multi-fuente:
 
-1. **Un solo comando:** La compilación cartográfica, el cruce censal, el modelo gravitatorio, la toponimia y el empaquetado se ejecutan de inicio a fin con un solo comando:
+1. **Un solo comando o Wizard Web:** La compilación cartográfica, el cruce censal, el modelo gravitatorio, la toponimia y el empaquetado se ejecutan de inicio a fin desde CLI o interfaz web interactiva:
    ```bash
    python build.py cities/cancun.yaml
+   # O mediante el Wizard Visual:
+   python tools/wizard.py
    ```
 2. **Modelo Gravitatorio Puro y Absorción Argmin:** Implementación de asignación multinomial directa con conservación matemática estricta de la PEA a priori y absorción de establecimientos DENUE por mínima distancia espacial esferoidal.
 3. **Toponimia y Taxonomía Modular:** Generación de archivos toponímicos OSM y `special_demand_points.json` validados contra el estándar oficial de Subway Builder Modded.
-4. **POI Studio Interactivo:** Servidor web local para diseñar, medir y calibrar radios de absorción de POIs con soporte satelital.
+4. **Wizard Studio & POI Studio:** Servidores web locales con calibración de BBOX, edición de radios de absorción, subida de archivos y visualización en tiempo real.
 
 ---
 
@@ -33,9 +35,11 @@ MANUAL SB/
 │   ├── cartography.py               # Generador cartográfico con depot.maps.MapGen
 │   └── pipeline.py                  # Orquestador del flujo completo y autovalidaciones
 ├── tools/                           # Herramientas de visualización y diseño
+│   ├── wizard.py                    # Servidor web del asistente integral interactivo
 │   ├── poi_studio.py                # Visualizador y editor interactivo de POIs (Leaflet)
 │   └── preview_toponymy.py          # Visor geoespacial de capas toponímicas
 ├── build.py                         # CLI ejecutable
+├── wizard.bat                       # Lanzador directo para Windows
 └── *.csv / *.osm.pbf                # Datos fuente del INEGI y OpenStreetMap
 ```
 

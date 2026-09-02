@@ -1,0 +1,1992 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Subway Builder México - Wizard v6.3</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            metro: {
+              orange: '#F37021', // Línea 1/7 CDMX
+              green: '#00805B',  // Verde Bandera / Línea 8
+              pink: '#E4007C',   // Rosa Mexicano / Línea 1
+              blue: '#0033A0',   // Azul Índigo
+              dark: '#0e1015',
+              card: '#161821',
+              panel: '#1e212b',
+              border: '#2a2f3d',
+              accent: '#f37021'
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Menlo', 'Consolas', 'monospace']
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    /* Estilo Wyman y Scrollbar Minimalista */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0e1015; }
+    ::-webkit-scrollbar-thumb { background: #2a2f3d; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #f37021; }
+
+    /* Forzar contención estricta de Leaflet dentro de sus cajas */
+    .leaflet-container {
+      background: #0e1015 !important;
+      font-family: inherit;
+      width: 100% !important;
+      height: 100% !important;
+      z-index: 10 !important;
+    }
+    .leaflet-control-container {
+      z-index: 20 !important;
+    }
+    .leaflet-popup-content-wrapper {
+      background: #161821 !important;
+      color: #f3f4f6 !important;
+      border: 1px solid #2a2f3d !important;
+      border-radius: 8px !important;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5) !important;
+    }
+    .leaflet-popup-tip { background: #161821 !important; }
+
+    /* Estilo del Control de Capas Leaflet en Dark Theme */
+    .leaflet-control-layers {
+      background: rgba(22, 24, 33, 0.94) !important;
+      backdrop-filter: blur(12px) !important;
+      -webkit-backdrop-filter: blur(12px) !important;
+      color: #e5e7eb !important;
+      border: 1px solid rgba(255, 255, 255, 0.12) !important;
+      border-radius: 10px !important;
+      padding: 6px 12px !important;
+      font-size: 11px !important;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6) !important;
+      z-index: 1000 !important;
+    }
+    .leaflet-control-layers-expanded {
+      background: rgba(22, 24, 33, 0.96) !important;
+      color: #e5e7eb !important;
+      padding: 10px 14px !important;
+    }
+    .leaflet-control-layers label {
+      margin-bottom: 6px !important;
+      font-weight: 500 !important;
+      cursor: pointer !important;
+      display: flex !important;
+      align-items: center !important;
+      gap: 6px !important;
+    }
+    .leaflet-control-layers-toggle {
+      background-size: 18px 18px !important;
+      width: 32px !important;
+      height: 32px !important;
+    }
+
+    .terminal-scroll {
+      font-family: 'JetBrains Mono', monospace;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+  </style>
+</head>
+
+<body class="bg-metro-dark text-gray-100 font-sans h-screen flex flex-col overflow-hidden select-none">
+
+  <!-- ========================================================================= -->
+  <!-- 1. HEADER PRINCIPAL (Identidad Lance Wyman / Metro CDMX) -->
+  <!-- ========================================================================= -->
+  <header class="h-16 bg-metro-card border-b border-metro-border px-6 flex items-center justify-between shrink-0 z-30 shadow-md">
+    <!-- Logo Subway Builder México -->
+    <div class="flex items-center space-x-4 cursor-pointer" onclick="goToStep(1)">
+      <!-- SVG Logo Wyman -->
+      <svg class="w-12 h-10 shrink-0" viewBox="0 0 120 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M10 85 V38 C10 18 26 10 46 10 H110" stroke="#F37021" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M26 85 V44 C26 30 36 24 50 24 H110" stroke="#00805B" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M40 85 V50 C40 40 46 36 56 36 H110" stroke="#E4007C" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="28" cy="28" r="4.5" fill="#FFFFFF"/>
+        <circle cx="42" cy="42" r="4" fill="#FFFFFF"/>
+        <circle cx="56" cy="56" r="3.5" fill="#FFFFFF"/>
+      </svg>
+      <div>
+        <div class="flex items-center space-x-2">
+          <span class="font-black text-lg tracking-wider text-white">SUBWAY BUILDER</span>
+          <span class="text-xs bg-metro-orange text-white font-bold px-1.5 py-0.5 rounded tracking-widest">MÉXICO</span>
+          <span class="text-xs text-gray-400 font-mono">v6.3</span>
+        </div>
+        <p class="text-[11px] text-gray-400">Suite Visual de Modelación Demográfica y Gravitatoria</p>
+      </div>
+    </div>
+
+    <!-- Selector de Ciudad & Controles Rápidos -->
+    <div class="flex items-center space-x-4">
+      <div class="flex items-center space-x-2 bg-metro-panel px-3 py-1.5 rounded-lg border border-metro-border">
+        <i data-lucide="map-pin" class="w-4 h-4 text-metro-orange"></i>
+        <select id="citySelect" onchange="onCitySelected(this.value)" class="bg-transparent text-sm font-semibold text-white focus:outline-none cursor-pointer pr-2">
+          <option value="" disabled selected>Cargando ciudades...</option>
+        </select>
+        <button onclick="openNewCityModal()" title="Crear Nueva Ciudad" class="text-gray-400 hover:text-white p-1 hover:bg-metro-border rounded transition">
+          <i data-lucide="plus" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <!-- Indicador de Auto-guardado -->
+      <div id="saveStatusIndicator" class="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono text-emerald-400 bg-emerald-950/40 border border-emerald-800/40" title="Auto-guardado activo en disco y memoria local">
+        <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400" id="saveStatusIcon"></i>
+        <span id="saveStatusText">Guardado</span>
+      </div>
+
+      <!-- Estado de Conexión / Build -->
+      <div id="buildStatusBadge" class="flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-mono bg-gray-800 text-gray-300 border border-gray-700">
+        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+        <span id="buildStatusText">Listo</span>
+      </div>
+
+      <!-- Botón Guardar Global -->
+      <button onclick="saveCurrentCity(false)" id="btnSaveGlobal" class="flex items-center space-x-2 bg-metro-green hover:bg-emerald-600 text-white text-xs font-bold px-3 py-2 rounded-lg transition shadow-md">
+        <i data-lucide="save" class="w-4 h-4"></i>
+        <span>Guardar YAML</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ========================================================================= -->
+  <!-- 2. BARRA DE PASOS (WIZARD STEPPER) -->
+  <!-- ========================================================================= -->
+  <nav class="bg-metro-card border-b border-metro-border px-8 py-2.5 flex items-center justify-between shrink-0 z-20">
+    <div class="flex items-center space-x-2 w-full max-w-5xl mx-auto justify-between">
+      
+      <!-- Paso 1 -->
+      <button onclick="goToStep(1)" id="stepTab-1" class="step-tab flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-bold transition text-metro-orange bg-metro-orange/10 border border-metro-orange/30">
+        <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono bg-metro-orange text-white">1</span>
+        <span>Delimitación & BBOX</span>
+      </button>
+      <div class="h-0.5 w-6 bg-metro-border"></div>
+
+      <!-- Paso 2 -->
+      <button onclick="goToStep(2)" id="stepTab-2" class="step-tab flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-bold transition text-gray-400 hover:text-gray-200">
+        <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono bg-gray-700 text-gray-300">2</span>
+        <span>Fuentes de Datos</span>
+      </button>
+      <div class="h-0.5 w-6 bg-metro-border"></div>
+
+      <!-- Paso 3 -->
+      <button onclick="goToStep(3)" id="stepTab-3" class="step-tab flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-bold transition text-gray-400 hover:text-gray-200">
+        <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono bg-gray-700 text-gray-300">3</span>
+        <span>Macroeconomía</span>
+      </button>
+      <div class="h-0.5 w-6 bg-metro-border"></div>
+
+      <!-- Paso 4 -->
+      <button onclick="goToStep(4)" id="stepTab-4" class="step-tab flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-bold transition text-gray-400 hover:text-gray-200">
+        <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono bg-gray-700 text-gray-300">4</span>
+        <span>POI Studio</span>
+      </button>
+      <div class="h-0.5 w-6 bg-metro-border"></div>
+
+      <!-- Paso 5 -->
+      <button onclick="goToStep(5)" id="stepTab-5" class="step-tab flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-bold transition text-gray-400 hover:text-gray-200">
+        <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono bg-gray-700 text-gray-300">5</span>
+        <span>Compilación</span>
+      </button>
+      <div class="h-0.5 w-6 bg-metro-border"></div>
+
+      <!-- Paso 6 -->
+      <button onclick="goToStep(6)" id="stepTab-6" class="step-tab flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-bold transition text-gray-400 hover:text-gray-200">
+        <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono bg-gray-700 text-gray-300">6</span>
+        <span>Visor & Exportación</span>
+      </button>
+
+    </div>
+  </nav>
+
+  <!-- ========================================================================= -->
+  <!-- 3. CONTENEDOR PRINCIPAL DE PASOS -->
+  <!-- ========================================================================= -->
+  <main class="flex-1 relative overflow-hidden bg-metro-dark w-full h-full">
+
+    <!-- --------------------------------------------------------------------- -->
+    <!-- PASO 1: DELIMITACIÓN ESPACIAL Y METADATOS BBOX -->
+    <!-- --------------------------------------------------------------------- -->
+    <section id="stepView-1" class="step-view absolute inset-0 flex p-4 gap-4 overflow-hidden w-full h-full">
+      <!-- Barra Lateral Colapsable -->
+      <div id="sidebar-1" class="w-96 bg-metro-card border border-metro-border rounded-xl p-5 flex flex-col shrink-0 space-y-4 overflow-y-auto shadow-xl transition-all duration-300 relative z-20">
+        <div class="border-b border-metro-border pb-3 flex justify-between items-start">
+          <div>
+            <h2 class="text-base font-bold text-white flex items-center space-x-2">
+              <i data-lucide="map" class="w-5 h-5 text-metro-orange"></i>
+              <span>Delimitación Urbana</span>
+            </h2>
+            <p class="text-xs text-gray-400 mt-1">Configura el Bounding Box y parámetros cartográficos.</p>
+          </div>
+          <button onclick="toggleSidebar(1)" title="Ocultar panel lateral" class="text-gray-400 hover:text-white p-1 hover:bg-metro-border rounded transition">
+            <i data-lucide="panel-left-close" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+        <div class="space-y-3 text-xs">
+          <div>
+            <label class="block text-gray-400 font-semibold mb-1">Nombre Oficial de la Ciudad</label>
+            <input type="text" id="cfg_city_name" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white focus:border-metro-orange focus:outline-none" placeholder="Cancún y Riviera Norte">
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-gray-400 font-semibold mb-1">Código ISO / IATA</label>
+              <input type="text" id="cfg_city_code" maxlength="4" class="w-full uppercase font-mono bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white focus:border-metro-orange focus:outline-none" placeholder="CUN">
+            </div>
+            <div>
+              <label class="block text-gray-400 font-semibold mb-1">Creador / Autor</label>
+              <input type="text" id="cfg_city_creator" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white focus:border-metro-orange focus:outline-none" placeholder="Keppler">
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-gray-400 font-semibold mb-1">Descripción Breve (&lt; 80 car.)</label>
+            <input type="text" id="cfg_city_desc" maxlength="80" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white focus:border-metro-orange focus:outline-none" placeholder="Zona Metropolitana y Corredor Turístico">
+          </div>
+
+          <!-- Coordenadas BBOX -->
+          <div class="bg-metro-panel p-3 rounded-lg border border-metro-border space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-gray-300">Bounding Box [W, S, E, N]</span>
+              <button onclick="fitMapToBbox()" class="text-[11px] text-metro-orange hover:underline">Centrar Mapa</button>
+            </div>
+            <div class="grid grid-cols-2 gap-2 font-mono text-[11px]">
+              <div>
+                <span class="text-gray-500">Min Lon (Oeste):</span>
+                <input type="number" step="0.001" id="cfg_bbox_0" onchange="updateBboxFromInputs()" class="w-full bg-metro-card border border-metro-border rounded px-2 py-1 text-white">
+              </div>
+              <div>
+                <span class="text-gray-500">Min Lat (Sur):</span>
+                <input type="number" step="0.001" id="cfg_bbox_1" onchange="updateBboxFromInputs()" class="w-full bg-metro-card border border-metro-border rounded px-2 py-1 text-white">
+              </div>
+              <div>
+                <span class="text-gray-500">Max Lon (Este):</span>
+                <input type="number" step="0.001" id="cfg_bbox_2" onchange="updateBboxFromInputs()" class="w-full bg-metro-card border border-metro-border rounded px-2 py-1 text-white">
+              </div>
+              <div>
+                <span class="text-gray-500">Max Lat (Norte):</span>
+                <input type="number" step="0.001" id="cfg_bbox_3" onchange="updateBboxFromInputs()" class="w-full bg-metro-card border border-metro-border rounded px-2 py-1 text-white">
+              </div>
+            </div>
+          </div>
+
+          <!-- Parámetros de Malla y Filtros -->
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-gray-400 font-semibold mb-1">Malla Espacial</label>
+              <select id="cfg_grid_size" class="w-full bg-metro-panel border border-metro-border rounded-lg px-2 py-2 text-white">
+                <option value="0.0018">Fina (~180m)</option>
+                <option value="0.0025" selected>Estándar (~250m)</option>
+                <option value="0.0035">Amplia (~380m)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-gray-400 font-semibold mb-1">Zoom Inicial</label>
+              <input type="number" step="0.5" id="cfg_initial_zoom" value="11.5" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white">
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between pt-2 border-t border-metro-border">
+            <span class="text-gray-300 font-semibold">Incluir Océano / Costera</span>
+            <input type="checkbox" id="cfg_include_ocean" class="w-4 h-4 accent-metro-orange rounded">
+          </div>
+        </div>
+
+        <div class="pt-4 mt-auto">
+          <button onclick="goToStep(2)" class="w-full bg-metro-orange hover:bg-orange-600 text-white font-bold py-2.5 rounded-lg flex items-center justify-center space-x-2 shadow-lg transition">
+            <span>Continuar a Fuentes de Datos</span>
+            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Botón Flotante para Reabrir Barra Lateral -->
+      <button id="btnExpand-1" onclick="toggleSidebar(1)" class="hidden absolute top-6 left-6 z-[1000] bg-metro-card/90 backdrop-blur border border-metro-border text-white p-2 rounded-xl shadow-2xl hover:bg-metro-panel transition">
+        <i data-lucide="panel-left-open" class="w-5 h-5 text-metro-orange"></i>
+      </button>
+
+      <!-- Mapa Interactivo Leaflet Contenido -->
+      <div class="flex-1 h-full bg-metro-card border border-metro-border rounded-xl overflow-hidden relative shadow-xl z-0">
+        <div id="mapBbox" class="w-full h-full"></div>
+        <div class="absolute bottom-4 left-4 bg-metro-card/90 backdrop-blur border border-metro-border px-3.5 py-2 rounded-lg text-xs text-gray-300 z-[999] shadow-lg pointer-events-none">
+          <span class="font-bold text-metro-orange">Tip:</span> Arrastra las esquinas del rectángulo para calibrar el BBOX.
+        </div>
+      </div>
+    </section>
+
+    <!-- --------------------------------------------------------------------- -->
+    <!-- PASO 2: GESTOR Y CARGA MANUAL DE FUENTES INEGI / OSM -->
+    <!-- --------------------------------------------------------------------- -->
+    <section id="stepView-2" class="step-view hidden absolute inset-0 p-6 flex flex-col md:flex-row gap-6 overflow-y-auto w-full h-full">
+      <div class="w-full md:w-1/2 flex flex-col space-y-4">
+        <div class="bg-metro-card border border-metro-border rounded-xl p-5 shadow-xl">
+          <div class="flex justify-between items-start mb-2">
+            <h2 class="text-base font-bold text-white flex items-center space-x-2">
+              <i data-lucide="database" class="w-5 h-5 text-metro-green"></i>
+              <span>Estado de Fuentes de Datos (INEGI / OSM)</span>
+            </h2>
+            <button onclick="openDataSourcesModal()" class="px-2.5 py-1 bg-metro-panel hover:bg-metro-border border border-metro-border text-metro-orange text-xs font-bold rounded-lg flex items-center space-x-1.5 transition">
+              <i data-lucide="help-circle" class="w-3.5 h-3.5"></i>
+              <span>¿Dónde descargar?</span>
+            </button>
+          </div>
+          <p class="text-xs text-gray-400 mb-3">El motor soporta **múltiples estados** simultáneos (ej. ZMVM: CDMX 09 + EdoMex 15). Busca en <code class="text-metro-orange font-mono">data/</code> o permite arrastrar varios archivos.</p>
+
+          <div class="space-y-3" id="dataStatusList">
+            <!-- Renderizado dinámico -->
+          </div>
+        </div>
+
+        <div class="flex justify-between items-center pt-2">
+          <button onclick="goToStep(1)" class="px-4 py-2 bg-metro-panel hover:bg-metro-border text-gray-300 text-xs font-bold rounded-lg transition">
+            &larr; Volver
+          </button>
+          <button onclick="goToStep(3)" class="px-6 py-2.5 bg-metro-green hover:bg-emerald-600 text-white text-xs font-bold rounded-lg transition shadow-lg flex items-center space-x-2">
+            <span>Continuar a Macroeconomía</span>
+            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Zona de Carga Manual (Drag & Drop) -->
+      <div class="w-full md:w-1/2 flex flex-col space-y-4">
+        <div class="bg-metro-card border border-metro-border rounded-xl p-6 shadow-xl flex flex-col flex-1">
+          <h3 class="text-sm font-bold text-white flex items-center space-x-2 mb-2">
+            <i data-lucide="upload-cloud" class="w-5 h-5 text-metro-pink"></i>
+            <span>Carga Manual de Archivos</span>
+          </h3>
+          <p class="text-xs text-gray-400 mb-4">Arrastra tus archivos de microdatos censales (DENUE, RESAGEBURB, Censos Económicos o OSM PBF). Se guardarán en <code class="text-metro-orange font-mono">data/</code>.</p>
+
+          <!-- Dropzone -->
+          <div id="dropzone" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)" onclick="document.getElementById('manualFileInput').click()" class="border-2 border-dashed border-metro-border hover:border-metro-pink bg-metro-panel/50 rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer transition flex-1 min-h-[220px]">
+            <input type="file" id="manualFileInput" multiple class="hidden" onchange="handleFileSelect(event)">
+            <i data-lucide="file-up" class="w-12 h-12 text-metro-pink mb-3"></i>
+            <span class="text-sm font-bold text-white mb-1">Arrastra archivos aquí o haz clic para examinar</span>
+            <span class="text-xs text-gray-400 text-center">Formatos soportados: .csv, .zip, .osm.pbf, .geojson, .shp</span>
+          </div>
+
+          <!-- Barra de Progreso de Subida -->
+          <div id="uploadProgressContainer" class="hidden mt-4 space-y-2">
+            <div class="flex justify-between text-xs font-mono">
+              <span id="uploadFileName" class="text-gray-300">Subiendo archivo...</span>
+              <span id="uploadPercent" class="text-metro-pink">0%</span>
+            </div>
+            <div class="w-full bg-metro-panel rounded-full h-2 overflow-hidden">
+              <div id="uploadProgressBar" class="bg-metro-pink h-full w-0 transition-all duration-200"></div>
+            </div>
+          </div>
+
+          <!-- Archivos Subidos Recientemente -->
+          <div class="mt-4">
+            <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Archivos Subidos en esta Sesión:</h4>
+            <ul id="uploadedFilesList" class="text-xs space-y-1 text-gray-300 font-mono max-h-32 overflow-y-auto">
+              <li class="text-gray-500 italic">No hay archivos cargados recientemente.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- --------------------------------------------------------------------- -->
+    <!-- PASO 3: CALIBRACIÓN MACROECONÓMICA Y CONAPO -->
+    <!-- --------------------------------------------------------------------- -->
+    <section id="stepView-3" class="step-view hidden absolute inset-0 p-6 flex flex-col md:flex-row gap-6 overflow-y-auto w-full h-full">
+      <div class="w-full md:w-1/2 bg-metro-card border border-metro-border rounded-xl p-5 shadow-xl flex flex-col space-y-4">
+        <div class="border-b border-metro-border pb-3">
+          <h2 class="text-base font-bold text-white flex items-center space-x-2">
+            <i data-lucide="sliders" class="w-5 h-5 text-metro-orange"></i>
+            <span>Parámetros Macroeconómicos (ENOE / Gravitatorio)</span>
+          </h2>
+          <p class="text-xs text-gray-400 mt-1">Calibra las tasas de empleo, informalidad y fricción espacial $\beta$.</p>
+        </div>
+
+        <div class="space-y-4 text-xs">
+          <!-- Tasa PEA -->
+          <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border">
+            <div class="flex justify-between font-bold mb-1">
+              <span class="text-gray-300">Tasa de Participación Laboral (PEA)</span>
+              <span id="val_tasa_pea" class="text-metro-orange font-mono">66.44%</span>
+            </div>
+            <input type="range" min="0.40" max="0.80" step="0.005" id="cfg_tasa_pea" oninput="document.getElementById('val_tasa_pea').innerText = (this.value * 100).toFixed(2) + '%'" class="w-full accent-metro-orange">
+            <p class="text-[11px] text-gray-500 mt-1">Derivada de la Encuesta Nacional de Ocupación y Empleo (ENOE) para la entidad.</p>
+          </div>
+
+          <!-- Informalidad TIL1 -->
+          <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border">
+            <div class="flex justify-between font-bold mb-1">
+              <span class="text-gray-300">Tasa de Informalidad Laboral (TIL1)</span>
+              <span id="val_til_1" class="text-metro-green font-mono">44.97%</span>
+            </div>
+            <input type="range" min="0.20" max="0.75" step="0.005" id="cfg_til_1" oninput="document.getElementById('val_til_1').innerText = (this.value * 100).toFixed(2) + '%'" class="w-full accent-metro-green">
+            <p class="text-[11px] text-gray-500 mt-1">Ajusta el multiplicador de microempresas formales vs informales.</p>
+          </div>
+
+          <!-- Beta Gravitatorio -->
+          <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border">
+            <div class="flex justify-between font-bold mb-1">
+              <span class="text-gray-300">Fricción Espacial Gravitatoria (&beta;)</span>
+              <span id="val_gravity_beta" class="text-metro-pink font-mono">0.120</span>
+            </div>
+            <input type="range" min="0.05" max="0.25" step="0.005" id="cfg_gravity_beta" oninput="document.getElementById('val_gravity_beta').innerText = parseFloat(this.value).toFixed(3)" class="w-full accent-metro-pink">
+            <p class="text-[11px] text-gray-500 mt-1">Determina el decaimiento de viajes por distancia $f(d_{ij}) = \exp(-\beta \cdot d_{ij})$.</p>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-gray-400 font-semibold mb-1">Distancia Máx. (km)</label>
+              <input type="number" id="cfg_max_distance_km" value="50.0" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white font-mono">
+            </div>
+            <div>
+              <label class="block text-gray-400 font-semibold mb-1">Máx. Cohorte Pop</label>
+              <input type="number" id="cfg_max_pop_size" value="150" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white font-mono">
+            </div>
+          </div>
+        </div>
+
+        <div class="pt-4 mt-auto flex justify-between">
+          <button onclick="goToStep(2)" class="px-4 py-2 bg-metro-panel hover:bg-metro-border text-gray-300 text-xs font-bold rounded-lg transition">
+            &larr; Volver
+          </button>
+          <button onclick="goToStep(4)" class="px-6 py-2.5 bg-metro-orange hover:bg-orange-600 text-white text-xs font-bold rounded-lg transition shadow-lg flex items-center space-x-2">
+            <span>Continuar a POI Studio</span>
+            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Proyecciones Demográficas CONAPO -->
+      <div class="w-full md:w-1/2 bg-metro-card border border-metro-border rounded-xl p-5 shadow-xl flex flex-col space-y-4">
+        <div class="border-b border-metro-border pb-3 flex justify-between items-center">
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center space-x-2">
+              <i data-lucide="trending-up" class="w-5 h-5 text-metro-green"></i>
+              <span>Proyecciones CONAPO por Municipio</span>
+            </h3>
+            <p class="text-xs text-gray-400 mt-1">Factores de sincronización intercensal $\text{Pob}_{2026} / \text{Pob}_{2020}$.</p>
+          </div>
+          <button onclick="addGrowthFactorRow()" class="px-2.5 py-1 bg-metro-green hover:bg-emerald-600 text-white text-xs font-bold rounded flex items-center space-x-1">
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+            <span>Añadir</span>
+          </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto">
+          <table class="w-full text-xs text-left">
+            <thead class="text-gray-400 bg-metro-panel uppercase font-mono text-[10px]">
+              <tr>
+                <th class="p-2.5">Clave Municipio (EEMMM)</th>
+                <th class="p-2.5">Factor de Crecimiento</th>
+                <th class="p-2.5 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="growthFactorsTableBody" class="divide-y divide-metro-border font-mono">
+              <!-- Renderizado dinámico -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- --------------------------------------------------------------------- -->
+    <!-- PASO 4: POI STUDIO INTEGRADO (CALIBRADOR DE RADIOS Y ABSORCIÓN) -->
+    <!-- --------------------------------------------------------------------- -->
+    <section id="stepView-4" class="step-view hidden absolute inset-0 p-4 flex gap-4 overflow-hidden w-full h-full">
+      <!-- Panel de Lista de POIs Colapsable -->
+      <div id="sidebar-4" class="w-96 bg-metro-card border border-metro-border rounded-xl p-5 flex flex-col shrink-0 shadow-xl overflow-hidden transition-all duration-300 relative z-20">
+        <div class="flex justify-between items-center border-b border-metro-border pb-3 shrink-0">
+          <div>
+            <h2 class="text-base font-bold text-white flex items-center space-x-2">
+              <i data-lucide="map-pin" class="w-5 h-5 text-metro-orange"></i>
+              <span>Puntos de Interés (POIs)</span>
+            </h2>
+            <span id="poiCountBadge" class="text-xs text-gray-400">0 POIs configurados</span>
+          </div>
+          <div class="flex items-center space-x-1">
+            <button onclick="openNewPoiModal()" class="px-2.5 py-1.5 bg-metro-orange hover:bg-orange-600 text-white text-xs font-bold rounded-lg flex items-center space-x-1 shadow transition">
+              <i data-lucide="plus" class="w-4 h-4"></i>
+              <span>Nuevo POI</span>
+            </button>
+            <button onclick="toggleSidebar(4)" title="Ocultar panel lateral" class="text-gray-400 hover:text-white p-1 hover:bg-metro-border rounded transition ml-1">
+              <i data-lucide="panel-left-close" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Lista scrolleable de POIs -->
+        <div id="poiListContainer" class="flex-1 overflow-y-auto py-3 space-y-2.5">
+          <!-- Renderizado dinámico de tarjetas de POIs -->
+        </div>
+
+        <!-- Botones de Navegación -->
+        <div class="pt-3 border-t border-metro-border flex justify-between shrink-0">
+          <button onclick="goToStep(3)" class="px-4 py-2 bg-metro-panel hover:bg-metro-border text-gray-300 text-xs font-bold rounded-lg transition">
+            &larr; Volver
+          </button>
+          <button onclick="goToStep(5)" class="px-5 py-2 bg-metro-orange hover:bg-orange-600 text-white text-xs font-bold rounded-lg transition shadow flex items-center space-x-2">
+            <span>Ir a Compilación</span>
+            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Botón Flotante para Reabrir Barra Lateral -->
+      <button id="btnExpand-4" onclick="toggleSidebar(4)" class="hidden absolute top-6 left-6 z-[1000] bg-metro-card/90 backdrop-blur border border-metro-border text-white p-2 rounded-xl shadow-2xl hover:bg-metro-panel transition">
+        <i data-lucide="panel-left-open" class="w-5 h-5 text-metro-orange"></i>
+      </button>
+
+      <!-- Mapa POI Studio Contenido -->
+      <div class="flex-1 h-full bg-metro-card border border-metro-border rounded-xl overflow-hidden relative shadow-xl z-0">
+        <div id="mapPoi" class="w-full h-full"></div>
+        <div class="absolute bottom-4 left-4 bg-metro-card/90 backdrop-blur border border-metro-border px-3.5 py-2 rounded-lg text-xs text-gray-300 z-[999] shadow-lg flex items-center space-x-3 pointer-events-none">
+          <span class="flex items-center space-x-1"><span class="w-3 h-3 rounded-full bg-amber-500 inline-block"></span> <span>POIs Especiales</span></span>
+          <span class="flex items-center space-x-1"><span class="w-3 h-3 rounded-full bg-rose-500/40 border border-rose-500 inline-block"></span> <span>Radio Absorción</span></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- --------------------------------------------------------------------- -->
+    <!-- PASO 5: COMPILADOR Y TERMINAL DE TELEMETRÍA EN VIVO -->
+    <!-- --------------------------------------------------------------------- -->
+    <section id="stepView-5" class="step-view hidden absolute inset-0 p-6 flex flex-col gap-6 overflow-hidden w-full h-full">
+      <!-- Control Superior de Ejecución -->
+      <div class="bg-metro-card border border-metro-border rounded-xl p-5 flex flex-col md:flex-row justify-between items-center gap-4 shrink-0 shadow-xl">
+        <div>
+          <h2 class="text-lg font-bold text-white flex items-center space-x-2">
+            <i data-lucide="terminal" class="w-5 h-5 text-metro-orange"></i>
+            <span>Compilación y Generación en Vivo</span>
+          </h2>
+          <p class="text-xs text-gray-400 mt-0.5">Ejecuta el pipeline de Subway Builder México transmitiendo la telemetría en tiempo real.</p>
+        </div>
+
+        <div class="flex items-center space-x-3">
+          <label class="flex items-center space-x-2 text-xs text-gray-300 cursor-pointer">
+            <input type="checkbox" id="chkSkipMap" class="w-4 h-4 accent-metro-orange rounded">
+            <span>Omitir mapa (--skip-map)</span>
+          </label>
+
+          <button onclick="startBuild()" id="btnStartBuild" class="px-5 py-2.5 bg-metro-orange hover:bg-orange-600 text-white text-xs font-bold rounded-lg shadow-lg flex items-center space-x-2 transition">
+            <i data-lucide="play" class="w-4 h-4" id="iconStartBuild"></i>
+            <span id="textStartBuild">Iniciar Compilación</span>
+          </button>
+
+          <button onclick="goToStep(6)" id="btnGoToResults" class="hidden px-5 py-2.5 bg-metro-green hover:bg-emerald-600 text-white text-xs font-bold rounded-lg shadow-lg flex items-center space-x-2 transition">
+            <span>Ver Demanda &rarr;</span>
+            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Barra de Progreso y Fases -->
+      <div class="bg-metro-card border border-metro-border rounded-xl p-4 shrink-0 space-y-2 shadow-xl">
+        <div class="flex justify-between text-xs font-bold">
+          <span id="buildStepLabel" class="text-gray-300">Estado: En espera</span>
+          <span id="buildPercentLabel" class="text-metro-orange font-mono">0%</span>
+        </div>
+        <div class="w-full bg-metro-panel rounded-full h-3 overflow-hidden border border-metro-border">
+          <div id="buildProgressBar" class="h-full bg-gradient-to-r from-metro-orange via-metro-green to-metro-pink w-0 transition-all duration-300"></div>
+        </div>
+      </div>
+
+      <!-- Terminal de Consola Vintage Wyman -->
+      <div class="flex-1 bg-black/95 border border-metro-border rounded-xl p-4 font-mono text-xs flex flex-col overflow-hidden shadow-2xl relative">
+        <div class="flex justify-between items-center pb-2 border-b border-gray-800 text-gray-400 shrink-0">
+          <span class="flex items-center space-x-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-yellow-500 inline-block"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-green-500 inline-block"></span>
+            <span class="text-[11px] ml-2 text-gray-500">pipeline_stdout_stream.log</span>
+          </span>
+          <button onclick="clearTerminal()" class="text-[11px] hover:text-white transition">Limpiar Consola</button>
+        </div>
+        <div id="terminalOutput" class="flex-1 overflow-y-auto pt-3 space-y-1 terminal-scroll text-green-400">
+          <p class="text-gray-500">// Terminal lista. Haz clic en 'Iniciar Compilación' para arrancar el pipeline.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- --------------------------------------------------------------------- -->
+    <!-- PASO 6: VISOR DE DEMANDA RESIDENCIAL/EMPLEO Y EXPORTACIÓN -->
+    <!-- --------------------------------------------------------------------- -->
+    <section id="stepView-6" class="step-view hidden absolute inset-0 p-4 flex gap-4 overflow-hidden w-full h-full">
+      <!-- Panel de Estadísticas y Descarga Colapsable -->
+      <div id="sidebar-6" class="w-96 bg-metro-card border border-metro-border rounded-xl p-5 flex flex-col shrink-0 shadow-xl space-y-4 overflow-y-auto transition-all duration-300 relative z-20">
+        <div class="border-b border-metro-border pb-3 flex justify-between items-start">
+          <div>
+            <h2 class="text-base font-bold text-white flex items-center space-x-2">
+              <i data-lucide="check-circle-2" class="w-5 h-5 text-metro-green"></i>
+              <span>Resultados & Empaquetado</span>
+            </h2>
+            <p class="text-xs text-gray-400 mt-1">Validación y descarga de paquete .zip.</p>
+          </div>
+          <button onclick="toggleSidebar(6)" title="Ocultar panel lateral" class="text-gray-400 hover:text-white p-1 hover:bg-metro-border rounded transition">
+            <i data-lucide="panel-left-close" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+        <!-- Tarjetas de Métricas -->
+        <div class="space-y-2.5 text-xs font-mono">
+          <div class="bg-metro-panel p-3 rounded-lg border border-metro-border">
+            <span class="text-gray-400 block text-[11px]">Puntos de Demanda Generados</span>
+            <span id="metricDemandPoints" class="text-lg font-bold text-white">0</span>
+          </div>
+
+          <div class="bg-metro-panel p-3 rounded-lg border border-metro-border">
+            <span class="text-gray-400 block text-[11px]">Población Económicamente Activa (PEA)</span>
+            <span id="metricTotalPea" class="text-lg font-bold text-metro-green">0</span>
+          </div>
+
+          <div class="bg-metro-panel p-3 rounded-lg border border-metro-border">
+            <span class="text-gray-400 block text-[11px]">Conservación de Masa (&sum; Tij &equiv; PEA)</span>
+            <span id="metricMassBalance" class="text-sm font-bold text-emerald-400">100.00% &check;</span>
+          </div>
+        </div>
+
+        <!-- Capas del Mapa Visor -->
+        <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border space-y-2 text-xs">
+          <span class="font-bold text-gray-300 block mb-1">Capas Visibles</span>
+          <label class="flex items-center space-x-2 text-blue-400 cursor-pointer">
+            <input type="checkbox" id="chkLayerResidents" checked onchange="toggleDemandLayers()" class="w-4 h-4 accent-blue-500 rounded">
+            <span>Orígenes Residenciales (Azul)</span>
+          </label>
+          <label class="flex items-center space-x-2 text-rose-400 cursor-pointer">
+            <input type="checkbox" id="chkLayerJobs" checked onchange="toggleDemandLayers()" class="w-4 h-4 accent-rose-500 rounded">
+            <span>Destinos de Empleo (Rojo)</span>
+          </label>
+          <label class="flex items-center space-x-2 text-amber-400 cursor-pointer">
+            <input type="checkbox" id="chkLayerPois" checked onchange="toggleDemandLayers()" class="w-4 h-4 accent-amber-500 rounded">
+            <span>POIs y Aeropuertos (Dorado)</span>
+          </label>
+        </div>
+
+        <!-- Botón de Descarga -->
+        <div class="pt-4 mt-auto space-y-2">
+          <button onclick="downloadCityPackage()" class="w-full bg-metro-green hover:bg-emerald-600 text-white font-bold py-3 rounded-lg flex items-center justify-center space-x-2 shadow-lg transition">
+            <i data-lucide="download" class="w-5 h-5"></i>
+            <span>Descargar Paquete (.zip)</span>
+          </button>
+          <button onclick="goToStep(1)" class="w-full bg-metro-panel hover:bg-metro-border text-gray-300 text-xs font-bold py-2 rounded-lg transition">
+            Volver al Inicio
+          </button>
+        </div>
+      </div>
+
+      <!-- Botón Flotante para Reabrir Barra Lateral -->
+      <button id="btnExpand-6" onclick="toggleSidebar(6)" class="hidden absolute top-6 left-6 z-[1000] bg-metro-card/90 backdrop-blur border border-metro-border text-white p-2 rounded-xl shadow-2xl hover:bg-metro-panel transition">
+        <i data-lucide="panel-left-open" class="w-5 h-5 text-metro-orange"></i>
+      </button>
+
+      <!-- Mapa Visor Final Contenido -->
+      <div class="flex-1 h-full bg-metro-card border border-metro-border rounded-xl overflow-hidden relative shadow-xl z-0">
+        <div id="mapDemand" class="w-full h-full"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- MODALES: NUEVA CIUDAD Y NUEVO POI -->
+  <!-- ========================================================================= -->
+  <!-- Modal Nueva Ciudad -->
+  <div id="modalNewCity" class="hidden fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-metro-card border border-metro-border rounded-xl p-6 w-full max-w-md shadow-2xl space-y-4">
+      <h3 class="text-base font-bold text-white flex items-center space-x-2">
+        <i data-lucide="plus-circle" class="w-5 h-5 text-metro-orange"></i>
+        <span>Crear Nueva Ciudad</span>
+      </h3>
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-gray-400 font-semibold mb-1">Código ISO / Clave (3 letras)</label>
+          <input type="text" id="new_city_code" maxlength="4" class="w-full uppercase font-mono bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white" placeholder="GDL">
+        </div>
+        <div>
+          <label class="block text-gray-400 font-semibold mb-1">Nombre Oficial</label>
+          <input type="text" id="new_city_name" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white" placeholder="Guadalajara y Zapopan">
+        </div>
+        <div>
+          <label class="block text-gray-400 font-semibold mb-1">Descripción Breve</label>
+          <input type="text" id="new_city_desc" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white" placeholder="Área Metropolitana de Guadalajara">
+        </div>
+      </div>
+      <div class="flex justify-end space-x-3 pt-3">
+        <button onclick="closeNewCityModal()" class="px-4 py-2 bg-metro-panel text-gray-300 text-xs font-bold rounded-lg">Cancelar</button>
+        <button onclick="submitCreateCity()" class="px-5 py-2 bg-metro-orange text-white text-xs font-bold rounded-lg shadow">Crear Ciudad</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Nuevo/Editar POI -->
+  <div id="modalPoi" class="hidden fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-metro-card border border-metro-border rounded-xl p-6 w-full max-w-md shadow-2xl space-y-4">
+      <h3 id="modalPoiTitle" class="text-base font-bold text-white flex items-center space-x-2">
+        <i data-lucide="map-pin" class="w-5 h-5 text-metro-orange"></i>
+        <span>Editar POI</span>
+      </h3>
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-gray-400 font-semibold mb-1">Identificador ID (ej. AIR_Cancún, UNI_UNAM)</label>
+          <input type="text" id="poi_id" class="w-full font-mono bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white" placeholder="AIR_Nombre">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-gray-400 font-semibold mb-1">Nombre en Español</label>
+            <input type="text" id="poi_name_es" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white">
+          </div>
+          <div>
+            <label class="block text-gray-400 font-semibold mb-1">Nombre en Inglés</label>
+            <input type="text" id="poi_name_en" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-gray-400 font-semibold mb-1">Tipo Canónico</label>
+            <select id="poi_type" class="w-full bg-metro-panel border border-metro-border rounded-lg px-2 py-2 text-white">
+              <option value="airport">Aeropuerto (airport)</option>
+              <option value="university">Universidad (university)</option>
+              <option value="shopping_center">Centro Comercial</option>
+              <option value="sports_facility">Estadio / Deportivo</option>
+              <option value="resort">Zona Hotelera / Resort</option>
+              <option value="hospital">Complejo Médico</option>
+              <option value="transit_station">Terminal Central</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-gray-400 font-semibold mb-1">Modo de Absorción</label>
+            <select id="poi_mode" class="w-full bg-metro-panel border border-metro-border rounded-lg px-2 py-2 text-white">
+              <option value="MAX" selected>MAX (Absorbe DENUE)</option>
+              <option value="BOOST">BOOST (Aditivo)</option>
+              <option value="REPLACE">REPLACE (Sobrescribe)</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-gray-400 font-semibold mb-1">Empleos / Pasajeros</label>
+            <input type="number" id="poi_jobs" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white font-mono" placeholder="10000">
+          </div>
+          <div>
+            <label class="block text-gray-400 font-semibold mb-1">Radio Físico (metros)</label>
+            <input type="number" id="poi_radius" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white font-mono" placeholder="750">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3 font-mono text-[11px]">
+          <div>
+            <label class="block text-gray-400 font-semibold mb-1">Longitud</label>
+            <input type="number" step="0.00001" id="poi_loc_lon" class="w-full bg-metro-panel border border-metro-border rounded-lg px-2 py-1.5 text-white">
+          </div>
+          <div>
+            <label class="block text-gray-400 font-semibold mb-1">Latitud</label>
+            <input type="number" step="0.00001" id="poi_loc_lat" class="w-full bg-metro-panel border border-metro-border rounded-lg px-2 py-1.5 text-white">
+          </div>
+        </div>
+      </div>
+      <div class="flex justify-between space-x-3 pt-3">
+        <button id="btnDeletePoi" onclick="deleteCurrentPoiModal()" class="px-3 py-2 bg-rose-900/50 hover:bg-rose-800 text-rose-300 text-xs font-bold rounded-lg">Eliminar</button>
+        <div class="flex space-x-2">
+          <button onclick="closePoiModal()" class="px-4 py-2 bg-metro-panel text-gray-300 text-xs font-bold rounded-lg">Cancelar</button>
+          <button onclick="submitPoiModal()" class="px-5 py-2 bg-metro-orange text-white text-xs font-bold rounded-lg shadow">Guardar POI</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Guía de Fuentes de Datos INEGI / CONAPO -->
+  <div id="modalDataSources" class="hidden fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-metro-card border border-metro-border rounded-xl p-6 w-full max-w-2xl shadow-2xl space-y-4 max-h-[85vh] flex flex-col">
+      <div class="flex justify-between items-start border-b border-metro-border pb-3 shrink-0">
+        <div>
+          <h3 class="text-base font-bold text-white flex items-center space-x-2">
+            <i data-lucide="book-open" class="w-5 h-5 text-metro-orange"></i>
+            <span>Guía de Descargas Oficiales (INEGI / CONAPO)</span>
+          </h3>
+          <p class="text-xs text-gray-400 mt-0.5">Enlaces directos a los portales oficiales de datos abiertos de México.</p>
+        </div>
+        <button onclick="closeDataSourcesModal()" class="text-gray-400 hover:text-white p-1 hover:bg-metro-border rounded">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="flex-1 overflow-y-auto space-y-3.5 text-xs pr-1">
+        <!-- 1. DENUE -->
+        <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border space-y-1">
+          <div class="flex justify-between items-center">
+            <span class="font-bold text-metro-orange">1. DENUE (Directorio de Establecimientos Económicos)</span>
+            <a href="https://www.inegi.org.mx/app/descarga/" target="_blank" class="text-[11px] bg-metro-orange/20 text-metro-orange hover:bg-metro-orange hover:text-white px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
+              <span>Abrir INEGI</span> <i data-lucide="external-link" class="w-3 h-3"></i>
+            </a>
+          </div>
+          <p class="text-gray-300">Descarga masiva por Entidad Federativa en formato CSV o ZIP.</p>
+          <p class="text-gray-500 font-mono text-[11px]">Archivo esperado: <code>denue_inegi_*.csv</code> (ej. <code>09</code> CDMX, <code>15</code> EdoMex, <code>23</code> Q. Roo).</p>
+        </div>
+
+        <!-- 2. CPV 2020 -->
+        <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border space-y-1">
+          <div class="flex justify-between items-center">
+            <span class="font-bold text-metro-green">2. Censo de Población y Vivienda 2020 (Microdatos Manzanas)</span>
+            <a href="https://www.inegi.org.mx/programas/ccpv/2020/#microdatos" target="_blank" class="text-[11px] bg-metro-green/20 text-metro-green hover:bg-metro-green hover:text-white px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
+              <span>Abrir INEGI</span> <i data-lucide="external-link" class="w-3 h-3"></i>
+            </a>
+          </div>
+          <p class="text-gray-300">Ve a <em>Microdatos &rarr; Resultados por AGEB y Manzana Urbana</em> y selecciona la entidad.</p>
+          <p class="text-gray-500 font-mono text-[11px]">Archivo esperado: <code>RESAGEBURB_*.csv</code> (ej. <code>RESAGEBURB_09CSV20.csv</code>).</p>
+        </div>
+
+        <!-- 3. CE 2024 -->
+        <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border space-y-1">
+          <div class="flex justify-between items-center">
+            <span class="font-bold text-metro-pink">3. Censos Económicos 2024 (SAIC - Personal Ocupado H001A)</span>
+            <a href="https://www.inegi.org.mx/app/saic/" target="_blank" class="text-[11px] bg-metro-pink/20 text-metro-pink hover:bg-metro-pink hover:text-white px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
+              <span>Abrir SAIC</span> <i data-lucide="external-link" class="w-3 h-3"></i>
+            </a>
+          </div>
+          <p class="text-gray-300">Consulta de variable H001A Personal Ocupado Total por municipio.</p>
+          <p class="text-gray-500 font-mono text-[11px]">Archivo esperado: <code>tr_ce_*.csv</code> o <code>SAIC_Exporta_*.csv</code>.</p>
+        </div>
+
+        <!-- 4. CONAPO -->
+        <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border space-y-1">
+          <div class="flex justify-between items-center">
+            <span class="font-bold text-blue-400">4. Proyecciones Demográficas CONAPO (2020-2050)</span>
+            <a href="https://datos.gob.mx/busca/dataset/proyecciones-de-la-poblacion-de-mexico-y-de-las-entidades-federativas-2020-2050" target="_blank" class="text-[11px] bg-blue-500/20 text-blue-400 hover:bg-blue-600 hover:text-white px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
+              <span>Abrir Datos.gob.mx</span> <i data-lucide="external-link" class="w-3 h-3"></i>
+            </a>
+          </div>
+          <p class="text-gray-300">Tabulado municipal para cálculo del factor de crecimiento intercensal.</p>
+          <p class="text-gray-500 font-mono text-[11px]">Archivo esperado: <code>data-*.csv</code> o <code>*conapo*.csv</code>.</p>
+        </div>
+
+        <!-- 5. OpenStreetMap -->
+        <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border space-y-1">
+          <div class="flex justify-between items-center">
+            <span class="font-bold text-amber-400">5. Cartografía OpenStreetMap (PBF México)</span>
+            <a href="https://download.geofabrik.de/central-america/mexico.html" target="_blank" class="text-[11px] bg-amber-500/20 text-amber-400 hover:bg-amber-500 hover:text-white px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
+              <span>Abrir Geofabrik</span> <i data-lucide="external-link" class="w-3 h-3"></i>
+            </a>
+          </div>
+          <p class="text-gray-300">Extracto OSM para toda la República Mexicana.</p>
+          <p class="text-gray-500 font-mono text-[11px]">Archivo esperado: <code>mexico-latest.osm.pbf</code>.</p>
+        </div>
+
+        <!-- Zonas Metropolitanas Multi-Estado -->
+        <div class="bg-amber-950/30 border border-amber-800/40 p-3.5 rounded-lg text-amber-200">
+          <strong class="block text-white mb-1">🗺️ Zonas Metropolitanas Interestatales / Multi-Estado:</strong>
+          <p>Para zonas conurbadas que cruzan límites estatales (ej. ZMVM, La Laguna, Puebla-Tlaxcala, Puerto Vallarta), puedes colocar los archivos de los 2 o 3 estados correspondientes. El motor los concatenará automáticamente y los filtrará por el BBOX.</p>
+        </div>
+      </div>
+
+      <div class="flex justify-end pt-3 border-t border-metro-border shrink-0">
+        <button onclick="closeDataSourcesModal()" class="px-5 py-2 bg-metro-panel text-white text-xs font-bold rounded-lg hover:bg-metro-border transition">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- SISTEMA REACTIVO JAVASCRIPT & ESTADO DEL WIZARD -->
+  <!-- ========================================================================= -->
+  <script>
+    // Configuración de Mapas y API Key de CartoDB
+    const CARTO_API_KEY = "cb1_2ocu_1_608c083d4c57c5e5c398b9b4";
+
+    // Estado de la aplicación
+    let currentCityFile = "cities/cancun.yaml";
+    let cityData = { city: {}, macroeconomics: {}, pois: [], places: [] };
+    let currentStep = 1;
+    let mapBbox = null, mapPoi = null, mapDemand = null;
+    let bboxRectangle = null;
+    let poiMarkersGroup = null;
+    let demandLayers = { residents: null, jobs: null, pois: null };
+    let editingPoiIndex = -1;
+    let sseSource = null;
+
+    let bboxHandlesGroup = null;
+    let bboxCornerMarkers = { NW: null, NE: null, SE: null, SW: null };
+
+    // Inicialización al cargar la ventana
+    window.addEventListener('DOMContentLoaded', async () => {
+      lucide.createIcons();
+      initMaps();
+      const urlParams = new URLSearchParams(window.location.search);
+      const cityParam = urlParams.get('city');
+      if (cityParam) {
+        currentCityFile = cityParam;
+      }
+      await fetchCitiesList();
+      await loadCityData(currentCityFile);
+      initSSE();
+    });
+
+    // -------------------------------------------------------------------------
+    // COLAPSO / EXPANSIÓN DE BARRAS LATERALES
+    // -------------------------------------------------------------------------
+    function toggleSidebar(step) {
+      const sidebar = document.getElementById(`sidebar-${step}`);
+      const btnExpand = document.getElementById(`btnExpand-${step}`);
+      if (!sidebar) return;
+
+      const isCollapsed = sidebar.classList.contains('hidden');
+      if (isCollapsed) {
+        sidebar.classList.remove('hidden');
+        if (btnExpand) btnExpand.classList.add('hidden');
+      } else {
+        sidebar.classList.add('hidden');
+        if (btnExpand) btnExpand.classList.remove('hidden');
+      }
+
+      // Reajustar tamaño de mapas
+      setTimeout(() => {
+        if (step === 1 && mapBbox) mapBbox.invalidateSize();
+        if (step === 4 && mapPoi) mapPoi.invalidateSize();
+        if (step === 6 && mapDemand) mapDemand.invalidateSize();
+      }, 150);
+      lucide.createIcons();
+    }
+
+    // -------------------------------------------------------------------------
+    // NAVEGACIÓN ENTRE PASOS
+    // -------------------------------------------------------------------------
+    function goToStep(step) {
+      currentStep = step;
+      document.querySelectorAll('.step-view').forEach((el, idx) => {
+        el.classList.toggle('hidden', idx + 1 !== step);
+      });
+      document.querySelectorAll('.step-tab').forEach((el, idx) => {
+        const isActive = idx + 1 === step;
+        el.className = `step-tab flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+          isActive 
+            ? 'text-metro-orange bg-metro-orange/10 border border-metro-orange/30' 
+            : 'text-gray-400 hover:text-gray-200'
+        }`;
+        const badge = el.querySelector('span:first-child');
+        if (badge) {
+          badge.className = `w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono ${
+            isActive ? 'bg-metro-orange text-white' : 'bg-gray-700 text-gray-300'
+          }`;
+        }
+      });
+
+      // Recalcular tamaño de mapas al cambiar de pestaña
+      setTimeout(() => {
+        if (step === 1 && mapBbox) mapBbox.invalidateSize();
+        if (step === 4 && mapPoi) {
+          mapPoi.invalidateSize();
+          renderPoiMarkersOnMap();
+        }
+        if (step === 6 && mapDemand) {
+          mapDemand.invalidateSize();
+          loadDemandDataPreview();
+        }
+      }, 100);
+
+      if (step === 2) refreshDataStatus();
+    }
+
+    // -------------------------------------------------------------------------
+    // MAPAS LEAFLET Y CAPAS
+    // -------------------------------------------------------------------------
+    function createBaseLayers() {
+      const darkCarto = L.tileLayer(`https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?api_key=${CARTO_API_KEY}`, {
+        attribution: '&copy; CARTO',
+        maxNativeZoom: 19,
+        maxZoom: 20
+      });
+      const darkEsri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+        attribution: '&copy; Esri',
+        maxNativeZoom: 16,
+        maxZoom: 20
+      });
+      const satEsri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: '&copy; Esri World Imagery',
+        maxNativeZoom: 19,
+        maxZoom: 20
+      });
+      const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap',
+        maxNativeZoom: 19,
+        maxZoom: 20
+      });
+
+      return {
+        baseMapDefault: darkCarto,
+        layerControl: {
+          "CartoDB Dark": darkCarto,
+          "Esri Dark Canvas": darkEsri,
+          "Satélite HD": satEsri,
+          "OpenStreetMap": osm
+        }
+      };
+    }
+
+    function initMaps() {
+      // Configuración de zoom ágil, rápido y reactivo
+      const mapOptions = {
+        maxZoom: 20,
+        zoomSnap: 0.5,             // Pasos limpios y precisos
+        zoomDelta: 1,              // Avance rápido con botones
+        wheelPxPerZoomLevel: 50,   // Rápido y directo al girar la rueda del ratón
+        wheelDebounceTime: 10      // Respuesta instantánea sin retrasos
+      };
+
+      // 1. Mapa BBOX
+      const b1 = createBaseLayers();
+      mapBbox = L.map('mapBbox', { ...mapOptions, layers: [b1.baseMapDefault] }).setView([21.16, -86.85], 11);
+      L.control.layers(b1.layerControl, null, { position: 'topright' }).addTo(mapBbox);
+      bboxHandlesGroup = L.layerGroup().addTo(mapBbox);
+
+      // 2. Mapa POI Studio
+      const b2 = createBaseLayers();
+      mapPoi = L.map('mapPoi', { ...mapOptions, layers: [b2.baseMapDefault] }).setView([21.16, -86.85], 11);
+      L.control.layers(b2.layerControl, null, { position: 'topright' }).addTo(mapPoi);
+      poiMarkersGroup = L.layerGroup().addTo(mapPoi);
+
+      mapPoi.on('click', (e) => {
+        openNewPoiModal(e.latlng.lng, e.latlng.lat);
+      });
+
+      // 3. Mapa Demand Viewer
+      const b3 = createBaseLayers();
+      mapDemand = L.map('mapDemand', { ...mapOptions, layers: [b3.baseMapDefault] }).setView([21.16, -86.85], 11);
+      L.control.layers(b3.layerControl, null, { position: 'topright' }).addTo(mapDemand);
+      demandLayers.residents = L.layerGroup().addTo(mapDemand);
+      demandLayers.jobs = L.layerGroup().addTo(mapDemand);
+      demandLayers.pois = L.layerGroup().addTo(mapDemand);
+    }
+
+    function createCornerIcon(key) {
+      return L.divIcon({
+        className: 'bbox-corner-handle',
+        html: `
+          <div style="
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 22px;
+            height: 22px;
+            background: #161821;
+            border: 2.5px solid #F37021;
+            border-radius: 50%;
+            box-shadow: 0 0 10px rgba(243,112,33,0.9);
+            cursor: grab;
+          ">
+            <div style="width: 6px; height: 6px; background: #FFFFFF; border-radius: 50%;"></div>
+          </div>
+        `,
+        iconSize: [22, 22],
+        iconAnchor: [11, 11]
+      });
+    }
+
+    function updateBboxLayer(bbox, fit = true) {
+      if (!mapBbox || !bbox || bbox.length !== 4) return;
+      if (bboxRectangle) mapBbox.removeLayer(bboxRectangle);
+      if (bboxHandlesGroup) bboxHandlesGroup.clearLayers();
+
+      const minLon = parseFloat(bbox[0]);
+      const minLat = parseFloat(bbox[1]);
+      const maxLon = parseFloat(bbox[2]);
+      const maxLat = parseFloat(bbox[3]);
+      const bounds = [[minLat, minLon], [maxLat, maxLon]];
+
+      bboxRectangle = L.rectangle(bounds, {
+        color: '#F37021',
+        weight: 2.5,
+        fillColor: '#F37021',
+        fillOpacity: 0.15,
+        dashArray: '6, 6'
+      }).addTo(mapBbox);
+
+      if (fit) {
+        mapBbox.fitBounds(bounds, { padding: [40, 40] });
+      }
+
+      // Crear las 4 guías visuales en las esquinas
+      const corners = {
+        NW: { latLng: [maxLat, minLon], label: '⇱ Noroeste (Arrastrar para ajustar)' },
+        NE: { latLng: [maxLat, maxLon], label: '⇲ Noreste (Arrastrar para ajustar)' },
+        SE: { latLng: [minLat, maxLon], label: '⇲ Sureste (Arrastrar para ajustar)' },
+        SW: { latLng: [minLat, minLon], label: '⇱ Suroeste (Arrastrar para ajustar)' }
+      };
+
+      Object.entries(corners).forEach(([key, cfg]) => {
+        const marker = L.marker(cfg.latLng, {
+          icon: createCornerIcon(key),
+          draggable: true,
+          zIndexOffset: 1000
+        }).addTo(bboxHandlesGroup);
+
+        marker.bindTooltip(`<strong>${cfg.label}</strong>`, { direction: 'top', offset: [0, -10] });
+
+        marker.on('drag', (e) => {
+          const latLng = e.target.getLatLng();
+          let b0 = parseFloat(document.getElementById('cfg_bbox_0').value) || minLon;
+          let b1 = parseFloat(document.getElementById('cfg_bbox_1').value) || minLat;
+          let b2 = parseFloat(document.getElementById('cfg_bbox_2').value) || maxLon;
+          let b3 = parseFloat(document.getElementById('cfg_bbox_3').value) || maxLat;
+
+          if (key === 'NW') { b0 = latLng.lng; b3 = latLng.lat; }
+          if (key === 'NE') { b2 = latLng.lng; b3 = latLng.lat; }
+          if (key === 'SE') { b2 = latLng.lng; b1 = latLng.lat; }
+          if (key === 'SW') { b0 = latLng.lng; b1 = latLng.lat; }
+
+          document.getElementById('cfg_bbox_0').value = b0.toFixed(4);
+          document.getElementById('cfg_bbox_1').value = b1.toFixed(4);
+          document.getElementById('cfg_bbox_2').value = b2.toFixed(4);
+          document.getElementById('cfg_bbox_3').value = b3.toFixed(4);
+
+          cityData.city.bbox = [b0, b1, b2, b3];
+          bboxRectangle.setBounds([[Math.min(b1, b3), Math.min(b0, b2)], [Math.max(b1, b3), Math.max(b0, b2)]]);
+
+          if (bboxCornerMarkers.NW && key !== 'NW') bboxCornerMarkers.NW.setLatLng([b3, b0]);
+          if (bboxCornerMarkers.NE && key !== 'NE') bboxCornerMarkers.NE.setLatLng([b3, b2]);
+          if (bboxCornerMarkers.SE && key !== 'SE') bboxCornerMarkers.SE.setLatLng([b1, b2]);
+          if (bboxCornerMarkers.SW && key !== 'SW') bboxCornerMarkers.SW.setLatLng([b1, b0]);
+
+          triggerAutoSave();
+        });
+
+        bboxCornerMarkers[key] = marker;
+      });
+    }
+
+    function fitMapToBbox() {
+      if (bboxRectangle && mapBbox) {
+        mapBbox.fitBounds(bboxRectangle.getBounds(), { padding: [40, 40] });
+      }
+    }
+
+    function updateBboxFromInputs() {
+      const b0 = parseFloat(document.getElementById('cfg_bbox_0').value) || 0;
+      const b1 = parseFloat(document.getElementById('cfg_bbox_1').value) || 0;
+      const b2 = parseFloat(document.getElementById('cfg_bbox_2').value) || 0;
+      const b3 = parseFloat(document.getElementById('cfg_bbox_3').value) || 0;
+      cityData.city.bbox = [b0, b1, b2, b3];
+      updateBboxLayer(cityData.city.bbox, false);
+      triggerAutoSave();
+    }
+
+    // -------------------------------------------------------------------------
+    // API CITIES Y CARGA DE DATOS
+    // -------------------------------------------------------------------------
+    async function fetchCitiesList() {
+      try {
+        const res = await fetch('/api/cities');
+        const json = await res.json();
+        const select = document.getElementById('citySelect');
+        select.innerHTML = '';
+        (json.cities || []).forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.path;
+          opt.textContent = `${c.name} (${c.code})`;
+          if (c.path === currentCityFile) opt.selected = true;
+          select.appendChild(opt);
+        });
+      } catch (e) {
+        console.error("Error al cargar lista de ciudades:", e);
+      }
+    }
+
+    async function onCitySelected(filePath) {
+      currentCityFile = filePath;
+      await loadCityData(filePath);
+    }
+
+    let autoSaveTimer = null;
+
+    async function loadCityData(filePath) {
+      try {
+        const res = await fetch(`/api/city?file=${encodeURIComponent(filePath)}`);
+        if (!res.ok) throw new Error("No se pudo cargar la ciudad");
+        cityData = await res.json();
+
+        // Verificar si existe un borrador de emergencia en localStorage (por apagón o cierre abrupto)
+        try {
+          const draftStr = localStorage.getItem(`sb_draft_${filePath}`);
+          if (draftStr) {
+            const draft = JSON.parse(draftStr);
+            if (draft && draft.data) {
+              cityData = draft.data;
+              showToast("⚡ Sesión restaurada: Se recuperaron tus cambios no guardados", "info");
+            }
+          }
+        } catch (err) {
+          console.warn("No se pudo verificar localStorage:", err);
+        }
+
+        populateFormFields();
+        await refreshDataStatus();
+        showToast("Configuración lista", "success");
+      } catch (e) {
+        showToast(e.message, "error");
+      }
+    }
+
+    function syncStateFromInputs() {
+      if (!cityData) cityData = { city: {}, macroeconomics: {}, pois: [], places: [] };
+      if (!cityData.city) cityData.city = {};
+      if (!cityData.macroeconomics) cityData.macroeconomics = {};
+
+      const nameEl = document.getElementById('cfg_city_name');
+      if (nameEl) cityData.city.name = nameEl.value;
+
+      const codeEl = document.getElementById('cfg_city_code');
+      if (codeEl) cityData.city.code = codeEl.value.toUpperCase();
+
+      const creatorEl = document.getElementById('cfg_city_creator');
+      if (creatorEl) cityData.city.creator = creatorEl.value;
+
+      const descEl = document.getElementById('cfg_city_desc');
+      if (descEl) cityData.city.description = descEl.value;
+
+      const gridEl = document.getElementById('cfg_grid_size');
+      if (gridEl) cityData.city.grid_size = parseFloat(gridEl.value);
+
+      const zoomEl = document.getElementById('cfg_initial_zoom');
+      if (zoomEl) cityData.city.initial_zoom = parseFloat(zoomEl.value);
+
+      const oceanEl = document.getElementById('cfg_include_ocean');
+      if (oceanEl) cityData.city.include_ocean = oceanEl.checked;
+
+      const b0 = parseFloat(document.getElementById('cfg_bbox_0').value) || 0;
+      const b1 = parseFloat(document.getElementById('cfg_bbox_1').value) || 0;
+      const b2 = parseFloat(document.getElementById('cfg_bbox_2').value) || 0;
+      const b3 = parseFloat(document.getElementById('cfg_bbox_3').value) || 0;
+      cityData.city.bbox = [b0, b1, b2, b3];
+
+      const peaEl = document.getElementById('cfg_tasa_pea');
+      if (peaEl) cityData.macroeconomics.tasa_pea = parseFloat(peaEl.value);
+
+      const tilEl = document.getElementById('cfg_til_1');
+      if (tilEl) cityData.macroeconomics.til_1_state = parseFloat(tilEl.value);
+
+      const betaEl = document.getElementById('cfg_gravity_beta');
+      if (betaEl) cityData.macroeconomics.gravity_beta = parseFloat(betaEl.value);
+
+      const distEl = document.getElementById('cfg_max_distance_km');
+      if (distEl) cityData.macroeconomics.max_distance_km = parseFloat(distEl.value);
+
+      const popEl = document.getElementById('cfg_max_pop_size');
+      if (popEl) cityData.macroeconomics.max_pop_size = parseInt(popEl.value);
+    }
+
+    function triggerAutoSave() {
+      syncStateFromInputs();
+
+      // Guardar snapshot instantáneo en localStorage (para apagones repentinos)
+      try {
+        localStorage.setItem(`sb_draft_${currentCityFile}`, JSON.stringify({
+          data: cityData,
+          savedAt: Date.now()
+        }));
+      } catch (err) {}
+
+      // UI de guardando
+      const statusText = document.getElementById('saveStatusText');
+      const statusIcon = document.getElementById('saveStatusIcon');
+      if (statusText) statusText.innerText = "Guardando...";
+      if (statusIcon) statusIcon.className = "w-3.5 h-3.5 text-metro-orange animate-spin";
+
+      // Debounce para guardar físicamente en disco (.yaml)
+      if (autoSaveTimer) clearTimeout(autoSaveTimer);
+      autoSaveTimer = setTimeout(async () => {
+        await saveCurrentCity(true);
+      }, 1000);
+    }
+
+    function populateFormFields() {
+      const c = cityData.city || {};
+      const m = cityData.macroeconomics || {};
+
+      // Paso 1
+      document.getElementById('cfg_city_name').value = c.name || "";
+      document.getElementById('cfg_city_code').value = c.code || "";
+      document.getElementById('cfg_city_creator').value = c.creator || "";
+      document.getElementById('cfg_city_desc').value = c.description || "";
+      document.getElementById('cfg_grid_size').value = c.grid_size || 0.0025;
+      document.getElementById('cfg_initial_zoom').value = c.initial_zoom || 11.5;
+      document.getElementById('cfg_include_ocean').checked = Boolean(c.include_ocean);
+
+      const bbox = c.bbox || [-87.05, 21.0, -86.72, 21.31];
+      document.getElementById('cfg_bbox_0').value = bbox[0];
+      document.getElementById('cfg_bbox_1').value = bbox[1];
+      document.getElementById('cfg_bbox_2').value = bbox[2];
+      document.getElementById('cfg_bbox_3').value = bbox[3];
+      updateBboxLayer(bbox);
+
+      // Paso 3
+      const pea = m.tasa_pea || 0.62;
+      document.getElementById('cfg_tasa_pea').value = pea;
+      document.getElementById('val_tasa_pea').innerText = (pea * 100).toFixed(2) + "%";
+
+      const til1 = m.til_1_state || 0.45;
+      document.getElementById('cfg_til_1').value = til1;
+      document.getElementById('val_til_1').innerText = (til1 * 100).toFixed(2) + "%";
+
+      const beta = m.gravity_beta || 0.12;
+      document.getElementById('cfg_gravity_beta').value = beta;
+      document.getElementById('val_gravity_beta').innerText = beta.toFixed(3);
+
+      document.getElementById('cfg_max_distance_km').value = m.max_distance_km || 50.0;
+      document.getElementById('cfg_max_pop_size').value = m.max_pop_size || 150;
+
+      // Adjuntar listeners de auto-guardado a los campos de formulario
+      const inputIds = [
+        'cfg_city_name', 'cfg_city_code', 'cfg_city_creator', 'cfg_city_desc',
+        'cfg_grid_size', 'cfg_initial_zoom', 'cfg_include_ocean',
+        'cfg_bbox_0', 'cfg_bbox_1', 'cfg_bbox_2', 'cfg_bbox_3',
+        'cfg_tasa_pea', 'cfg_til_1', 'cfg_gravity_beta',
+        'cfg_max_distance_km', 'cfg_max_pop_size'
+      ];
+      inputIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el && !el.dataset.autosaveBound) {
+          el.addEventListener('input', triggerAutoSave);
+          el.addEventListener('change', triggerAutoSave);
+          el.dataset.autosaveBound = "true";
+        }
+      });
+
+      renderGrowthFactorsTable();
+      renderPoiList();
+      renderPoiMarkersOnMap();
+    }
+
+    // -------------------------------------------------------------------------
+    // GUARDADO GLOBAL EN DISCO
+    // -------------------------------------------------------------------------
+    async function saveCurrentCity(isSilent = false) {
+      syncStateFromInputs();
+
+      try {
+        const res = await fetch('/api/city/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file: currentCityFile, ...cityData })
+        });
+        const json = await res.json();
+        if (json.status === 'ok') {
+          // Limpiar borrador temporal al guardar con éxito en disco
+          try {
+            localStorage.removeItem(`sb_draft_${currentCityFile}`);
+          } catch (e) {}
+
+          const statusText = document.getElementById('saveStatusText');
+          const statusIcon = document.getElementById('saveStatusIcon');
+          if (statusText) statusText.innerText = "Guardado";
+          if (statusIcon) {
+            statusIcon.className = "w-3.5 h-3.5 text-emerald-400";
+            statusIcon.setAttribute('data-lucide', 'check');
+          }
+          lucide.createIcons();
+
+          if (!isSilent) {
+            showToast("¡Configuración guardada en disco exitosamente!", "success");
+          }
+        } else {
+          throw new Error(json.error || "Error al guardar");
+        }
+      } catch (e) {
+        const statusText = document.getElementById('saveStatusText');
+        const statusIcon = document.getElementById('saveStatusIcon');
+        if (statusText) statusText.innerText = "Borrador local";
+        if (statusIcon) {
+          statusIcon.className = "w-3.5 h-3.5 text-amber-400";
+          statusIcon.setAttribute('data-lucide', 'alert-triangle');
+        }
+        lucide.createIcons();
+        if (!isSilent) {
+          showToast(e.message, "error");
+        }
+      }
+    }
+
+    function openDataSourcesModal() { document.getElementById('modalDataSources').classList.remove('hidden'); }
+    function closeDataSourcesModal() { document.getElementById('modalDataSources').classList.add('hidden'); }
+
+    async function refreshDataStatus() {
+      const code = cityData.city ? (cityData.city.code || "") : "";
+      const name = cityData.city ? (cityData.city.name || "") : "";
+      try {
+        const res = await fetch(`/api/data-status?city=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&file=${encodeURIComponent(currentCityFile)}`);
+        const status = await res.json();
+        const container = document.getElementById('dataStatusList');
+        container.innerHTML = '';
+
+        const sources = [
+          { key: 'denue', label: 'DENUE (Establecimientos Económicos)', icon: 'briefcase', desc: '*denue*.csv' },
+          { key: 'cpv', label: 'Censo CPV 2020 (Manzanas RESAGEBURB)', icon: 'users', desc: '*RESAGEBURB*.csv' },
+          { key: 'ce2024', label: 'Censos Económicos 2024 / H001A', icon: 'file-text', desc: '*tr_ce*.csv' },
+          { key: 'conapo', label: 'Proyecciones Demográficas CONAPO', icon: 'trending-up', desc: 'data-*.csv o *conapo*.csv' },
+          { key: 'osm', label: 'Red Vial OpenStreetMap (PBF / GeoJSON)', icon: 'map-pin', desc: '*.osm.pbf o roads.geojson' }
+        ];
+
+        sources.forEach(s => {
+          const item = status[s.key] || { status: 'missing', files: [] };
+          const isOk = item.status === 'ok';
+          const files = item.files || [];
+          const count = files.length;
+
+          let fileDesc = s.desc;
+          if (count === 1) {
+            fileDesc = `${files[0].filename} (${files[0].size_mb} MB)`;
+          } else if (count > 1) {
+            fileDesc = `${count} archivos: ` + files.map(f => f.filename).join(', ');
+          }
+
+          const card = document.createElement('div');
+          card.className = `p-3.5 rounded-lg border flex items-center justify-between text-xs ${
+            isOk ? 'bg-emerald-950/20 border-emerald-800/40 text-gray-200' : 'bg-metro-panel border-metro-border text-gray-400'
+          }`;
+          card.innerHTML = `
+            <div class="flex items-center space-x-3 overflow-hidden mr-2">
+              <span class="p-2 rounded-lg shrink-0 ${isOk ? 'bg-emerald-900/50 text-emerald-400' : 'bg-gray-800 text-gray-500'}">
+                <i data-lucide="${s.icon}" class="w-4 h-4"></i>
+              </span>
+              <div class="overflow-hidden">
+                <span class="font-bold text-white block truncate">${s.label}</span>
+                <span class="text-[11px] text-gray-400 font-mono block truncate" title="${fileDesc}">${fileDesc}</span>
+              </div>
+            </div>
+            <span class="px-2.5 py-1 rounded text-[10px] font-bold font-mono shrink-0 ${
+              isOk ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-gray-800 text-gray-400'
+            }">
+              ${isOk ? (count > 1 ? `${count} ARCHIVOS &check;` : 'DETECTADO &check;') : 'PENDIENTE'}
+            </span>
+          `;
+          container.appendChild(card);
+        });
+        lucide.createIcons();
+      } catch (e) {
+        console.error("Error al obtener estado de datos:", e);
+      }
+    }
+
+    // Drag & Drop
+    function handleDragOver(e) {
+      e.preventDefault();
+      document.getElementById('dropzone').classList.add('border-metro-pink', 'bg-metro-pink/10');
+    }
+    function handleDragLeave(e) {
+      e.preventDefault();
+      document.getElementById('dropzone').classList.remove('border-metro-pink', 'bg-metro-pink/10');
+    }
+    function handleDrop(e) {
+      e.preventDefault();
+      document.getElementById('dropzone').classList.remove('border-metro-pink', 'bg-metro-pink/10');
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        uploadFiles(e.dataTransfer.files);
+      }
+    }
+    function handleFileSelect(e) {
+      if (e.target.files && e.target.files.length > 0) {
+        uploadFiles(e.target.files);
+      }
+    }
+
+    async function uploadFiles(files) {
+      const progressCont = document.getElementById('uploadProgressContainer');
+      const progressBar = document.getElementById('uploadProgressBar');
+      const progressPercent = document.getElementById('uploadPercent');
+      const fileNameLabel = document.getElementById('uploadFileName');
+      const uploadedList = document.getElementById('uploadedFilesList');
+
+      progressCont.classList.remove('hidden');
+
+      for (let file of files) {
+        fileNameLabel.innerText = `Subiendo ${file.name}...`;
+        const formData = new FormData();
+        formData.append("file", file);
+
+        try {
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", "/api/upload", true);
+
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+              const p = Math.round((e.loaded / e.total) * 100);
+              progressBar.style.width = p + "%";
+              progressPercent.innerText = p + "%";
+            }
+          };
+
+          xhr.onload = () => {
+            if (xhr.status === 200) {
+              showToast(`Archivo '${file.name}' subido a data/`, "success");
+              const li = document.createElement('li');
+              li.className = "text-emerald-400 flex items-center space-x-1";
+              li.innerHTML = `<span>&check;</span> <span>${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)</span>`;
+              if (uploadedList.querySelector('li.italic')) uploadedList.innerHTML = '';
+              uploadedList.appendChild(li);
+              refreshDataStatus();
+            } else {
+              showToast(`Error al subir ${file.name}`, "error");
+            }
+          };
+          xhr.send(formData);
+        } catch (err) {
+          showToast(`Error de red: ${err.message}`, "error");
+        }
+      }
+      setTimeout(() => progressCont.classList.add('hidden'), 2000);
+    }
+
+    // -------------------------------------------------------------------------
+    // PASO 3: TABLA DE PROYECCIONES CONAPO
+    // -------------------------------------------------------------------------
+    function renderGrowthFactorsTable() {
+      const tbody = document.getElementById('growthFactorsTableBody');
+      tbody.innerHTML = '';
+      const factors = (cityData.macroeconomics && cityData.macroeconomics.growth_factors) || {};
+
+      Object.entries(factors).forEach(([code, val]) => {
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-metro-panel/50 transition";
+        tr.innerHTML = `
+          <td class="p-2.5 font-bold text-white">${code}</td>
+          <td class="p-2.5">
+            <input type="number" step="0.01" value="${val}" onchange="updateGrowthFactor('${code}', this.value)" class="bg-metro-card border border-metro-border rounded px-2 py-1 text-white w-24">
+          </td>
+          <td class="p-2.5 text-right">
+            <button onclick="deleteGrowthFactor('${code}')" class="text-rose-400 hover:text-rose-300 p-1">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+            </button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+      lucide.createIcons();
+    }
+
+    function addGrowthFactorRow() {
+      const code = prompt("Ingresa la clave de municipio (ej. 23005):", "23005");
+      if (code) {
+        if (!cityData.macroeconomics.growth_factors) cityData.macroeconomics.growth_factors = {};
+        cityData.macroeconomics.growth_factors[code] = 1.05;
+        renderGrowthFactorsTable();
+        triggerAutoSave();
+      }
+    }
+    function updateGrowthFactor(code, val) {
+      cityData.macroeconomics.growth_factors[code] = parseFloat(val);
+      triggerAutoSave();
+    }
+    function deleteGrowthFactor(code) {
+      delete cityData.macroeconomics.growth_factors[code];
+      renderGrowthFactorsTable();
+      triggerAutoSave();
+    }
+
+    // -------------------------------------------------------------------------
+    // PASO 4: POI STUDIO (EDITOR DE POIS Y RADIOS)
+    // -------------------------------------------------------------------------
+    function renderPoiList() {
+      const pois = cityData.pois || [];
+      document.getElementById('poiCountBadge').innerText = `${pois.length} POIs configurados`;
+      const cont = document.getElementById('poiListContainer');
+      cont.innerHTML = '';
+
+      pois.forEach((poi, idx) => {
+        const card = document.createElement('div');
+        card.className = "bg-metro-panel hover:border-metro-orange border border-metro-border p-3 rounded-lg text-xs cursor-pointer transition shadow flex flex-col space-y-1.5";
+        card.onclick = () => openEditPoiModal(idx);
+
+        const nameStr = typeof poi.name === 'object' ? (poi.name.es || poi.name.en || poi.id) : (poi.name || poi.id);
+        const modeColor = poi.mode === 'MAX' ? 'bg-amber-500/20 text-amber-400' : 'bg-blue-500/20 text-blue-400';
+
+        card.innerHTML = `
+          <div class="flex justify-between items-start">
+            <span class="font-bold text-white truncate max-w-[180px]">${nameStr}</span>
+            <span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${modeColor}">${poi.mode || 'MAX'}</span>
+          </div>
+          <div class="flex justify-between text-gray-400 text-[11px] font-mono">
+            <span>&bull; Empleos: <strong class="text-gray-200">${(poi.jobs || 0).toLocaleString()}</strong></span>
+            <span>&bull; Radio: <strong class="text-gray-200">${poi.radius_m || 750}m</strong></span>
+          </div>
+        `;
+        cont.appendChild(card);
+      });
+    }
+
+    function renderPoiMarkersOnMap() {
+      if (!mapPoi || !poiMarkersGroup) return;
+      poiMarkersGroup.clearLayers();
+      const pois = cityData.pois || [];
+
+      pois.forEach((poi, idx) => {
+        if (!poi.loc || poi.loc.length !== 2) return;
+        const latLng = [poi.loc[1], poi.loc[0]];
+
+        L.circle(latLng, {
+          radius: poi.radius_m || 750,
+          color: '#E4007C',
+          weight: 1.5,
+          fillColor: '#E4007C',
+          fillOpacity: 0.15
+        }).addTo(poiMarkersGroup);
+
+        const marker = L.circleMarker(latLng, {
+          radius: 6,
+          color: '#F37021',
+          fillColor: '#FFFFFF',
+          fillOpacity: 1,
+          weight: 2
+        }).addTo(poiMarkersGroup);
+
+        const nameStr = typeof poi.name === 'object' ? (poi.name.es || poi.id) : (poi.name || poi.id);
+        marker.bindTooltip(`<strong>${nameStr}</strong><br>Empleos: ${poi.jobs}<br>Radio: ${poi.radius_m}m`);
+        marker.on('click', () => openEditPoiModal(idx));
+      });
+    }
+
+    function openNewPoiModal(lon = null, lat = null) {
+      editingPoiIndex = -1;
+      document.getElementById('modalPoiTitle').innerText = "Nuevo POI Especial";
+      document.getElementById('poi_id').value = "AIR_Nuevo";
+      document.getElementById('poi_name_es').value = "";
+      document.getElementById('poi_name_en').value = "";
+      document.getElementById('poi_jobs').value = 5000;
+      document.getElementById('poi_radius').value = 750;
+      document.getElementById('poi_mode').value = "MAX";
+      document.getElementById('btnDeletePoi').classList.add('hidden');
+
+      const center = lon && lat ? { lng: lon, lat: lat } : (mapPoi ? mapPoi.getCenter() : { lng: -86.85, lat: 21.16 });
+      document.getElementById('poi_loc_lon').value = center.lng.toFixed(5);
+      document.getElementById('poi_loc_lat').value = center.lat.toFixed(5);
+
+      document.getElementById('modalPoi').classList.remove('hidden');
+    }
+
+    function openEditPoiModal(idx) {
+      editingPoiIndex = idx;
+      const poi = cityData.pois[idx];
+      document.getElementById('modalPoiTitle').innerText = `Editar POI: ${poi.id}`;
+      document.getElementById('poi_id').value = poi.id || "";
+      document.getElementById('poi_name_es').value = typeof poi.name === 'object' ? (poi.name.es || "") : (poi.name || "");
+      document.getElementById('poi_name_en').value = typeof poi.name === 'object' ? (poi.name.en || "") : "";
+      document.getElementById('poi_type').value = poi.type || "airport";
+      document.getElementById('poi_mode').value = poi.mode || "MAX";
+      document.getElementById('poi_jobs').value = poi.jobs || 5000;
+      document.getElementById('poi_radius').value = poi.radius_m || 750;
+      document.getElementById('poi_loc_lon').value = poi.loc ? poi.loc[0] : 0;
+      document.getElementById('poi_loc_lat').value = poi.loc ? poi.loc[1] : 0;
+      document.getElementById('btnDeletePoi').classList.remove('hidden');
+
+      document.getElementById('modalPoi').classList.remove('hidden');
+    }
+
+    function closePoiModal() {
+      document.getElementById('modalPoi').classList.add('hidden');
+    }
+
+    function submitPoiModal() {
+      const pId = document.getElementById('poi_id').value.trim();
+      const esName = document.getElementById('poi_name_es').value.trim();
+      const enName = document.getElementById('poi_name_en').value.trim();
+      const pType = document.getElementById('poi_type').value;
+      const pMode = document.getElementById('poi_mode').value;
+      const pJobs = parseInt(document.getElementById('poi_jobs').value) || 5000;
+      const pRad = parseInt(document.getElementById('poi_radius').value) || 750;
+      const lon = parseFloat(document.getElementById('poi_loc_lon').value) || 0;
+      const lat = parseFloat(document.getElementById('poi_loc_lat').value) || 0;
+
+      const poiObj = {
+        id: pId,
+        name: enName ? { es: esName || pId, en: enName } : (esName || pId),
+        type: pType,
+        mode: pMode,
+        jobs: pJobs,
+        radius_m: pRad,
+        loc: [lon, lat]
+      };
+
+      if (!cityData.pois) cityData.pois = [];
+      if (editingPoiIndex >= 0) {
+        cityData.pois[editingPoiIndex] = poiObj;
+      } else {
+        cityData.pois.push(poiObj);
+      }
+
+      closePoiModal();
+      renderPoiList();
+      renderPoiMarkersOnMap();
+      triggerAutoSave();
+      showToast("POI guardado", "success");
+    }
+
+    function deleteCurrentPoiModal() {
+      if (editingPoiIndex >= 0) {
+        cityData.pois.splice(editingPoiIndex, 1);
+        closePoiModal();
+        renderPoiList();
+        renderPoiMarkersOnMap();
+        triggerAutoSave();
+        showToast("POI eliminado", "info");
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // PASO 5: COMPILACIÓN Y TELEMETRÍA EN VIVO (SSE)
+    // -------------------------------------------------------------------------
+    function initSSE() {
+      if (sseSource) sseSource.close();
+      sseSource = new EventSource('/api/build/stream');
+
+      sseSource.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          appendTerminalLog(msg);
+
+          if (msg.progress !== undefined) {
+            document.getElementById('buildProgressBar').style.width = msg.progress + "%";
+            document.getElementById('buildPercentLabel').innerText = msg.progress + "%";
+          }
+          if (msg.step_name) {
+            document.getElementById('buildStepLabel').innerText = `Fase: ${msg.step_name}`;
+          }
+
+          const btn = document.getElementById('btnStartBuild');
+          const btnText = document.getElementById('textStartBuild');
+          const btnIcon = document.getElementById('iconStartBuild');
+          const btnResults = document.getElementById('btnGoToResults');
+          const statusBadge = document.getElementById('buildStatusBadge');
+          const statusText = document.getElementById('buildStatusText');
+
+          // 1. Detección de Error
+          if (msg.step_name === "Error en Compilación" || (msg.line && (msg.line.includes('❌') || msg.line.includes('ERROR CRÍTICO')))) {
+            if (btn) {
+              btn.disabled = false;
+              btn.classList.remove('opacity-50', 'cursor-not-allowed', 'bg-metro-orange');
+              btn.classList.add('bg-rose-600', 'hover:bg-rose-700');
+            }
+            if (btnText) btnText.innerText = "Reintentar Compilación";
+            if (btnIcon) btnIcon.setAttribute('data-lucide', 'rotate-cw');
+            if (btnResults) btnResults.classList.add('hidden');
+
+            document.getElementById('buildProgressBar').className = "h-full bg-rose-600 w-full transition-all duration-300";
+            document.getElementById('buildStepLabel').innerHTML = `<span class="text-rose-400 font-bold">❌ Error en compilación. Revisa los detalles en rojo en la terminal.</span>`;
+
+            if (statusBadge) statusBadge.className = "flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-mono bg-rose-950/60 text-rose-300 border border-rose-800";
+            if (statusText) statusText.innerText = "Error en Pipeline";
+
+            showToast("Hubo un error en la compilación. Revisa la terminal.", "error");
+            lucide.createIcons();
+          }
+
+          // 2. Detección de Éxito / Finalizado
+          if (msg.step_name === "Finalizado" || (msg.progress === 100 && msg.line && msg.line.includes('✨'))) {
+            if (btn) {
+              btn.disabled = false;
+              btn.classList.remove('opacity-50', 'cursor-not-allowed', 'bg-rose-600');
+              btn.classList.add('bg-metro-orange', 'hover:bg-orange-600');
+            }
+            if (btnText) btnText.innerText = "Recompilar";
+            if (btnIcon) btnIcon.setAttribute('data-lucide', 'play');
+            if (btnResults) btnResults.classList.remove('hidden');
+
+            document.getElementById('buildProgressBar').className = "h-full bg-emerald-500 w-full transition-all duration-300";
+            document.getElementById('buildStepLabel').innerHTML = `<span class="text-emerald-400 font-bold">✨ ¡Compilación Completada Exitosamente!</span>`;
+
+            if (statusBadge) statusBadge.className = "flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-mono bg-emerald-950/60 text-emerald-300 border border-emerald-800";
+            if (statusText) statusText.innerText = "Listo";
+
+            showToast("¡Compilación finalizada! Haz clic en 'Ver Demanda' para revisar los resultados.", "success");
+            lucide.createIcons();
+          }
+        } catch (err) {}
+      };
+    }
+
+    async function startBuild() {
+      const skipMap = document.getElementById('chkSkipMap').checked;
+      const btn = document.getElementById('btnStartBuild');
+      const btnResults = document.getElementById('btnGoToResults');
+      btn.disabled = true;
+      btn.classList.add('opacity-50', 'cursor-not-allowed');
+      if (btnResults) btnResults.classList.add('hidden');
+
+      document.getElementById('buildProgressBar').className = "h-full bg-gradient-to-r from-metro-orange via-metro-green to-metro-pink w-0 transition-all duration-300";
+      document.getElementById('buildStepLabel').innerText = "Fase: Iniciando Pipeline...";
+      document.getElementById('buildPercentLabel').innerText = "0%";
+      document.getElementById('buildStatusText').innerText = "Compilando...";
+      document.getElementById('buildStatusBadge').className = "flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-mono bg-gray-800 text-gray-300 border border-gray-700";
+
+      showToast("Iniciando pipeline de compilación...", "info");
+
+      try {
+        const res = await fetch('/api/build/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file: currentCityFile, skip_map: skipMap })
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "No se pudo iniciar");
+      } catch (e) {
+        showToast(e.message, "error");
+        btn.disabled = false;
+        btn.classList.remove('opacity-50', 'cursor-not-allowed');
+      }
+    }
+
+    function appendTerminalLog(logObj) {
+      const term = document.getElementById('terminalOutput');
+      const p = document.createElement('p');
+      p.className = "leading-relaxed";
+
+      const line = logObj.line || "";
+      const isError = line.includes('❌') || line.includes('ERROR') || line.includes('Traceback') || line.includes('Exception') || line.includes('FileNotFoundError');
+      const isSuccess = line.includes('✨') || line.includes('exitosamente') || line.includes('Completado');
+      const isStep = line.includes('🚀') || line.includes('📊') || line.includes('===');
+
+      let colorClass = "text-gray-300";
+      if (isError) colorClass = "text-rose-400 font-bold bg-rose-950/40 px-1.5 py-0.5 rounded block my-0.5 border border-rose-900/50";
+      else if (isSuccess) colorClass = "text-emerald-300 font-bold bg-emerald-950/40 px-1.5 py-0.5 rounded block my-0.5 border border-emerald-900/50";
+      else if (isStep) colorClass = "text-metro-orange font-bold";
+
+      p.innerHTML = `<span class="text-gray-600 font-mono text-[11px]">[${logObj.timestamp}]</span> <span class="${colorClass}">${escapeHtml(line)}</span>`;
+      term.appendChild(p);
+      term.scrollTop = term.scrollHeight;
+    }
+
+    function clearTerminal() {
+      document.getElementById('terminalOutput').innerHTML = '';
+    }
+
+    // -------------------------------------------------------------------------
+    // PASO 6: VISOR DE DEMANDA Y EMPAQUETADO
+    // -------------------------------------------------------------------------
+    async function loadDemandDataPreview() {
+      try {
+        const res = await fetch(`/api/demand-preview?file=${encodeURIComponent(currentCityFile)}`);
+        const data = await res.json();
+        const points = data.points || [];
+
+        document.getElementById('metricDemandPoints').innerText = points.length.toLocaleString();
+
+        let totalResidents = 0;
+        let totalJobs = 0;
+
+        demandLayers.residents.clearLayers();
+        demandLayers.jobs.clearLayers();
+        demandLayers.pois.clearLayers();
+
+        points.forEach(pt => {
+          const latLng = [pt.location[1], pt.location[0]];
+          totalResidents += (pt.residents || 0);
+          totalJobs += (pt.jobs || 0);
+
+          if (pt.residents > 0) {
+            L.circleMarker(latLng, {
+              radius: Math.min(8, Math.max(3, Math.sqrt(pt.residents) * 0.8)),
+              color: '#3B82F6',
+              fillColor: '#60A5FA',
+              fillOpacity: 0.6,
+              weight: 1
+            }).addTo(demandLayers.residents);
+          }
+          if (pt.jobs > 0) {
+            L.circleMarker(latLng, {
+              radius: Math.min(8, Math.max(3, Math.sqrt(pt.jobs) * 0.8)),
+              color: '#EF4444',
+              fillColor: '#F87171',
+              fillOpacity: 0.6,
+              weight: 1
+            }).addTo(demandLayers.jobs);
+          }
+        });
+
+        document.getElementById('metricTotalPea').innerText = totalResidents.toLocaleString();
+
+        if (points.length > 0 && mapDemand) {
+          const b = cityData.city.bbox;
+          if (b && b.length === 4) mapDemand.fitBounds([[b[1], b[0]], [b[3], b[2]]]);
+        }
+      } catch (e) {
+        console.error("Error al cargar demanda final:", e);
+      }
+    }
+
+    function toggleDemandLayers() {
+      const chkRes = document.getElementById('chkLayerResidents').checked;
+      const chkJobs = document.getElementById('chkLayerJobs').checked;
+      const chkPois = document.getElementById('chkLayerPois').checked;
+
+      if (chkRes) mapDemand.addLayer(demandLayers.residents); else mapDemand.removeLayer(demandLayers.residents);
+      if (chkJobs) mapDemand.addLayer(demandLayers.jobs); else mapDemand.removeLayer(demandLayers.jobs);
+      if (chkPois) mapDemand.addLayer(demandLayers.pois); else mapDemand.removeLayer(demandLayers.pois);
+    }
+
+    function downloadCityPackage() {
+      window.location.href = `/api/download?file=${encodeURIComponent(currentCityFile)}`;
+    }
+
+    // -------------------------------------------------------------------------
+    // UTILIDADES GENERALES
+    // -------------------------------------------------------------------------
+    function showToast(msg, type = "info") {
+      const toast = document.createElement('div');
+      const colors = {
+        success: 'bg-emerald-600 text-white border-emerald-500',
+        error: 'bg-rose-600 text-white border-rose-500',
+        info: 'bg-metro-card text-white border-metro-border'
+      };
+      toast.className = `fixed bottom-6 right-6 ${colors[type] || colors.info} border px-4 py-2.5 rounded-lg text-xs font-semibold shadow-2xl z-50 transition transform duration-300 flex items-center space-x-2`;
+      toast.innerHTML = `<span>${msg}</span>`;
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 3500);
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function openNewCityModal() { document.getElementById('modalNewCity').classList.remove('hidden'); }
+    function closeNewCityModal() { document.getElementById('modalNewCity').classList.add('hidden'); }
+    async function submitCreateCity() {
+      const code = document.getElementById('new_city_code').value.trim().toUpperCase();
+      const name = document.getElementById('new_city_name').value.trim();
+      const desc = document.getElementById('new_city_desc').value.trim();
+      if (!code || !name) {
+        showToast("Código y nombre son obligatorios", "error");
+        return;
+      }
+      try {
+        const res = await fetch('/api/city/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code, name, description: desc })
+        });
+        const json = await res.json();
+        if (json.status === 'ok') {
+          closeNewCityModal();
+          await fetchCitiesList();
+          currentCityFile = json.file;
+          document.getElementById('citySelect').value = json.file;
+          await loadCityData(json.file);
+          showToast(`Ciudad '${name}' creada exitosamente`, "success");
+        } else {
+          throw new Error(json.error);
+        }
+      } catch (e) {
+        showToast(e.message, "error");
+      }
+    }
+  </script>
+</body>
+</html>

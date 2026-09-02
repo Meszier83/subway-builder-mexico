@@ -36,3 +36,13 @@ Al trabajar en este repositorio, siempre debes seguir estos principios técnicos
 - **Codificación Universal UTF-8:** Todos los archivos de documentación, scripts y datos deben ser UTF-8 estricto sin BOM con terminaciones LF y `.gitattributes` en la raíz para prevenir corrupción de caracteres (mojibake).
 - **Resolución de Rutas:** Los scripts en `tools/` y `sb_mexico/` deben resolver rutas a `cities/` y `data/` de forma flexible, verificando candidatos relativos a `ROOT_DIR`, `CWD`, `data_dir` y `output_dir`.
 - **Sanitización de Archivos:** Las APIs locales deben restringir el acceso exclusivamente a archivos dentro del directorio del proyecto para prevenir Path Traversal.
+
+### 7. Zonas Metropolitanas Interestatales y Fuentes de Datos Multi-Archivo
+- **Concatenación y Deduplicación Espacial:** Para conurbaciones multi-estado (ej. ZMVM, La Laguna, Puebla-Tlaxcala, Puerto Vallarta), el motor debe aceptar múltiples archivos `RESAGEBURB` y `denue_inegi`, concatenándolos en memoria y aplicando un recorte estricto por BBOX para eliminar manzanas y establecimientos fuera del área funcional sin duplicar masa ni demanda.
+- **Trazabilidad y Detección en UI:** La interfaz debe reflejar el conteo de archivos detectados por entidad y proporcionar accesos directos a los repositorios de datos abiertos oficiales (INEGI, CONAPO, Geofabrik).
+
+### 8. Ergonomía Cartográfica y Experiencia de Usuario en Leaflet (Wizard / POI Studio)
+- **Despeje de Controles de Capas:** El área de `L.control.layers` (esquina superior derecha) debe mantenerse siempre despejada de badges, leyendas o tooltips flotantes (ubicarlos en la esquina inferior izquierda `bottom-4 left-4`).
+- **Cinemática del Zoom (Scrollwheel):** Configurar el zoom de rueda con `wheelPxPerZoomLevel: 50–60`, `wheelDebounceTime: 10ms` y `zoomSnap: 0.5` para garantizar una respuesta ágil, rápida y precisa.
+- **Calibración Interactiva de BBOX:** Las herramientas de delimitación deben contar con 4 tiradores visibles en las esquinas (`NW, NE, SE, SW`) con eventos de arrastre sincronizados en tiempo real con los campos de entrada de coordenadas.
+

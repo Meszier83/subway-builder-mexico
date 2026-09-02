@@ -35,6 +35,7 @@ from sb_mexico.special_demand import (
     save_special_demand_points
 )
 
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 console = Console()
 
 
@@ -77,11 +78,7 @@ def execute_pipeline(
     """
     Ejecuta el pipeline completo de principio a fin de manera determinista y autovalidada.
     """
-    console.print(Panel.fit("[bold green]SUBWAY BUILDER MÉXICO v6.1[/bold green]\n[cyan]Pipeline Integral y Autovalidado[/cyan]"))
-
-    src_dir = os.path.abspath(data_dir or output_dir)
-    out_dir = os.path.abspath(output_dir)
-    os.makedirs(out_dir, exist_ok=True)
+    console.print(Panel.fit("[bold green]SUBWAY BUILDER MÉXICO v6.3[/bold green]\n[cyan]Pipeline Integral y Autovalidado[/cyan]"))
 
     cfg = load_city_config(config_path)
     city_info = cfg["city"]
@@ -89,6 +86,7 @@ def execute_pipeline(
     pois_cfg = cfg.get("pois") or []
 
     city_code = city_info["code"]
+    city_base = os.path.splitext(os.path.basename(config_path))[0].lower()
     bbox_list = city_info["bbox"]  # [min_lon, min_lat, max_lon, max_lat]
     bbox_dict = {
         "min_lon": bbox_list[0],
@@ -97,16 +95,46 @@ def execute_pipeline(
         "max_lat": bbox_list[3]
     }
 
+    out_dir = os.path.abspath(output_dir)
+    os.makedirs(out_dir, exist_ok=True)
+
+    # Resolución universal de directorios de búsqueda de datos
+    search_dirs = []
+    if data_dir:
+        search_dirs.append(os.path.abspath(data_dir))
+
+    candidate_subdirs = [
+        os.path.join(ROOT_DIR, "data", city_base),
+        os.path.join(ROOT_DIR, "data", city_code.lower()),
+        os.path.join(ROOT_DIR, "data"),
+        out_dir,
+        ROOT_DIR
+    ]
+    for d in candidate_subdirs:
+        if os.path.exists(d) and d not in search_dirs:
+            search_dirs.append(d)
+
+    data_parent = os.path.join(ROOT_DIR, "data")
+    if os.path.exists(data_parent):
+        for entry in os.scandir(data_parent):
+            if entry.is_dir() and entry.path not in search_dirs:
+                search_dirs.append(entry.path)
+
+    def find_sources(patterns: List[str]) -> List[str]:
+        candidates = []
+        for sdir in search_dirs:
+            for pat in patterns:
+                candidates.append(os.path.join(sdir, pat))
+        return _dedup_glob(candidates)
+
+    src_dir = search_dirs[0] if search_dirs else ROOT_DIR
+
     # =========================================================================
     # 1. COMPILACIÓN CARTOGRÁFICA (SI NO SE OMITE)
     # =========================================================================
     if not skip_map:
         console.print(f"\n[bold yellow]1. Compilación Cartográfica ({city_code})[/bold yellow]")
-        pbf_candidates = _dedup_glob([
-            os.path.join(src_dir, "*.osm.pbf"),
-            os.path.join(out_dir, "*.osm.pbf"),
-            "*.osm.pbf"
-        ])
+        pbf_candidates = find_sources(["*.osm.pbf"])
         osm_pbf = pbf_candidates[0] if pbf_candidates else None
         build_city_map(
             city_code=city_code,
@@ -115,7 +143,7 @@ def execute_pipeline(
             building_filter_size=city_info.get("building_filter_size", 15.0),
             building_simplification=city_info.get("building_simplification", 0.2),
             include_ocean=city_info.get("include_ocean", False),
-            places=city_config.get("places", []),
+            places=cfg.get("places", []),
             output_dir=out_dir
         )
     else:
@@ -126,30 +154,33 @@ def execute_pipeline(
     # =========================================================================
     console.print(f"\n[bold yellow]2. Ingesta y Calibración INEGI[/bold yellow]")
 
-    # Detección automática en src_dir o rutas configuradas con desduplicación
-    denue_files = _dedup_glob([os.path.join(src_dir, "*denue*.csv")])
-    cpv_files = _dedup_glob([
-        os.path.join(src_dir, "*RESAGEBURB*.csv"),
-        os.path.join(src_dir, "*censo*.csv"),
-        os.path.join(src_dir, "*censo*.xlsx")
+    # Detección universal automática en todas las ubicaciones candidatas
+    denue_files = find_sources(["*denue*.csv", "*DENUE*.csv"])
+    cpv_files = find_sources([
+        "*RESAGEBURB*.csv",
+        "*resageburb*.csv",
+        "*censo*.csv",
+        "*censo*.xlsx",
+        "*cpv*.csv"
     ])
-    ce_files = _dedup_glob([
-        os.path.join(src_dir, "*SAIC*.csv"),
-        os.path.join(src_dir, "*cenu24*.csv"),
-        os.path.join(src_dir, "*tr_ce*.csv"),
-        os.path.join(src_dir, "*ce_*.csv")
+    ce_files = find_sources([
+        "*SAIC*.csv",
+        "*cenu24*.csv",
+        "*tr_ce*.csv",
+        "*ce_*.csv",
+        "*ce2024*.csv"
     ])
-    enoe_files = _dedup_glob([
-        os.path.join(src_dir, "*2026_trim*.csv"),
-        os.path.join(src_dir, "*2024_trim*.csv"),
-        os.path.join(src_dir, "*2025_trim*.csv"),
-        os.path.join(src_dir, "*trim*.csv"),
-        os.path.join(src_dir, "*enoe*.csv")
+    enoe_files = find_sources([
+        "*2026_trim*.csv",
+        "*2024_trim*.csv",
+        "*2025_trim*.csv",
+        "*trim*.csv",
+        "*enoe*.csv"
     ])
-    conapo_files = _dedup_glob([
-        os.path.join(src_dir, "*conapo*.csv"),
-        os.path.join(src_dir, "data-*.csv"),
-        os.path.join(src_dir, "*proyeccion*.csv")
+    conapo_files = find_sources([
+        "*conapo*.csv",
+        "data-*.csv",
+        "*proyeccion*.csv"
     ])
 
     # A. Macroeconomía (ENOE)
@@ -316,8 +347,8 @@ def execute_pipeline(
             name=city_info["name"],
             code=city_code,
             description=city_info["description"][:80],
-            creator=city_info.get("creator", "Subway Builder México v6.1"),
-            version="6.1.0",
+            creator=city_info.get("creator", "Subway Builder México v6.3"),
+            version="6.3.0",
             filename=cfg_out_path
         )
         # Asegurar centrado baricéntrico inteligente
@@ -352,8 +383,8 @@ def execute_pipeline(
                 "pitch": 0,
                 "bearing": 0
             },
-            "creator": city_info.get("creator", "Subway Builder México v6.1"),
-            "version": "6.1.0"
+            "creator": city_info.get("creator", "Subway Builder México v6.3"),
+            "version": "6.3.0"
         }
         with open(cfg_out_path, "w", encoding="utf-8") as f:
             json.dump(config_data, f, indent=2, ensure_ascii=False)
