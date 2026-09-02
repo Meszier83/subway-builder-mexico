@@ -243,6 +243,7 @@ def execute_pipeline(
         raise FileNotFoundError("No se encontró archivo de Censo CPV 2020 (*RESAGEBURB*.csv o *censo*).")
 
     growth_factors = macro.get("growth_factors", {}).copy()
+    conapo_projs = None
     if conapo_files:
         conapo_projs = parse_conapo_projections(conapo_files[0])
         if conapo_projs:
@@ -254,9 +255,12 @@ def execute_pipeline(
         bbox=bbox_dict,
         tasa_pea=tasa_pea,
         growth_factors=growth_factors,
+        conapo_projections=conapo_projs,
         default_growth=macro.get("default_growth_factor", 1.0)
     )
-    console.print(f"-> Censo CPV cargado y georreferenciado: [cyan]{len(df_cpv):,}[/cyan] manzanas habitadas.")
+    total_cpv_pop = float(df_cpv['pobtot_adj'].sum()) if len(df_cpv) > 0 else 0.0
+    total_cpv_pea = float(df_cpv['pea_real'].sum()) if len(df_cpv) > 0 else 0.0
+    console.print(f"-> Censo CPV cargado y georreferenciado: [cyan]{len(df_cpv):,}[/cyan] manzanas habitadas | [bold green]{int(total_cpv_pop):,}[/bold green] hab. proyectados (PEA base: [bold green]{int(total_cpv_pea):,}[/bold green]).")
 
     # =========================================================================
     # 3. MALLA ESPACIAL, SNAPPING VIAL Y FUSIÓN DE POIS

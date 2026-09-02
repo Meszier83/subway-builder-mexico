@@ -91,6 +91,26 @@ class TestGravity(unittest.TestCase):
         self.assertEqual(audit_dict["POI_B"], 50)
         self.assertEqual(audit_dict["POI_A"], 0)
 
+    def test_simulate_gravity_demand_single_origin_beyond_distance(self):
+        pts = [
+            {"id": "orig_1", "location": [-86.85, 21.15], "jobs": 0, "residents": 100, "pea_15ymas": 50, "popIds": []},
+            {"id": "dest_1", "location": [-85.00, 21.15], "jobs": 100, "residents": 0, "pea_15ymas": 0, "popIds": []}
+        ]
+        pops = simulate_gravity_demand(pts, max_distance_km=50.0, seed=42)
+        self.assertEqual(sum(p["size"] for p in pops), 50)
+
+    def test_simulate_gravity_demand_no_self_loops_special_poi(self):
+        pts = [
+            {"id": "AIR_CUN", "location": [-86.87, 21.03], "jobs": 100, "residents": 100, "pea_15ymas": 50, "popIds": [], "is_special": True},
+            {"id": "dest_reg", "location": [-86.85, 21.15], "jobs": 200, "residents": 0, "pea_15ymas": 0, "popIds": []},
+            {"id": "orig_normal", "location": [-86.84, 21.14], "jobs": 0, "residents": 200, "pea_15ymas": 100, "popIds": []}
+        ]
+        pops = simulate_gravity_demand(pts, seed=42)
+        self_loops = [p for p in pops if p["residenceId"] == p["jobId"]]
+        self.assertEqual(len(self_loops), 0)
+        for p in pts:
+            self.assertEqual(len(p["popIds"]), len(set(p["popIds"])))
+
 if __name__ == "__main__":
     unittest.main()
 

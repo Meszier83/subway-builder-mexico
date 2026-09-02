@@ -29,15 +29,19 @@ def format_cve_mun(cve_mun_raw, cve_ent_raw=None) -> str:
     """
     Homologa claves municipales y estatales al estándar INEGI de 5 dígitos (EEMMM).
     Soporta:
-    - Claves municipales de 5 dígitos completas (ej. '23005' -> '23005')
-    - Claves municipales de 4 dígitos (ej. '1001' -> '01001')
+    - Claves municipales de 5 dígitos completas (ej. '23005' -> '23005', '23005.0' -> '23005')
+    - Claves municipales de 4 dígitos (ej. '1001' -> '01001', '1001.0' -> '01001')
     - Claves separadas municipio + entidad (ej. '005', '23' -> '23005' o '5', '1' -> '01005')
     """
     if cve_mun_raw is None:
         return "-1"
     s_mun = str(cve_mun_raw).strip()
-    if not s_mun or s_mun.lower() == 'nan' or s_mun == '-1':
+    if not s_mun or s_mun.lower() in ('nan', 'none', '-1'):
         return "-1"
+
+    # Normalizar si viene como representación flotante (ej. '23005.0' o '1001.0')
+    if s_mun.endswith('.0'):
+        s_mun = s_mun[:-2].strip()
 
     # Caso 1: Si s_mun ya contiene la clave completa de 4 o 5 dígitos numéricos
     if s_mun.isdigit() and len(s_mun) in (4, 5):
@@ -51,14 +55,21 @@ def format_cve_mun(cve_mun_raw, cve_ent_raw=None) -> str:
             pass
 
     # Caso 2: Combinar municipio con clave de entidad
-    s_ent = str(cve_ent_raw).strip().zfill(2) if cve_ent_raw is not None else "00"
-    if not s_ent or s_ent == '00' or s_ent.lower() == 'nan':
+    s_ent = str(cve_ent_raw).strip() if cve_ent_raw is not None else "00"
+    if s_ent.endswith('.0'):
+        s_ent = s_ent[:-2].strip()
+    s_ent = s_ent.zfill(2)
+
+    if not s_ent or s_ent == '00' or s_ent.lower() in ('nan', 'none'):
         return "-1"
     try:
         num_mun = int(float(s_mun))
         num_ent = int(float(s_ent))
         if num_mun <= 0 or num_ent < 1 or num_ent > 32:
             return "-1"
+        # Si num_mun ya contiene la clave completa de 5 dígitos coincidente con la entidad
+        if num_mun >= 1000 and (num_mun // 1000) == num_ent:
+            return f"{num_mun:05d}"
         return f"{num_ent:02d}{num_mun:03d}"
     except (ValueError, TypeError):
         return "-1"
@@ -383,11 +394,14 @@ def load_cpv_demography(
     bbox: Dict[str, float],
     tasa_pea: float,
     growth_factors: Optional[Dict[str, float]] = None,
+    conapo_projections: Optional[Dict[str, float]] = None,
     default_growth: float = 1.0
 ) -> pd.DataFrame:
     """
     Carga e imputa georreferenciación de población (CPV 2020) por manzana.
-    Aplica tasa PEA y resuelve coordenadas mediante cruce jerárquico resiliente en 4 niveles con el DENUE.
+    Aplica tasa PEA y resuelve coordenadas mediante cruce jerárquico resiliente con el DENUE.
+    Deriva automáticamente los factores de crecimiento municipal a partir de proyecciones oficiales de CONAPO:
+    growth_factor_m = POB_CONAPO_m / POB_CPV2020_m.
     Soporta múltiples archivos para zonas metropolitanas multi-estado.
     """
     if isinstance(cpv_paths, str):
@@ -437,8 +451,15 @@ def load_cpv_demography(
     df_censo['ageb_clean'] = df_censo['AGEB'].astype(str).str.strip().str.upper().str.replace('-', '').str.zfill(4)
     df_censo['mza_clean'] = df_censo['mza_num'].astype(int).astype(str)
 
-    # Factores de proyección poblacional
-    growth_dict = growth_factors or {}
+    # Factores de proyección poblacional (integración de CONAPO)
+    growth_dict = dict(growth_factors or {})
+    if conapo_projections:
+        cpv_mun_totals = df_censo.groupby('cve_mun_clean')['pobtot_num'].sum().to_dict()
+        for cve_mun, proj_pob in conapo_projections.items():
+            if cve_mun not in growth_dict and cve_mun in cpv_mun_totals and cpv_mun_totals[cve_mun] > 0:
+                ratio = proj_pob / cpv_mun_totals[cve_mun]
+                growth_dict[cve_mun] = round(float(np.clip(ratio, 0.90, 1.60)), 4)
+
     df_censo['growth'] = df_censo['cve_mun_clean'].map(growth_dict).fillna(default_growth)
     df_censo['pobtot_adj'] = df_censo['pobtot_num'] * df_censo['growth']
     df_censo['pob15_adj'] = df_censo['pob15_num'] * df_censo['growth']

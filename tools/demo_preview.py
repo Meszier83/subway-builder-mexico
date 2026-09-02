@@ -1,5 +1,12 @@
+import os
+import sys
 import json
 import numpy as np
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 from sb_mexico.gravity import simulate_gravity_demand, sanitize_demand_points
 from visualize import generate_html_viewer
 

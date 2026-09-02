@@ -309,8 +309,19 @@ def simulate_gravity_demand(
         remaining_quota = target_quota
         sp_assigned = np.zeros(len(origins), dtype=np.int64)
 
+        # Identificar si el destino especial es también un origen (evitar auto-viajes)
+        self_orig_idx = None
+        for idx, o in enumerate(origins):
+            if o["id"] == sp_id:
+                self_orig_idx = idx
+                break
+
         while remaining_quota > 0 and np.any(orig_pea > 0):
             active_mask = orig_pea > 0
+            if self_orig_idx is not None:
+                active_mask[self_orig_idx] = False
+            if not np.any(active_mask):
+                break
             sp_weights = np.zeros(len(origins), dtype=np.float64)
             sp_weights[active_mask] = orig_pea[active_mask].astype(np.float64) * np.exp(-0.04 * dist_km[active_mask])
             total_w = sp_weights.sum()
@@ -347,7 +358,8 @@ def simulate_gravity_demand(
                     "drivingDistance": dist_m
                 })
                 orig["popIds"].append(pid)
-                sp_dest["popIds"].append(pid)
+                if sp_dest["id"] != orig["id"]:
+                    sp_dest["popIds"].append(pid)
                 pop_id += 1
                 pax_left -= chunk
 
@@ -378,7 +390,7 @@ def simulate_gravity_demand(
 
         # Normalizar probabilidades
         row_sums = weights.sum(axis=1, keepdims=True)
-        zero_rows = (row_sums.squeeze() == 0)
+        zero_rows = (row_sums.reshape(-1) == 0)
         if np.any(zero_rows):
             for i in np.where(zero_rows)[0]:
                 nearest_dests = np.argsort(dist_km_mat[i])[:5]

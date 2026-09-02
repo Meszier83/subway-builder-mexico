@@ -20,6 +20,14 @@ class TestInegi(unittest.TestCase):
         self.assertEqual(format_cve_mun("invalid", "23"), "-1")
         self.assertEqual(format_cve_mun("-1", "23"), "-1")
         self.assertEqual(format_cve_mun(None, "23"), "-1")
+        # Casos con flotantes de pandas
+        self.assertEqual(format_cve_mun("23005.0", None), "23005")
+        self.assertEqual(format_cve_mun(23005.0, None), "23005")
+        self.assertEqual(format_cve_mun("23005.0", "23"), "23005")
+        self.assertEqual(format_cve_mun("1001.0", None), "01001")
+        self.assertEqual(format_cve_mun("1001.0", "01"), "01001")
+        self.assertEqual(format_cve_mun("5.0", "23"), "23005")
+        self.assertEqual(format_cve_mun(" 23005 ", None), "23005")
 
     def test_parse_enoe_indicators(self):
         with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as f:

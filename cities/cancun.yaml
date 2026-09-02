@@ -78,7 +78,7 @@ pois:
     type: "resort"
     loc: [-86.74700, 21.13700]
     jobs: 22000
-    radius_m: 1500
+    radius_m: 800
     mode: "MAX"
 
   - id: "Zona Hotelera (Punta Nizuc)"
@@ -88,6 +88,6 @@ pois:
     type: "resort"
     loc: [-86.78400, 21.04200]
     jobs: 14000
-    radius_m: 1500
+    radius_m: 800
     mode: "MAX"
 
