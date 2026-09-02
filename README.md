@@ -1,4 +1,4 @@
-# Subway Builder México (v6.0) 🚇🇲🇽
+# Subway Builder México (v6.1) 🚇🇲🇽
 **Pipeline Integral, Declarativo y Riguroso para Generación de Mapas de México**
 
 ---
@@ -64,13 +64,16 @@ python build.py cities/cancun.yaml --skip-map
 │   ├── _template.yaml       # Plantilla documentada
 │   └── cancun.yaml          # Configuración de Cancún
 ├── sb_mexico/               # Núcleo del motor
-│   ├── inegi.py             # Ingesta, geocodificación y calibración INEGI
-│   ├── gravity.py           # Malla espacial, POIs, dos capas y congestión
+│   ├── inegi.py             # Ingesta, geocodificación y calibración INEGI/CONAPO
+│   ├── gravity.py           # Malla espacial, POIs, dos capas y asignación multinomial
+│   ├── special_demand.py    # Validación y exportación de demanda especial (Taxonomía v5)
+│   ├── toponymy.py          # Extracción y filtrado toponímico para OSM XML/PBF
 │   ├── cartography.py       # Wrapper de depot.maps.MapGen
 │   └── pipeline.py          # Orquestador integral y empaquetado
 ├── tests/                   # Suite formal de pruebas unitarias
 ├── tools/                   # Utilidades y scripts auxiliares
 │   ├── poi_studio.py        # Editor visual de POIs y calibrador en mapa satelital
+│   ├── preview_toponymy.py  # Visor geoespacial de capas toponímicas
 │   └── demo_preview.py      # Generador rápido de vistas previas
 ├── build.py                 # CLI de ejecución principal
 ├── visualize.py             # Visor HTML interactivo de demanda
@@ -85,7 +88,7 @@ python build.py cities/cancun.yaml --skip-map
 
 * [**Guía de Fuentes de Datos (DATA_SOURCES.md)**](DATA_SOURCES.md): Enlaces y pasos para descargar datos de cualquier estado en 3 minutos.
 * [**Libro Blanco y Metodología (METHODOLOGY.md)**](METHODOLOGY.md): Formulación matemática y justificación técnica.
-* [**Manual Maestro (MANUAL_MAESTRO_v6.0.md)**](MANUAL_MAESTRO_v6.0.md): Guía de referencia paso a paso.
+* [**Manual Maestro (MANUAL_MAESTRO_v6.1.md)**](MANUAL_MAESTRO_v6.1.md): Guía de referencia paso a paso.
 
 ---
 

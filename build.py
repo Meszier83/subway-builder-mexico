@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Subway Builder México CLI - v6.0
+Subway Builder México CLI - v6.1
 ================================
 Ejecución:
     python build.py cities/cancun.yaml
@@ -13,7 +13,7 @@ from sb_mexico.pipeline import execute_pipeline
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Subway Builder México Engine v6.0 - Compilador de Mapas y Demanda"
+        description="Subway Builder México Engine v6.1 - Compilador de Mapas y Demanda"
     )
     parser.add_argument(
         "config",

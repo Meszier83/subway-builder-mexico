@@ -63,7 +63,7 @@ def generate_html_viewer(demand_json_path, config_json_path, output_html="previe
     <div id="map"></div>
     <div class="hud-panel">
         <div class="hud-title">{city_name} ({city_code})</div>
-        <div class="hud-subtitle">Subway Builder México v6.0 - Visor de Interacción</div>
+        <div class="hud-subtitle">Subway Builder México v6.1 - Visor de Interacción</div>
         <div class="stat-grid">
             <div class="stat-box"><div>Población</div><div class="stat-num">{total_residents:,}</div></div>
             <div class="stat-box"><div>Empleos</div><div class="stat-num">{total_jobs:,}</div></div>

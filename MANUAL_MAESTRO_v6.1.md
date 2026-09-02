@@ -1,19 +1,19 @@
-# MANUAL MAESTRO: SUBWAY BUILDER MÉXICO (v6.0)
+# MANUAL MAESTRO: SUBWAY BUILDER MÉXICO (v6.1)
 **Arquitectura de Compilación y Modelado de Demanda Geoespacial (INEGI & Depot)**
 
 ---
 
-## 1. INTRODUCCIÓN Y FILOSOFÍA v6.0
+## 1. INTRODUCCIÓN Y FILOSOFÍA v6.1
 
-La versión 6.0 abandona el antiguo paradigma de "copiar y pegar bloques de código en múltiples checkpoints" en favor de una **arquitectura declarativa y automatizada**:
+La versión 6.1 amplía la arquitectura declarativa y automatizada con módulos de toponimia enriquecida, validación de demanda especial y herramientas interactivas:
 
-1. **Un solo comando:** La compilación cartográfica, el cruce censal, el modelo gravitatorio y el empaquetado se ejecutan de inicio a fin con un solo comando:
+1. **Un solo comando:** La compilación cartográfica, el cruce censal, el modelo gravitatorio, la toponimia y el empaquetado se ejecutan de inicio a fin con un solo comando:
    ```bash
    python build.py cities/cancun.yaml
    ```
-2. **Modelo Gravitatorio Puro:** Implementación de asignación multinomial directa con conservación matemática estricta de la PEA a priori (sin sesgos, sin inflaciones ni rellenos artificiales).
-3. **Integración Nativa con Depot:** Uso completo de `depot.maps.MapGen` para vector tiles optimizados y `depot.demand.DemandData` para sanitización formal y cálculo del viewport de `config.json`.
-4. **La IA como Asistente de Investigación:** Tu asistente de IA ya no genera scripts propensos a errores; su función es investigar la ciudad que elijas y entregarte su archivo `ciudad.yaml` listo para correr.
+2. **Modelo Gravitatorio Puro y Absorción Argmin:** Implementación de asignación multinomial directa con conservación matemática estricta de la PEA a priori y absorción de establecimientos DENUE por mínima distancia espacial esferoidal.
+3. **Toponimia y Taxonomía Modular:** Generación de archivos toponímicos OSM y `special_demand_points.json` validados contra el estándar oficial de Subway Builder Modded.
+4. **POI Studio Interactivo:** Servidor web local para diseñar, medir y calibrar radios de absorción de POIs con soporte satelital.
 
 ---
 
@@ -26,10 +26,15 @@ MANUAL SB/
 │   ├── cancun.yaml                  # Configuración de Cancún / Q. Roo
 │   └── ...                          # Tus próximas ciudades
 ├── sb_mexico/                       # Motor de procesamiento en Python
-│   ├── inegi.py                     # Ingesta y conciliación de CPV, DENUE, CE 2024 y ENOE
-│   ├── gravity.py                   # Modelo de fricción β=0.12 y asignación multinomial
+│   ├── inegi.py                     # Ingesta y conciliación de CPV, DENUE, CE 2024, ENOE y CONAPO
+│   ├── gravity.py                   # Modelo de fricción β=0.12 y asignación multinomial con argmin
+│   ├── special_demand.py            # Generación y validación de demanda especial (Taxonomía v5)
+│   ├── toponymy.py                  # Extractor y conversor de toponimia urbana a OSM XML/PBF
 │   ├── cartography.py               # Generador cartográfico con depot.maps.MapGen
 │   └── pipeline.py                  # Orquestador del flujo completo y autovalidaciones
+├── tools/                           # Herramientas de visualización y diseño
+│   ├── poi_studio.py                # Visualizador y editor interactivo de POIs (Leaflet)
+│   └── preview_toponymy.py          # Visor geoespacial de capas toponímicas
 ├── build.py                         # CLI ejecutable
 └── *.csv / *.osm.pbf                # Datos fuente del INEGI y OpenStreetMap
 ```

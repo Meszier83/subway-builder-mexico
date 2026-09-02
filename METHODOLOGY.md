@@ -1,4 +1,4 @@
-# Libro Blanco de Metodología y Fundamentos Matemáticos (v6.0) 📐🚇
+# Libro Blanco de Metodología y Fundamentos Matemáticos (v6.1) 📐🚇
 
 ## 1. Fundamentación Teórica
 A diferencia del estándar estadounidense basado en encuestas de origen-destino (LODES/LEHD), México no cuenta con matrices O-D universales a nivel manzana. sb_mexico implementa un modelo de interacción espacial gravitatoria de **Muestreo Multinomial Puro en Dos Capas**, calibrado con microdatos del INEGI.

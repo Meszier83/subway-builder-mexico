@@ -77,7 +77,7 @@ def execute_pipeline(
     """
     Ejecuta el pipeline completo de principio a fin de manera determinista y autovalidada.
     """
-    console.print(Panel.fit("[bold green]SUBWAY BUILDER MÉXICO v6.0[/bold green]\n[cyan]Pipeline Integral y Autovalidado[/cyan]"))
+    console.print(Panel.fit("[bold green]SUBWAY BUILDER MÉXICO v6.1[/bold green]\n[cyan]Pipeline Integral y Autovalidado[/cyan]"))
 
     src_dir = os.path.abspath(data_dir or output_dir)
     out_dir = os.path.abspath(output_dir)
@@ -316,8 +316,8 @@ def execute_pipeline(
             name=city_info["name"],
             code=city_code,
             description=city_info["description"][:80],
-            creator=city_info.get("creator", "Subway Builder México v6.0"),
-            version="6.0.0",
+            creator=city_info.get("creator", "Subway Builder México v6.1"),
+            version="6.1.0",
             filename=cfg_out_path
         )
         # Asegurar centrado baricéntrico inteligente
@@ -352,8 +352,8 @@ def execute_pipeline(
                 "pitch": 0,
                 "bearing": 0
             },
-            "creator": city_info.get("creator", "Subway Builder México v6.0"),
-            "version": "6.0.0"
+            "creator": city_info.get("creator", "Subway Builder México v6.1"),
+            "version": "6.1.0"
         }
         with open(cfg_out_path, "w", encoding="utf-8") as f:
             json.dump(config_data, f, indent=2, ensure_ascii=False)

@@ -55,7 +55,7 @@ config_data = {
         "bearing": 0
     },
     "creator": "Keppler",
-    "version": "6.0.0"
+    "version": "6.1.0"
 }
 
 with open("config.json", "w", encoding="utf-8") as f:
