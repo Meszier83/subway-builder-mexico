@@ -46,11 +46,13 @@ def build_city_map(
     build_dir: Optional[str] = None,
     building_filter_size: float = 15.0,
     building_simplification: float = 0.2,
-    include_ocean: bool = False
+    include_ocean: bool = False,
+    places: Optional[List[Dict]] = None
 ) -> Dict[str, str]:
     """
     Ejecuta el pipeline cartográfico completo de depot.maps.MapGen.
     Genera .pmtiles, roads.geojson, buildings_index.bin.gz, etc.
+    Si se proporcionan 'places', inyecta un parche de toponimia previa compilación.
     """
     from depot.maps import MapGen
 
@@ -69,7 +71,17 @@ def build_city_map(
 
     os.makedirs(native_build_dir, exist_ok=True)
     target_pbf_path = os.path.join(native_build_dir, osm_pbf_name)
-    
+
+    # Inyección opcional de toponimia curada si se definieron 'places'
+    if places and len(places) > 0:
+        try:
+            from sb_mexico.toponymy import generate_osm_patch
+            patch_path = os.path.join(native_build_dir, f"{city_code.lower()}_places_patch.osm")
+            generate_osm_patch(places, patch_path)
+            print(f"-> Parche de toponimia generado: {len(places)} colonias en {patch_path}")
+        except Exception as e:
+            print(f"  [WARN] No se pudo generar el parche de toponimia: {e}")
+
     # Copiar PBF al directorio de compilación solo si no existe o cambió de tamaño
     if not os.path.exists(target_pbf_path) or os.path.getsize(target_pbf_path) != os.path.getsize(osm_pbf_path):
         print(f"-> Copiando {osm_pbf_name} a {native_build_dir}...")
@@ -123,12 +135,12 @@ def build_city_map(
             dst = os.path.join(work_dir, filename)
             shutil.copyfile(src, dst)
             generated_files[filename] = dst
-            print(f"  ✓ Archivo cartográfico copiado: {filename}")
+            print(f"  [OK] Archivo cartográfico copiado: {filename}")
         else:
             if filename == "ocean_depth_index.json.gz" and not include_ocean:
                 continue
             if filename == "runways_taxiways.geojson":
                 continue
-            print(f"  ⚠ Advertencia: no se encontró {filename} en {native_build_dir}")
+            print(f"  [WARN] Advertencia: no se encontró {filename} en {native_build_dir}")
 
     return generated_files

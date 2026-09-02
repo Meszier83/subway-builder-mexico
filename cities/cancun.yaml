@@ -29,37 +29,65 @@ macroeconomics:
     "23005": 1.07                      # Benito Juárez (Cancún)
 pois:
   - id: "AIR_Cancún"
+    name:
+      es: "Aeropuerto Internacional de Cancún"
+      en: "Cancun International Airport"
+    type: "airport"
+    sub_type: "international_terminal"
     loc: [-86.87508, 21.04045]
     jobs: 31991
     radius_m: 1500
     mode: "MAX"
+    metadata:
+      source: "ASUR / AFAC 2026"
 
   - id: "UNI_Universidad del Caribe"
+    name:
+      es: "Universidad del Caribe"
+      en: "University of the Caribbean"
+    type: "university"
     loc: [-86.82306, 21.20066]
     jobs: 7500
     radius_m: 300
     mode: "BOOST"
 
   - id: "UNI_Tecnológico de Cancún"
+    name:
+      es: "Instituto Tecnológico de Cancún"
+      en: "Cancun Institute of Technology"
+    type: "university"
     loc: [-86.83486, 21.13911]
     jobs: 6000
     radius_m: 600
     mode: "BOOST"
 
   - id: "Plaza Las Américas"
+    name:
+      es: "Plaza Las Américas Cancún"
+      en: "Las Americas Shopping Mall"
+    type: "shopping_center"
     loc: [-86.82302, 21.14679]
     jobs: 8500
     radius_m: 350
     mode: "MAX"
 
   - id: "Zona Hotelera (Punta Cancún)"
+    name:
+      es: "Zona Hotelera - Punta Cancún"
+      en: "Hotel Zone - Punta Cancun"
+    type: "resort"
     loc: [-86.74700, 21.13700]
     jobs: 22000
     radius_m: 1500
     mode: "MAX"
 
   - id: "Zona Hotelera (Punta Nizuc)"
+    name:
+      es: "Zona Hotelera - Punta Nizuc"
+      en: "Hotel Zone - Punta Nizuc"
+    type: "resort"
     loc: [-86.78400, 21.04200]
     jobs: 14000
     radius_m: 1500
     mode: "MAX"
+

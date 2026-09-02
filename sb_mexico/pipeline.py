@@ -29,6 +29,11 @@ from sb_mexico.inegi import (
 )
 from sb_mexico.gravity import build_demand_grid, simulate_gravity_demand, sanitize_demand_points
 from sb_mexico.cartography import build_city_map
+from sb_mexico.special_demand import (
+    generate_special_demand_points_doc,
+    validate_special_demand_points,
+    save_special_demand_points
+)
 
 console = Console()
 
@@ -110,6 +115,7 @@ def execute_pipeline(
             building_filter_size=city_info.get("building_filter_size", 15.0),
             building_simplification=city_info.get("building_simplification", 0.2),
             include_ocean=city_info.get("include_ocean", False),
+            places=city_config.get("places", []),
             output_dir=out_dir
         )
     else:
@@ -327,7 +333,7 @@ def execute_pipeline(
                 json.dump(cfg_json, f, indent=2, ensure_ascii=False)
 
         dd.save(demand_out_path)
-        console.print("[green]✓[/green] Sanitización y exportación mediante [bold]depot.demand.DemandData[/bold] exitosa.")
+        console.print("[green][OK][/green] Sanitización y exportación mediante [bold]depot.demand.DemandData[/bold] exitosa.")
     except Exception as e:
         console.print(f"[yellow]Nota: depot.demand fallback nativo ({e}). Exportando directamente...[/yellow]")
         # Exportación manual de respaldo
@@ -352,6 +358,24 @@ def execute_pipeline(
         with open(cfg_out_path, "w", encoding="utf-8") as f:
             json.dump(config_data, f, indent=2, ensure_ascii=False)
 
+    # B. Generación y Validación de Metadatos de Demanda Especial (Subway Builder Modded Standard)
+    if pois_cfg:
+        sp_doc = generate_special_demand_points_doc(
+            map_code=city_code,
+            special_pois_cfg=pois_cfg,
+            demand_points=demand_points
+        )
+        is_valid, validation_errors = validate_special_demand_points(sp_doc)
+        if not is_valid:
+            console.print(f"[bold red][WARN] Advertencia de validación en Special Demand Points ({len(validation_errors)} errores):[/bold red]")
+            for err in validation_errors:
+                console.print(f"  - [red]{err}[/red]")
+        else:
+            console.print(f"[green][OK][/green] Validación Special Demand Schema: [bold green]OK ({len(sp_doc['points'])} POIs conformes con @subway-builder-modded/special-demand-schemas)[/bold green]")
+
+        sp_out_path = os.path.join(out_dir, "special_demand_points.json")
+        save_special_demand_points(sp_doc, sp_out_path)
+
     # =========================================================================
     # 6. EMPAQUETADO EN ARCHIVO ZIP FINAL
     # =========================================================================
@@ -370,6 +394,7 @@ def execute_pipeline(
     files_to_pack = [
         "config.json",
         "demand_data.json",
+        "special_demand_points.json",
         f"{city_code}.pmtiles",
         "buildings_index.bin.gz",
         "roads.geojson",

@@ -35,38 +35,58 @@ macroeconomics:
 # ==============================================================================
 # GENERADORES ESPECIALES (POIs) - REGLAS Y TAXONOMÍA:
 #
-# 1. Prefijos de ID Nativos del Juego:
-#    - AIR_* : Aeropuertos -> Activa horario 24/7 (dampening = 0.5) y flujo simétrico.
-#    - UNI_* : Universidades -> Activa horario estudiantil (dampening = 0.3).
-#    - SPO_* : Estadios y complejos deportivos.
-#    - TOU_* : Anclas turísticas y centros de convenciones.
-#    - MED_* : Complejos médicos y hospitales de alta especialidad.
-#    - TRA_* : Terminales centrales de autobuses o trenes interurbanos.
+# 1. Prefijos y Taxonomía Oficial (Subway Builder Modded / Foundry Standard):
+#    - AIR_* : Aeropuertos (type: airport, sub_type: international_terminal / domestic_terminal)
+#    - UNI_* : Universidades (type: university)
+#    - SPO_* : Estadios y complejos deportivos (type: sports_facility, sub_type: stadium)
+#    - TOU_* : Anclas turísticas y resorts (type: resort / amusement_park)
+#    - MED_* : Complejos médicos y hospitales (type: hospital)
+#    - TRA_* : Terminales centrales y estaciones (type: transit_station)
+#    - MAL_* / Plaza : Centros comerciales (type: shopping_center)
+#    - CUL_* : Centros culturales / museos (type: cultural_center / museum)
+#    - CNV_* : Centros de convenciones (type: convention_center)
 #
-# 2. Modos de Asignación:
+# 2. Atributos Opcionales Enriquecidos:
+#    - name      : Diccionario bilingüe (es, en) o texto para nombres en la UI del juego.
+#    - type      : Tipo canónico según special_demand_types.json (se infiere si se omite).
+#    - sub_type  : Subtipo específico (ej. international_terminal, stadium, campus).
+#    - metadata  : Metadatos libres (ej. source: "ASUR 2026", capacity: 45000).
+#
+# 3. Modos de Asignación:
 #    - MAX     : (Recomendado) Garantiza una cuota objetivo absorbiendo los negocios
 #                locales del DENUE en su radio y añadiendo la diferencia.
 #    - BOOST   : Suma la cuota como empleo exógeno puro encima del censo.
 #    - REPLACE : Sobrescribe y reemplaza totalmente los empleos del DENUE en el radio.
-#
-# 3. Regla para Clusters Comerciales / Corredores (ej. Zona Hotelera):
-#    - NO crear un solo mega-POI que concentre todo el corredor en 1 punto.
-#    - Usar POIs puntuales para anclas específicas con radio acotado (radius_m: 500-800).
 # ==============================================================================
 pois:
-  - id: "AIR_Aeropuerto_Internacional"
+  - id: "AIR_Cancún"
+    name:
+      es: "Aeropuerto Internacional de Cancún"
+      en: "Cancun International Airport"
+    type: "airport"
+    sub_type: "international_terminal"
     loc: [-86.874, 21.036]
     jobs: 32000                       # Cuota objetivo basada en pasajeros y personal
     radius_m: 2500                    # Radio físico del polígono aeroportuario
     mode: "MAX"                       # Absorbe DENUE local y fija piso de 32k
+    metadata:
+      source: "ASUR / AFAC 2026"
 
   - id: "UNI_Campus_Metropolitano"
+    name:
+      es: "Universidad Metropolitana"
+      en: "Metropolitan University"
+    type: "university"
     loc: [-86.840, 21.150]
     jobs: 8000                        # Matrícula estudiantil + personal docente
     radius_m: 800                     # Radio del campus
     mode: "MAX"
 
   - id: "TOU_Centro_Convenciones"
+    name:
+      es: "Centro Internacional de Convenciones"
+      en: "International Convention Center"
+    type: "convention_center"
     loc: [-86.748, 21.134]
     jobs: 6000                        # Flujo de visitantes/turistas en nodo ancla
     radius_m: 600                     # Radio acotado (no cubre todo el corredor)

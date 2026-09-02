@@ -354,10 +354,10 @@
             max-height: 400px;
         }
 
-        /* Floating HUD over Map */
+        /* Floating HUD over Map (Bottom-Right Dock) */
         .map-hud {
             position: absolute;
-            top: 75px;
+            bottom: 25px;
             right: 20px;
             z-index: 990;
             background: var(--bg-panel);
@@ -369,7 +369,7 @@
             display: flex;
             flex-direction: column;
             gap: 8px;
-            min-width: 220px;
+            min-width: 230px;
         }
         .map-hud-title {
             font-size: 11px;
@@ -384,28 +384,37 @@
         }
         .map-hud-stat strong { color: var(--accent-cyan); }
 
-        /* Estilos Oscuros para Controles Leaflet */
+        /* Estilos Oscuros para Controles Leaflet (Top-Right Layer Switcher) */
+        .leaflet-top.leaflet-right {
+            top: 15px !important;
+            right: 20px !important;
+            z-index: 1000 !important;
+        }
         .leaflet-control-layers {
-            background: rgba(15, 23, 42, 0.92) !important;
-            backdrop-filter: blur(10px) !important;
-            border: 1px solid rgba(255, 255, 255, 0.15) !important;
+            background: rgba(15, 23, 42, 0.94) !important;
+            backdrop-filter: blur(12px) !important;
+            border: 1px solid rgba(255, 255, 255, 0.18) !important;
             border-radius: 10px !important;
             color: #f8fafc !important;
             box-shadow: var(--shadow-lg) !important;
-            margin-top: 15px !important;
-            margin-right: 20px !important;
+            margin: 0 !important;
         }
         .leaflet-control-layers-expanded {
-            padding: 10px 14px !important;
+            padding: 12px 16px !important;
             font-size: 12px !important;
+            min-width: 220px !important;
         }
-        .leaflet-control-layers-base label {
-            margin-bottom: 4px;
-            cursor: pointer;
+        .leaflet-control-layers-base label,
+        .leaflet-control-layers-overlays label {
+            margin-bottom: 6px !important;
+            cursor: pointer !important;
+            display: flex !important;
+            align-items: center !important;
+            gap: 6px !important;
         }
         .leaflet-control-layers-toggle {
             background-color: rgba(15, 23, 42, 0.9) !important;
-            border: 1px solid rgba(255, 255, 255, 0.15) !important;
+            border: 1px solid rgba(255, 255, 255, 0.2) !important;
             border-radius: 8px !important;
         }
         .leaflet-bar a {
@@ -511,6 +520,97 @@
             transition: transform 0.2s;
         }
         .poi-marker-icon:hover { transform: scale(1.15); }
+
+        /* Place Markers & Tooltips */
+        .place-marker-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px;
+            height: 26px;
+            border-radius: 6px;
+            background: #0284c7;
+            border: 2px solid #38bdf8;
+            color: #fff;
+            font-size: 11px;
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+            transition: transform 0.2s;
+        }
+        .place-marker-icon:hover { transform: scale(1.2); }
+
+        .place-tooltip-label {
+            background: rgba(11, 15, 25, 0.85) !important;
+            border: 1px solid rgba(56, 189, 248, 0.5) !important;
+            border-radius: 4px !important;
+            color: #7dd3fc !important;
+            font-size: 11px !important;
+            font-weight: 700 !important;
+            padding: 2px 6px !important;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.6) !important;
+            text-shadow: 0 1px 2px #000;
+        }
+
+        /* Places Card */
+        .place-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            transition: all 0.2s;
+        }
+        .place-card:hover { background: var(--bg-card-hover); border-color: rgba(56, 189, 248, 0.4); }
+
+        /* Suggestions Modal / Drawer */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(4px);
+            z-index: 2000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-card {
+            width: 480px;
+            max-width: 90vw;
+            max-height: 80vh;
+            background: #0f172a;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.8);
+            display: flex;
+            flex-direction: column;
+            padding: 18px;
+        }
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .suggestions-list {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .suggestion-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: rgba(30, 41, 59, 0.7);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 6px;
+            font-size: 12px;
+        }
+        .suggestion-item:hover { background: rgba(51, 65, 85, 0.9); border-color: rgba(56, 189, 248, 0.3); }
     </style>
 </head>
 <body>
@@ -544,7 +644,10 @@
                     <i class="fa-solid fa-list-check"></i> POIs (<span id="poi-count-badge">0</span>)
                 </button>
                 <button class="tab-btn" data-tab="tab-editor">
-                    <i class="fa-solid fa-pen-to-square"></i> Editor
+                    <i class="fa-solid fa-pen-to-square"></i> Editor POI
+                </button>
+                <button class="tab-btn" data-tab="tab-places">
+                    <i class="fa-solid fa-tags"></i> Colonias (<span id="place-count-badge">0</span>)
                 </button>
                 <button class="tab-btn" data-tab="tab-validation">
                     <i class="fa-solid fa-shield-halved"></i> Validar (<span id="val-issue-badge">0</span>)
@@ -652,7 +755,25 @@
                 </div>
             </div>
 
-            <!-- TAB 3: VALIDATION -->
+            <!-- TAB 3: PLACES / COLONIAS -->
+            <div id="tab-places" class="tab-content">
+                <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                    <button class="btn btn-sm btn-primary" id="btn-new-place" style="flex: 1;">
+                        <i class="fa-solid fa-plus"></i> Nueva Colonia
+                    </button>
+                    <button class="btn btn-sm btn-amber" id="btn-show-suggestions" style="flex: 1;" title="Sugerencias limpias del DENUE">
+                        <i class="fa-solid fa-lightbulb"></i> Sugerencias DENUE
+                    </button>
+                </div>
+                <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">
+                    Etiquetas toponímicas curadas inyectadas en la capa de mapa (.pmtiles).
+                </div>
+                <div id="places-container">
+                    <!-- Place cards will be inserted here dynamically -->
+                </div>
+            </div>
+
+            <!-- TAB 4: VALIDATION -->
             <div id="tab-validation" class="tab-content">
                 <div style="font-size: 13px; font-weight: 700; margin-bottom: 10px; color: var(--accent-cyan);">
                     Auditoría Preventiva de Calidad (Pre-flight Checks)
@@ -717,8 +838,27 @@
         <!-- Interactive Map Click Bar -->
         <div class="map-crosshair-tip" id="map-pick-tip">
             <i class="fa-solid fa-location-crosshairs fa-fade" style="color: var(--accent-cyan);"></i>
-            <span>Haz clic en el mapa para situar las coordenadas del POI</span>
+            <span id="map-pick-tip-text">Haz clic en el mapa para situar las coordenadas</span>
             <button class="btn btn-sm btn-danger" id="btn-cancel-pick" style="margin-left: 8px;">Cancelar</button>
+        </div>
+
+        <!-- Modal Sugerencias DENUE -->
+        <div id="modal-suggestions" class="modal-overlay" style="display: none;">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <h3 style="font-size: 15px; color: var(--accent-amber); display: flex; align-items: center; gap: 8px;">
+                        <i class="fa-solid fa-lightbulb"></i> Asistente de Toponimia (DENUE)
+                    </h3>
+                    <button class="btn btn-sm" id="btn-close-suggestions"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;">
+                    Asentamientos y supermanzanas detectados con mayor densidad comercial. Haz clic en <strong>+ Añadir</strong> para incorporarlos a tu mapa.
+                </div>
+                <input type="text" id="suggestions-search" class="form-input" placeholder="🔍 Filtrar por nombre (ej. 94, Otoch, Bonfil, Paseos)..." style="margin-bottom: 8px;" />
+                <div id="suggestions-list" class="suggestions-list">
+                    <div style="text-align: center; color: var(--text-muted); padding: 20px;">Cargando sugerencias del DENUE...</div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -727,15 +867,20 @@
         let currentCityFile = "";
         let currentCityData = null;
         let pois = [];
+        let places = [];
         let map = null;
         let bboxLayer = null;
         let poiLayers = new Map(); // id -> { marker, circle }
+        let placeMarkers = []; // Array of markers for places
         let densityPoints = []; // Array of { id, location: [lon, lat], jobs, residents }
         let residentsLayerGroup = L.layerGroup();
         let jobsLayerGroup = L.layerGroup();
+        let placesLayerGroup = L.layerGroup();
         let layerControl = null;
         let isPickingLocation = false;
+        let isPickingPlaceLocation = false;
         let activeEditingPoiId = null;
+        let rawSuggestions = [];
 
         // Area Selection State
         let isBoxSelectActive = false;
@@ -775,49 +920,66 @@
             map = L.map('map', {
                 center: [21.15, -86.85],
                 zoom: 11,
+                minZoom: 4,
+                maxZoom: 20,
                 zoomControl: false
             });
 
-            L.control.zoom({ position: 'bottomright' }).addTo(map);
+            // Zoom control situado en bottom-left (junto al sidebar sin tapar nada)
+            L.control.zoom({ position: 'bottomleft' }).addTo(map);
 
-            // Capa Oscura Limpia (Esri Dark Gray Canvas - sin marca de agua)
+            // Capa Oscura CartoDB Dark Matter (Alta fidelidad global y etiquetas nítidas)
+            const cartoDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+                subdomains: 'abcd',
+                maxZoom: 20
+            });
+
+            // Capa Oscura Esri Dark Gray Canvas
             const esriDark = L.layerGroup([
                 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{x}/{y}', {
-                    attribution: 'Tiles &copy; Esri, HERE, Garmin, &copy; OpenStreetMap contributors',
-                    maxZoom: 16
+                    attribution: 'Tiles &copy; Esri',
+                    maxNativeZoom: 16,
+                    maxZoom: 20
                 }),
                 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
                     attribution: '',
-                    maxZoom: 16
+                    maxNativeZoom: 16,
+                    maxZoom: 20
                 })
             ]);
 
             // Capa Satelital de Alta Resolución
             const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
-                maxZoom: 19
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics',
+                maxNativeZoom: 18,
+                maxZoom: 20
             });
 
             // Capa Estándar de Calles
             const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '&copy; OpenStreetMap contributors',
-                maxZoom: 19
+                maxNativeZoom: 19,
+                maxZoom: 20
             });
 
-            esriDark.addTo(map);
+            cartoDark.addTo(map);
+            placesLayerGroup.addTo(map);
 
             const baseMaps = {
-                "🌙 Modo Oscuro (Esri Canvas)": esriDark,
+                "🌙 Modo Oscuro (CartoDB)": cartoDark,
+                "🌑 Modo Oscuro (Esri Canvas)": esriDark,
                 "🛰️ Satelital HD (Esri World)": esriSat,
                 "🗺️ Calles y Nombres (OSM)": osm
             };
 
             const overlayMaps = {
+                "🏷️ Toponimia & Colonias (Places)": placesLayerGroup,
                 "🔵 Nodos Residenciales (Población)": residentsLayerGroup,
                 "🔴 Nodos de Empleo (DENUE)": jobsLayerGroup
             };
 
-            layerControl = L.control.layers(baseMaps, overlayMaps, { position: 'topright' }).addTo(map);
+            layerControl = L.control.layers(baseMaps, overlayMaps, { position: 'topright', collapsed: true }).addTo(map);
 
             // Map Click Event for Coords Picking
             map.on('click', (e) => {
@@ -828,6 +990,11 @@
                     document.getElementById('edit-lon').value = lon;
                     stopPickingLocation();
                     updatePoiPreviewFromForm();
+                } else if (isPickingPlaceLocation) {
+                    const lat = parseFloat(e.latlng.lat.toFixed(5));
+                    const lon = parseFloat(e.latlng.lng.toFixed(5));
+                    stopPickingLocation();
+                    addNewPlaceAt([lon, lat]);
                 }
             });
         }
@@ -901,6 +1068,12 @@
 
             // Delete POI button
             document.getElementById('btn-delete-poi').addEventListener('click', deleteCurrentPoi);
+
+            // Place & Toponymy Events
+            document.getElementById('btn-new-place').addEventListener('click', startPickingPlaceLocation);
+            document.getElementById('btn-show-suggestions').addEventListener('click', openSuggestionsModal);
+            document.getElementById('btn-close-suggestions').addEventListener('click', closeSuggestionsModal);
+            document.getElementById('suggestions-search').addEventListener('input', renderSuggestionsList);
 
             // Save YAML button
             document.getElementById('btn-save-yaml').addEventListener('click', saveAllToDisk);
@@ -1076,10 +1249,14 @@
                 currentCityData = data;
 
                 pois = JSON.parse(JSON.stringify(data.pois || []));
+                places = JSON.parse(JSON.stringify(data.places || []));
+
                 updateHud();
                 renderBbox(data.city.bbox);
                 renderAllPois();
                 renderPoiList();
+                renderAllPlaces();
+                renderPlacesList();
                 runValidations();
                 updateYamlPreview();
 
@@ -1099,6 +1276,7 @@
             const totalJobs = pois.reduce((acc, p) => acc + (parseInt(p.jobs) || 0), 0);
             document.getElementById('hud-total-jobs').innerText = totalJobs.toLocaleString();
             document.getElementById('poi-count-badge').innerText = pois.length;
+            document.getElementById('place-count-badge').innerText = places.length;
         }
 
         function renderBbox(bbox) {
@@ -1515,15 +1693,292 @@
             }
         }
 
+        // =========================================================================
+        // TOPONYMY & PLACES (COLONIAS) MANAGEMENT
+        // =========================================================================
+        function renderAllPlaces() {
+            placesLayerGroup.clearLayers();
+            placeMarkers = [];
+
+            places.forEach((pl, idx) => {
+                const loc = [pl.loc[1], pl.loc[0]];
+                const icon = L.divIcon({
+                    className: 'custom-place-marker',
+                    html: `<div class="place-marker-icon"><i class="fa-solid fa-tag"></i></div>`,
+                    iconSize: [26, 26],
+                    iconAnchor: [13, 13]
+                });
+
+                const marker = L.marker(loc, {
+                    icon: icon,
+                    draggable: true
+                }).addTo(placesLayerGroup);
+
+                marker.bindTooltip(pl.name, {
+                    permanent: true,
+                    direction: 'bottom',
+                    className: 'place-tooltip-label',
+                    offset: [0, 8]
+                });
+
+                marker.on('drag', (e) => {
+                    const newPos = e.target.getLatLng();
+                    pl.loc = [parseFloat(newPos.lng.toFixed(5)), parseFloat(newPos.lat.toFixed(5))];
+                    renderPlacesList();
+                    updateYamlPreview();
+                });
+
+                marker.on('click', () => {
+                    switchTab('tab-places');
+                    const card = document.getElementById(`place-card-${idx}`);
+                    if (card) {
+                        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        card.style.borderColor = 'var(--accent-cyan)';
+                        setTimeout(() => { card.style.borderColor = ''; }, 1500);
+                    }
+                });
+
+                placeMarkers.push(marker);
+            });
+
+            document.getElementById('place-count-badge').innerText = places.length;
+        }
+
+        function renderPlacesList() {
+            const container = document.getElementById('places-container');
+            container.innerHTML = '';
+
+            if (places.length === 0) {
+                container.innerHTML = `
+                    <div style="text-align: center; color: var(--text-muted); padding: 25px 10px;">
+                        <i class="fa-solid fa-tags" style="font-size: 28px; margin-bottom: 8px; color: rgba(255,255,255,0.2);"></i>
+                        <p style="font-size: 12px; margin-bottom: 12px;">No hay colonias o supermanzanas curadas en este mapa.</p>
+                        <button class="btn btn-sm btn-amber" onclick="openSuggestionsModal()">
+                            <i class="fa-solid fa-lightbulb"></i> Sugerencias del DENUE
+                        </button>
+                    </div>
+                `;
+                return;
+            }
+
+            places.forEach((pl, idx) => {
+                const card = document.createElement('div');
+                card.className = 'place-card';
+                card.id = `place-card-${idx}`;
+
+                card.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="font-size: 11px; font-weight: 700; color: var(--accent-cyan);">
+                            <i class="fa-solid fa-tag"></i> #${idx + 1}
+                        </span>
+                        <div style="display: flex; gap: 4px;">
+                            <button class="btn btn-sm" onclick="locatePlace(${idx})" title="Centrar en el mapa" style="padding:2px 6px;">
+                                <i class="fa-solid fa-crosshairs"></i>
+                            </button>
+                            <button class="btn btn-sm btn-danger" onclick="deletePlace(${idx})" title="Eliminar colonia" style="padding:2px 6px;">
+                                <i class="fa-solid fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 6px;">
+                        <input type="text" class="form-input" value="${pl.name}" placeholder="Nombre de la colonia / SM" 
+                               onchange="updatePlaceName(${idx}, this.value)" style="padding: 4px 8px; font-size: 12px;" />
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+                        <div>
+                            <select class="form-select" onchange="updatePlaceType(${idx}, this.value)" style="padding: 4px 6px; font-size: 11px;">
+                                <option value="suburb" ${pl.type === 'suburb' ? 'selected' : ''}>suburb (SM/Zona)</option>
+                                <option value="neighbourhood" ${pl.type === 'neighbourhood' ? 'selected' : ''}>neighbourhood (Colonia)</option>
+                                <option value="quarter" ${pl.type === 'quarter' ? 'selected' : ''}>quarter (Barrio)</option>
+                            </select>
+                        </div>
+                        <div style="font-size: 10px; color: var(--text-muted); display: flex; align-items: center; justify-content: flex-end;">
+                            [${pl.loc[0]}, ${pl.loc[1]}]
+                        </div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function updatePlaceName(idx, newName) {
+            if (places[idx]) {
+                places[idx].name = newName.trim();
+                renderAllPlaces();
+                updateYamlPreview();
+            }
+        }
+
+        function updatePlaceType(idx, newType) {
+            if (places[idx]) {
+                places[idx].type = newType;
+                updateYamlPreview();
+            }
+        }
+
+        function locatePlace(idx) {
+            if (places[idx]) {
+                map.flyTo([places[idx].loc[1], places[idx].loc[0]], 15);
+            }
+        }
+
+        function deletePlace(idx) {
+            if (confirm(`¿Eliminar "${places[idx].name}"?`)) {
+                places.splice(idx, 1);
+                renderAllPlaces();
+                renderPlacesList();
+                updateYamlPreview();
+            }
+        }
+
+        function startPickingPlaceLocation() {
+            isPickingLocation = false;
+            isPickingPlaceLocation = true;
+            document.getElementById('map').style.cursor = 'crosshair';
+            document.getElementById('map-pick-tip-text').innerText = 'Haz clic en el mapa para situar la nueva colonia / supermanzana';
+            document.getElementById('map-pick-tip').classList.add('active');
+        }
+
+        function addNewPlaceAt(loc) {
+            const newPl = {
+                name: `Supermanzana / Colonia ${places.length + 1}`,
+                loc: loc,
+                type: "suburb"
+            };
+            places.push(newPl);
+            renderAllPlaces();
+            renderPlacesList();
+            updateYamlPreview();
+            switchTab('tab-places');
+            map.flyTo([loc[1], loc[0]], 14);
+        }
+
+        // =========================================================================
+        // DENUE SETTLEMENT SUGGESTIONS ASSISTANT
+        // =========================================================================
+        async function openSuggestionsModal() {
+            if (!currentCityFile) return;
+            const modal = document.getElementById('modal-suggestions');
+            modal.style.display = 'flex';
+            const list = document.getElementById('suggestions-list');
+            list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;"><i class="fa-solid fa-spinner fa-spin"></i> Consultando DENUE...</div>';
+
+            try {
+                const res = await fetch(`/api/settlement_suggestions?file=${encodeURIComponent(currentCityFile)}`);
+                if (!res.ok) {
+                    throw new Error(`Error HTTP ${res.status}: ${res.statusText}`);
+                }
+                const data = await res.json();
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                rawSuggestions = data.suggestions || [];
+                renderSuggestionsList();
+            } catch (err) {
+                list.innerHTML = `<div style="color:var(--accent-red); padding:15px; font-size:13px; line-height:1.4;">
+                    <i class="fa-solid fa-circle-exclamation"></i> Error al cargar sugerencias: ${err.message || err}
+                </div>`;
+            }
+        }
+
+        function closeSuggestionsModal() {
+            document.getElementById('modal-suggestions').style.display = 'none';
+        }
+
+        function renderSuggestionsList() {
+            const query = (document.getElementById('suggestions-search').value || '').toLowerCase().trim();
+            const list = document.getElementById('suggestions-list');
+            list.innerHTML = '';
+
+            const filtered = rawSuggestions.filter(s => {
+                return !query || s.name.toLowerCase().includes(query) || (s.tipo_asent || '').toLowerCase().includes(query);
+            });
+
+            if (filtered.length === 0) {
+                list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">No se encontraron asentamientos con ese criterio.</div>';
+                return;
+            }
+
+            filtered.forEach((sugg, idx) => {
+                // Verificar si ya está añadido
+                const isAlreadyAdded = places.some(p => p.name.toLowerCase() === sugg.name.toLowerCase());
+
+                const item = document.createElement('div');
+                item.className = 'suggestion-item';
+                item.innerHTML = `
+                    <div>
+                        <strong style="color:#fff;">${sugg.name}</strong>
+                        <div style="font-size: 11px; color: var(--text-muted);">
+                            <span>${sugg.establishments} comercios</span> • 
+                            <span>Coords: [${sugg.loc[0]}, ${sugg.loc[1]}]</span>
+                        </div>
+                    </div>
+                    <div>
+                        ${isAlreadyAdded 
+                            ? '<span style="font-size:11px; color:var(--accent-green); font-weight:700;"><i class="fa-solid fa-check"></i> Añadido</span>'
+                            : `<button class="btn btn-sm btn-success" onclick="addPlaceFromSuggestionIndex(${rawSuggestions.indexOf(sugg)})">
+                                <i class="fa-solid fa-plus"></i> Añadir
+                               </button>`
+                        }
+                    </div>
+                `;
+                list.appendChild(item);
+            });
+        }
+
+        function addPlaceFromSuggestionIndex(idx) {
+            const sugg = rawSuggestions[idx];
+            if (!sugg) return;
+
+            places.push({
+                name: sugg.name,
+                loc: [sugg.loc[0], sugg.loc[1]],
+                type: sugg.type || "suburb"
+            });
+
+            renderAllPlaces();
+            renderPlacesList();
+            updateYamlPreview();
+            renderSuggestionsList();
+        }
+
         function updateYamlPreview() {
             let yaml = "pois:\n";
             pois.forEach(p => {
                 yaml += `  - id: "${p.id}"\n`;
+                if (p.name) {
+                    if (typeof p.name === 'object') {
+                        yaml += `    name:\n`;
+                        if (p.name.es) yaml += `      es: "${p.name.es}"\n`;
+                        if (p.name.en) yaml += `      en: "${p.name.en}"\n`;
+                    } else {
+                        yaml += `    name: "${p.name}"\n`;
+                    }
+                }
+                if (p.type) yaml += `    type: "${p.type}"\n`;
+                if (p.sub_type) yaml += `    sub_type: "${p.sub_type}"\n`;
                 yaml += `    loc: [${p.loc[0]}, ${p.loc[1]}]\n`;
                 yaml += `    jobs: ${p.jobs}\n`;
                 yaml += `    radius_m: ${p.radius_m || 750}\n`;
-                yaml += `    mode: "${p.mode || 'MAX'}"\n\n`;
+                yaml += `    mode: "${p.mode || 'MAX'}"\n`;
+                if (p.metadata && Object.keys(p.metadata).length > 0) {
+                    yaml += `    metadata:\n`;
+                    for (const [mk, mv] of Object.entries(p.metadata)) {
+                        yaml += `      ${mk}: "${mv}"\n`;
+                    }
+                }
+                yaml += `\n`;
             });
+
+            if (places && places.length > 0) {
+                yaml += "# Toponimia y Colonias Curadas\nplaces:\n";
+                places.forEach(pl => {
+                    yaml += `  - name: "${pl.name}"\n`;
+                    yaml += `    loc: [${pl.loc[0]}, ${pl.loc[1]}]\n`;
+                    yaml += `    type: "${pl.type || 'suburb'}"\n`;
+                });
+            }
+
             document.getElementById('yaml-preview').innerText = yaml;
         }
 
@@ -1539,12 +1994,13 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         file: currentCityFile,
-                        pois: pois
+                        pois: pois,
+                        places: places
                     })
                 });
                 const resp = await res.json();
                 if (resp.status === 'ok') {
-                    alert(`¡Configuración de POIs guardada exitosamente en ${currentCityFile}!`);
+                    alert(`¡Configuración de ${resp.saved_pois} POIs y ${resp.saved_places} Colonias guardada exitosamente en ${currentCityFile}!`);
                 } else {
                     alert(`Error al guardar: ${resp.error}`);
                 }

@@ -20,7 +20,7 @@ import argparse
 import webbrowser
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 CITIES_DIR = os.path.join(ROOT_DIR, "cities")
@@ -89,18 +89,24 @@ def load_city_data(rel_or_abs_path: str) -> Dict[str, Any]:
         raise FileNotFoundError(f"No existe el archivo de ciudad: {fpath}")
 
     with open(fpath, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+        data = yaml.safe_load(f) or {}
 
     if not isinstance(data.get("pois"), list):
         data["pois"] = []
+    if not isinstance(data.get("places"), list):
+        data["places"] = []
 
     return data
 
 
-def save_city_pois(rel_or_abs_path: str, new_pois: List[Dict[str, Any]]) -> None:
+def save_city_data(
+    rel_or_abs_path: str,
+    new_pois: List[Dict[str, Any]],
+    new_places: Optional[List[Dict[str, Any]]] = None
+) -> None:
     """
-    Guarda los POIs actualizados en el archivo YAML preservando la estructura
-    y comentarios del resto del archivo.
+    Guarda los POIs y las Colonias/Toponimia (places) en el archivo YAML
+    preservando la estructura y comentarios base del archivo.
     """
     fpath = _resolve_city_path(rel_or_abs_path)
 
@@ -110,7 +116,7 @@ def save_city_pois(rel_or_abs_path: str, new_pois: List[Dict[str, Any]]) -> None
     with open(fpath, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # Formatear el bloque de POIs en YAML limpio y legible
+    # 1. Formatear el bloque de POIs en YAML limpio
     pois_yaml_lines = ["pois:"]
     for poi in new_pois:
         p_id = poi.get("id", "POI_Sin_Nombre")
@@ -120,25 +126,65 @@ def save_city_pois(rel_or_abs_path: str, new_pois: List[Dict[str, Any]]) -> None
         mode = poi.get("mode", "MAX").upper()
 
         pois_yaml_lines.append(f'  - id: "{p_id}"')
+        name_val = poi.get("name")
+        if isinstance(name_val, dict):
+            pois_yaml_lines.append('    name:')
+            if "es" in name_val:
+                pois_yaml_lines.append(f'      es: "{name_val["es"]}"')
+            if "en" in name_val:
+                pois_yaml_lines.append(f'      en: "{name_val["en"]}"')
+        elif isinstance(name_val, str) and name_val:
+            pois_yaml_lines.append(f'    name: "{name_val}"')
+
+        if poi.get("type"):
+            pois_yaml_lines.append(f'    type: "{poi["type"]}"')
+        if poi.get("sub_type"):
+            pois_yaml_lines.append(f'    sub_type: "{poi["sub_type"]}"')
+
         pois_yaml_lines.append(f'    loc: [{loc[0]:.5f}, {loc[1]:.5f}]')
         pois_yaml_lines.append(f'    jobs: {jobs}')
         pois_yaml_lines.append(f'    radius_m: {rad}')
-        pois_yaml_lines.append(f'    mode: "{mode}"\n')
+        pois_yaml_lines.append(f'    mode: "{mode}"')
 
-    new_pois_block = "\n".join(pois_yaml_lines) + "\n"
+        if isinstance(poi.get("metadata"), dict) and poi["metadata"]:
+            pois_yaml_lines.append('    metadata:')
+            for mk, mv in poi["metadata"].items():
+                pois_yaml_lines.append(f'      {mk}: "{mv}"')
+        pois_yaml_lines.append('')
 
-    # Si ya existe la sección pois:, reemplazarla
-    if "\npois:" in content or content.startswith("pois:"):
-        # Cortar a partir de la declaración de pois:
-        idx = content.find("pois:")
-        base_content = content[:idx].rstrip() + "\n\n"
-        updated_content = base_content + new_pois_block
-    else:
-        # Si no existe, anexarla al final
-        updated_content = content.rstrip() + "\n\n" + new_pois_block
+    new_pois_block = "\n".join(pois_yaml_lines).rstrip() + "\n"
+
+    # 2. Formatear el bloque opcional de Places/Toponimia en YAML
+    new_places_block = ""
+    if new_places is not None and len(new_places) > 0:
+        places_yaml_lines = ["\n# Toponimia y Colonias Curadas (Inyección de etiquetas en .pmtiles)", "places:"]
+        for pl in new_places:
+            pl_name = pl.get("name", "Colonia")
+            pl_loc = pl.get("loc", [0.0, 0.0])
+            pl_type = pl.get("type", "suburb")
+            places_yaml_lines.append(f'  - name: "{pl_name}"')
+            places_yaml_lines.append(f'    loc: [{pl_loc[0]:.5f}, {pl_loc[1]:.5f}]')
+            places_yaml_lines.append(f'    type: "{pl_type}"')
+        new_places_block = "\n".join(places_yaml_lines) + "\n"
+
+    # 3. Remover bloques anteriores de pois: y places: del contenido original
+    # Cortar a partir de la primera aparición de pois: o places:
+    cut_idx = len(content)
+    for marker in ["\npois:", "pois:", "\nplaces:", "places:"]:
+        pos = content.find(marker)
+        if pos != -1 and pos < cut_idx:
+            cut_idx = pos
+
+    base_content = content[:cut_idx].rstrip() + "\n\n"
+    updated_content = base_content + new_pois_block + new_places_block
 
     with open(fpath, "w", encoding="utf-8") as f:
         f.write(updated_content)
+
+
+def save_city_pois(rel_or_abs_path: str, new_pois: List[Dict[str, Any]]) -> None:
+    """Wrapper de compatibilidad retroactiva para guardar POIs."""
+    save_city_data(rel_or_abs_path, new_pois=new_pois)
 
 
 def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Dict[str, Any]]:
@@ -168,16 +214,20 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
                     data = json.load(f)
                 points = data.get("points", [])
                 if bbox and len(bbox) == 4:
+                    margin_lon = (bbox[2] - bbox[0]) * 0.35
+                    margin_lat = (bbox[3] - bbox[1]) * 0.35
+                    min_lon, max_lon = bbox[0] - margin_lon, bbox[2] + margin_lon
+                    min_lat, max_lat = bbox[1] - margin_lat, bbox[3] + margin_lat
                     points = [
                         p for p in points
-                        if bbox[0] <= p["location"][0] <= bbox[2] and bbox[1] <= p["location"][1] <= bbox[3]
+                        if min_lon <= p["location"][0] <= max_lon and min_lat <= p["location"][1] <= max_lat
                     ]
                 if points:
                     return points
             except Exception as e:
                 print(f"[WARN] Error al leer {dpath}: {e}")
 
-    # 2. Cargar densidad desde DENUE oficial si existe en data/
+    # Estrategia 2: Si no hay demand_data compilado, procesar DENUE en tiempo real
     denue_patterns = [
         os.path.join(ROOT_DIR, "data", "*", "*denue*.csv"),
         os.path.join(ROOT_DIR, "data", "*denue*.csv"),
@@ -197,9 +247,15 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
 
             df['lat'] = pd.to_numeric(df[lat_col], errors='coerce')
             df['lon'] = pd.to_numeric(df[lon_col], errors='coerce')
+
+            margin_lon = (bbox[2] - bbox[0]) * 0.35
+            margin_lat = (bbox[3] - bbox[1]) * 0.35
+            min_lon, max_lon = bbox[0] - margin_lon, bbox[2] + margin_lon
+            min_lat, max_lat = bbox[1] - margin_lat, bbox[3] + margin_lat
+
             df = df[
-                (df['lon'] >= bbox[0]) & (df['lon'] <= bbox[2]) &
-                (df['lat'] >= bbox[1]) & (df['lat'] <= bbox[3])
+                (df['lon'] >= min_lon) & (df['lon'] <= max_lon) &
+                (df['lat'] >= min_lat) & (df['lat'] <= max_lat)
             ].dropna(subset=['lat', 'lon'])
 
             # Bins de agregación espacial rápida (~250m)
@@ -237,6 +293,13 @@ class PoiStudioRequestHandler(BaseHTTPRequestHandler):
         # Silenciar logs ruidosos de polling/tile requests
         pass
 
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.end_headers()
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
@@ -256,6 +319,43 @@ class PoiStudioRequestHandler(BaseHTTPRequestHandler):
                 self.serve_json(data)
             except Exception as e:
                 self.serve_error(str(e), 404)
+        elif path == "/api/settlement_suggestions":
+            try:
+                city_file = query.get("file", [""])[0]
+                bbox = None
+                city_base = ""
+                if city_file:
+                    try:
+                        cdata = load_city_data(city_file)
+                        bbox = cdata.get("city", {}).get("bbox")
+                        city_base = os.path.splitext(os.path.basename(city_file))[0]
+                    except Exception as e:
+                        print(f"[WARN] Error cargando city_data en suggestions: {e}")
+
+                from sb_mexico.toponymy import extract_settlement_suggestions
+                denue_candidates = []
+                if city_base:
+                    denue_candidates.extend(glob.glob(os.path.join(ROOT_DIR, "data", city_base, "*denue*.csv")))
+                    denue_candidates.extend(glob.glob(os.path.join(ROOT_DIR, "dist", city_base, "*denue*.csv")))
+                denue_candidates.extend(glob.glob(os.path.join(ROOT_DIR, "data", "*", "*denue*.csv")))
+                denue_candidates.extend(glob.glob(os.path.join(ROOT_DIR, "data", "*denue*.csv")))
+                denue_candidates.extend(glob.glob(os.path.join(ROOT_DIR, "*denue*.csv")))
+
+                seen = set()
+                valid_denue = []
+                for c in denue_candidates:
+                    if c not in seen and os.path.isfile(c):
+                        seen.add(c)
+                        valid_denue.append(c)
+
+                if valid_denue and bbox:
+                    suggs = extract_settlement_suggestions(valid_denue[0], bbox, min_count=10)
+                else:
+                    suggs = []
+                self.serve_json({"suggestions": suggs})
+            except Exception as e:
+                print(f"[ERROR] En /api/settlement_suggestions: {e}")
+                self.serve_json({"suggestions": [], "error": str(e)})
         elif path == "/api/density":
             city_file = query.get("file", [""])[0]
             bbox = None
@@ -265,7 +365,7 @@ class PoiStudioRequestHandler(BaseHTTPRequestHandler):
                     bbox = cdata.get("city", {}).get("bbox")
                 except Exception:
                     pass
-            points = load_demand_sample(bbox)
+            points = load_demand_sample(bbox, city_file=city_file)
             self.serve_json({"points": points})
         else:
             self.serve_error("Ruta no encontrada", 404)
@@ -282,38 +382,48 @@ class PoiStudioRequestHandler(BaseHTTPRequestHandler):
 
                 city_file = req_data.get("file")
                 new_pois = req_data.get("pois", [])
+                new_places = req_data.get("places", [])
 
                 if not city_file:
                     self.serve_error("Falta el parámetro 'file'", 400)
                     return
 
-                save_city_pois(city_file, new_pois)
-                print(f"[OK] Guardados {len(new_pois)} POIs en {city_file}")
-                self.serve_json({"status": "ok", "saved_pois": len(new_pois)})
+                save_city_data(city_file, new_pois=new_pois, new_places=new_places)
+                self.serve_json({"status": "ok", "saved_pois": len(new_pois), "saved_places": len(new_places)})
             except Exception as e:
-                print(f"[ERROR] Al guardar POIs: {e}")
-                self.serve_json({"status": "error", "error": str(e)}, status=500)
+                self.serve_error(str(e), 500)
         else:
-            self.serve_error("Ruta no encontrada", 404)
+            self.serve_error("Método POST no permitido", 405)
 
     def serve_html(self):
         if not os.path.exists(TEMPLATE_HTML_PATH):
-            self.serve_error(f"No se encontró la plantilla HTML en {TEMPLATE_HTML_PATH}", 500)
+            self.serve_error("Template HTML no encontrado", 500)
             return
 
         with open(TEMPLATE_HTML_PATH, "r", encoding="utf-8") as f:
             content = f.read()
 
+        body = content.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
-        self.wfile.write(content.encode("utf-8"))
+        self.wfile.write(body)
 
     def serve_json(self, data: Any, status: int = 200):
-        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        try:
+            body = json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")
+        except Exception as e:
+            body = json.dumps({"error": f"JSON serialization error: {e}"}).encode("utf-8")
+            status = 500
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.end_headers()
         self.wfile.write(body)
 
