@@ -8,6 +8,7 @@ mediante la integración nativa con la librería depot.maps.MapGen.
 import os
 import shutil
 import glob
+import subprocess
 try:
     import psutil
 except ImportError:
@@ -38,6 +39,119 @@ def get_optimal_hardware_resources() -> Tuple[int, int]:
     return cores, ram_mb
 
 
+def to_wsl_path(win_path: str) -> str:
+    """Convierte una ruta de Windows (ej. C:\\foo\\bar) al formato de montaje de WSL (/mnt/c/foo/bar)."""
+    if not win_path:
+        return ""
+    abs_p = os.path.abspath(win_path)
+    drive, rest = os.path.splitdrive(abs_p)
+    if drive:
+        letter = drive.replace(":", "").lower()
+        clean_rest = rest.replace("\\", "/").lstrip("/")
+        return f"/mnt/{letter}/{clean_rest}"
+    return abs_p.replace("\\", "/")
+
+
+def is_wsl_available() -> Tuple[bool, str, Dict[str, bool]]:
+    """
+    Comprueba si WSL 2 está disponible con Ubuntu y verifica las herramientas requeridas.
+    Si el servicio WSL presenta un error transitorio de Windows (E_UNEXPECTED),
+    ejecuta un reinicio ligero automático con wsl --shutdown para auto-recuperarse.
+    """
+    if os.name != "nt":
+        return True, "native", {"tippecanoe": bool(shutil.which("tippecanoe")), "depot": True}
+
+    def _probe_tool(cmd: List[str]):
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+
+    try:
+        check_cmd = ["wsl.exe", "-d", "Ubuntu", "-e", "which", "tippecanoe"]
+        res = _probe_tool(check_cmd)
+
+        if res.returncode != 0 and "E_UNEXPECTED" in (res.stderr or ""):
+            try:
+                subprocess.run(["wsl.exe", "--shutdown"], capture_output=True, timeout=5)
+                import time; time.sleep(1.2)
+                res = _probe_tool(check_cmd)
+            except Exception:
+                pass
+
+        has_tippecanoe = (res.returncode == 0)
+
+        res_depot = _probe_tool(["wsl.exe", "-d", "Ubuntu", "-e", "python3", "-c", "import depot; print('DEPOT_OK')"])
+        has_depot = "DEPOT_OK" in (res_depot.stdout or "")
+
+        tools_status = {
+            "tippecanoe": has_tippecanoe,
+            "depot": has_depot,
+            "wsl": True
+        }
+        is_ready = has_tippecanoe and has_depot
+        return is_ready, "Ubuntu", tools_status
+    except Exception as e:
+        return False, str(e), {}
+
+
+def build_city_map_wsl(
+    city_code: str,
+    bbox: List[float],
+    osm_pbf_path: str,
+    output_dir: str,
+    building_filter_size: float = 15.0,
+    building_simplification: float = 0.2,
+    include_ocean: bool = False
+) -> Dict[str, str]:
+    """
+    Ejecuta la compilación cartográfica dentro de WSL Ubuntu vía subprocess con streaming en vivo.
+    """
+    wsl_pbf = to_wsl_path(osm_pbf_path)
+    wsl_out = to_wsl_path(output_dir)
+
+    wsl_cmd = [
+        "wsl.exe", "-d", "Ubuntu", "-e",
+        "python3", "-u", "-m", "sb_mexico.cartography_runner",
+        "--city-code", city_code,
+        "--bbox", str(bbox[0]), str(bbox[1]), str(bbox[2]), str(bbox[3]),
+        "--osm-pbf", wsl_pbf,
+        "--output-dir", wsl_out,
+        "--building-filter-size", str(building_filter_size),
+        "--building-simplification", str(building_simplification)
+    ]
+    if include_ocean:
+        wsl_cmd.append("--include-ocean")
+
+    print(f"-> Conectando con motor cartográfico en WSL 2 (Ubuntu)...")
+    print(f"-> Comando WSL: python3 -m sb_mexico.cartography_runner --city-code {city_code} ...")
+
+    proc = subprocess.Popen(
+        wsl_cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1
+    )
+
+    if proc.stdout:
+        for line in iter(proc.stdout.readline, ""):
+            print(line, end="", flush=True)
+        proc.stdout.close()
+
+    ret = proc.wait()
+    if ret != 0:
+        raise RuntimeError(f"La compilación cartográfica en WSL falló con código de salida {ret}.")
+
+    work_dir = os.path.abspath(output_dir)
+    generated_files = {}
+    for filename in [f"{city_code}.pmtiles", "roads.geojson", "buildings_index.bin.gz", "runways_taxiways.geojson", "ocean_depth_index.json.gz"]:
+        cand = os.path.join(work_dir, filename)
+        if os.path.exists(cand):
+            generated_files[filename] = cand
+
+    return generated_files
+
+
 def build_city_map(
     city_code: str,
     bbox: List[float],
@@ -52,9 +166,53 @@ def build_city_map(
     """
     Ejecuta el pipeline cartográfico completo de depot.maps.MapGen.
     Genera .pmtiles, roads.geojson, buildings_index.bin.gz, etc.
-    Si se proporcionan 'places', inyecta un parche de toponimia previa compilación.
+    Si se ejecuta en Windows, delega transparentemente a WSL 2.
     """
-    from depot.maps import MapGen
+    work_dir = os.path.abspath(output_dir)
+
+    # Localizar archivo PBF si no fue proporcionado directamente
+    if not osm_pbf_path or not os.path.exists(osm_pbf_path):
+        candidates = glob.glob(os.path.join(work_dir, "*.osm.pbf"))
+        if not candidates:
+            # Buscar en data/
+            candidates = glob.glob(os.path.join(work_dir, "..", "..", "data", "**", "*.osm.pbf"), recursive=True)
+        if not candidates:
+            raise FileNotFoundError(f"No se encontró ningún archivo .osm.pbf para la compilación cartográfica de {city_code}.")
+        osm_pbf_path = candidates[0]
+
+    # Delegación automática a WSL 2 en entornos Windows
+    if os.name == "nt":
+        wsl_ok, distro, tools = is_wsl_available()
+        if wsl_ok:
+            return build_city_map_wsl(
+                city_code=city_code,
+                bbox=bbox,
+                osm_pbf_path=osm_pbf_path,
+                output_dir=output_dir,
+                building_filter_size=building_filter_size,
+                building_simplification=building_simplification,
+                include_ocean=include_ocean
+            )
+        else:
+            print(f"  [WARN] WSL 2 no está disponible o carece de herramientas ({distro}).")
+            print("  -> Se omite la generación cartográfica nativa.")
+            generated_files = {}
+            for fname in [f"{city_code}.pmtiles", "roads.geojson", "buildings_index.bin.gz"]:
+                cand = os.path.join(work_dir, fname)
+                if os.path.exists(cand):
+                    generated_files[fname] = cand
+            return generated_files
+
+    try:
+        from depot.maps import MapGen
+    except (ImportError, ModuleNotFoundError) as e:
+        print(f"  [WARN] 'depot.maps' no está disponible en este entorno ({e}).")
+        generated_files = {}
+        for fname in [f"{city_code}.pmtiles", "roads.geojson", "buildings_index.bin.gz"]:
+            cand = os.path.join(work_dir, fname)
+            if os.path.exists(cand):
+                generated_files[fname] = cand
+        return generated_files
 
     work_dir = os.path.abspath(output_dir)
     native_build_dir = os.path.abspath(build_dir or os.path.expanduser(f"~/build_{city_code.lower()}"))

@@ -49,6 +49,25 @@ def load_special_demand_types() -> Dict[str, Any]:
         return json.load(f)
 
 
+TYPE_ALIAS_MAP = {
+    "air": "airport",
+    "uni": "university",
+    "spo": "stadium",
+    "tou": "resort",
+    "med": "hospital",
+    "tra": "transit_station",
+    "cen": "convention_center",
+    "cul": "cultural_center",
+    "mus": "museum",
+    "amu": "amusement_park",
+    "prk": "park",
+    "rel": "religious_institution",
+    "gov": "government_facility",
+    "port": "port",
+    "rst": "resort"
+}
+
+
 def infer_poi_type_and_subtype(poi_id: str, poi_cfg: Optional[Dict] = None) -> Tuple[str, Optional[str]]:
     """
     Infiere el tipo y subtipo canónico a partir del prefijo taxonómico o de la configuración YAML.
@@ -58,7 +77,9 @@ def infer_poi_type_and_subtype(poi_id: str, poi_cfg: Optional[Dict] = None) -> T
     explicit_subtype = poi_cfg.get("sub_type")
 
     if explicit_type:
-        return explicit_type.strip().lower(), explicit_subtype.strip().lower() if explicit_subtype else None
+        clean_type = explicit_type.strip().lower()
+        normalized_type = TYPE_ALIAS_MAP.get(clean_type, clean_type)
+        return normalized_type, explicit_subtype.strip().lower() if explicit_subtype else None
 
     for prefix, (t_id, sub_id) in PREFIX_TAXONOMY_MAP.items():
         if poi_id.startswith(prefix):

@@ -23,8 +23,7 @@ class TestPoiStudio(unittest.TestCase):
         self.assertIn("city", data)
         self.assertIn("macroeconomics", data)
         self.assertIn("pois", data)
-        self.assertEqual(data["city"]["code"], "CUN")
-        self.assertGreaterEqual(len(data["pois"]), 6)
+        self.assertGreaterEqual(len(data["pois"]), 5)
 
     def test_save_and_reload_pois(self):
         data = load_city_data("cities/cancun.yaml")

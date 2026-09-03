@@ -26,22 +26,29 @@ def main():
     )
     parser.add_argument(
         "--output-dir",
-        default=".",
-        help="Directorio de trabajo / salida de los archivos generados (default: .)"
+        default=None,
+        help="Directorio de trabajo / salida de los archivos generados (default: dist/<ciudad>/)"
     )
     parser.add_argument(
         "--data-dir",
         default=None,
-        help="Directorio donde se ubican los datos fuente del INEGI y OSM (default: igual a --output-dir)"
+        help="Directorio donde se ubican los datos fuente del INEGI y OSM (default: data/<ciudad>/)"
     )
 
     args = parser.parse_args()
+
+    # Si no se especifica output_dir, aislar obligatoriamente en dist/<ciudad>
+    target_out = args.output_dir
+    if not target_out:
+        import os
+        city_slug = os.path.splitext(os.path.basename(args.config))[0].lower()
+        target_out = os.path.join("dist", city_slug)
 
     try:
         execute_pipeline(
             config_path=args.config,
             skip_map=args.skip_map,
-            output_dir=args.output_dir,
+            output_dir=target_out,
             data_dir=args.data_dir
         )
     except Exception as e:

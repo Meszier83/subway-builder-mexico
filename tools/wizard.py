@@ -15,6 +15,7 @@ Uso:
 
 import os
 import sys
+import re
 import glob
 import json
 import yaml
@@ -24,6 +25,7 @@ import shutil
 import logging
 import argparse
 import threading
+import subprocess
 import webbrowser
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -44,9 +46,10 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-# Asegurar que sb_mexico esté en sys.path
+# Asegurar que sb_mexico esté en sys.path y CWD sea ROOT_DIR
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
+os.chdir(ROOT_DIR)
 
 # Estado global de compilación
 build_lock = threading.Lock()
@@ -138,6 +141,10 @@ def load_city_data(rel_or_abs_path: str) -> Dict[str, Any]:
         data["pois"] = []
     if not isinstance(data.get("places"), list):
         data["places"] = []
+    if "data_dir" not in data:
+        data["data_dir"] = ""
+    if not isinstance(data.get("data_exclusions"), list):
+        data["data_exclusions"] = []
 
     return data
 
@@ -151,6 +158,8 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
     macro_cfg = data.get("macroeconomics", {})
     pois_cfg = data.get("pois", [])
     places_cfg = data.get("places", [])
+    data_dir_cfg = str(data.get("data_dir", "")).strip()
+    data_exclusions_cfg = data.get("data_exclusions", [])
 
     lines = [
         "# ==============================================================================",
@@ -170,7 +179,20 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         f'  building_filter_size: {float(city_cfg.get("building_filter_size", 15.0))}',
         f'  building_simplification: {float(city_cfg.get("building_simplification", 0.2))}',
         f'  include_ocean: {"true" if city_cfg.get("include_ocean") else "false"}',
-        "",
+        ""
+    ]
+
+    if data_dir_cfg:
+        lines.append(f'data_dir: "{data_dir_cfg}"')
+        lines.append("")
+
+    if data_exclusions_cfg and isinstance(data_exclusions_cfg, list):
+        lines.append("data_exclusions:")
+        for ex in data_exclusions_cfg:
+            lines.append(f'  - "{ex}"')
+        lines.append("")
+
+    lines.extend([
         "macroeconomics:",
         f'  tasa_pea: {float(macro_cfg.get("tasa_pea", 0.62))}',
         f'  til_1_state: {float(macro_cfg.get("til_1_state", 0.45))}',
@@ -180,7 +202,7 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         f'  max_distance_km: {float(macro_cfg.get("max_distance_km", 50.0))}',
         f'  max_pop_size: {int(macro_cfg.get("max_pop_size", 150))}',
         ""
-    ]
+    ])
 
     growth_factors = macro_cfg.get("growth_factors", {})
     if isinstance(growth_factors, dict) and growth_factors:
@@ -245,58 +267,219 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
     return fpath
 
 
-def inspect_data_files(city_name: str = "", city_code: str = "", city_file: str = "") -> Dict[str, Any]:
-    """
-    Escanea la carpeta data/ y sus subcarpetas para detectar archivos INEGI y OSM.
-    Busca por nombre de archivo YAML, clave de ciudad y escaneo recursivo en data/.
-    """
-    search_dirs = []
+def create_new_project(name: str, code: str, creator: str = "Creador", data_dir: str = "") -> Dict[str, Any]:
+    clean_code = code.strip().upper()
+    slug = re.sub(r'[^a-zA-Z0-9_-]', '', name.strip().lower().replace(" ", "_")) or clean_code.lower()
+    yaml_name = f"{slug}.yaml"
+    yaml_path = os.path.join(CITIES_DIR, yaml_name)
 
-    # 1. Candidatos derivados de la ciudad
-    candidates = []
+    resolved_data_dir = data_dir.strip() if data_dir else os.path.join("data", slug).replace("\\", "/")
+    if not os.path.isabs(resolved_data_dir):
+        os.makedirs(os.path.join(ROOT_DIR, resolved_data_dir), exist_ok=True)
+    else:
+        os.makedirs(resolved_data_dir, exist_ok=True)
+
+    initial_data = {
+        "city": {
+            "code": clean_code,
+            "name": name.strip(),
+            "description": f"Zona Metropolitana de {name.strip()}",
+            "bbox": [-99.3, 19.2, -98.9, 19.6],
+            "creator": creator or "Creador",
+            "grid_size": 0.0025,
+            "min_residents": 10,
+            "min_jobs": 3,
+            "initial_zoom": 11.5,
+            "building_filter_size": 15.0,
+            "building_simplification": 0.2,
+            "include_ocean": False
+        },
+        "data_dir": resolved_data_dir,
+        "data_exclusions": [],
+        "macroeconomics": {
+            "tasa_pea": 0.62,
+            "til_1_state": 0.45,
+            "sample_threshold": 500,
+            "default_growth_factor": 1.05,
+            "gravity_beta": 0.12,
+            "max_distance_km": 50.0,
+            "max_pop_size": 150,
+            "growth_factors": {}
+        },
+        "pois": [],
+        "places": []
+    }
+
+    save_full_city_data(yaml_path, initial_data)
+    rel_path = os.path.relpath(yaml_path, ROOT_DIR).replace("\\", "/")
+    return {
+        "status": "ok",
+        "path": rel_path,
+        "file": rel_path,
+        "filename": yaml_name,
+        "data_dir": resolved_data_dir,
+        "city": initial_data["city"]
+    }
+
+
+def delete_project(rel_or_abs_path: str, delete_data_folder: bool = False) -> Dict[str, Any]:
+    """Elimina el archivo .yaml de la ciudad de forma segura, y opcionalmente su carpeta data local."""
+    fpath = _resolve_city_path(rel_or_abs_path)
+    if not os.path.exists(fpath):
+        raise FileNotFoundError(f"Proyecto no encontrado: {rel_or_abs_path}")
+
+    data_dir_to_clean = None
+    if delete_data_folder:
+        try:
+            with open(fpath, "r", encoding="utf-8") as f:
+                cdata = yaml.safe_load(f) or {}
+            dd = cdata.get("data_dir")
+            if dd and not os.path.isabs(dd):
+                data_dir_to_clean = os.path.abspath(os.path.join(ROOT_DIR, dd))
+        except Exception:
+            pass
+
+    os.remove(fpath)
+
+    if data_dir_to_clean and os.path.exists(data_dir_to_clean):
+        norm_data = os.path.normcase(os.path.realpath(DATA_DIR))
+        norm_target = os.path.normcase(os.path.realpath(data_dir_to_clean))
+        if norm_target.startswith(norm_data + os.sep) and norm_target != norm_data:
+            import shutil
+            shutil.rmtree(data_dir_to_clean, ignore_errors=True)
+
+    return {"status": "ok", "deleted": rel_or_abs_path}
+
+
+def open_file_location(target_path: str) -> Dict[str, Any]:
+    """Abre la ubicación física del archivo o carpeta en el explorador del sistema operativo."""
+    if not target_path:
+        raise ValueError("Ruta de archivo no proporcionada")
+
+    if os.path.isabs(target_path):
+        full_p = os.path.abspath(target_path)
+    else:
+        full_p = os.path.abspath(os.path.join(ROOT_DIR, target_path))
+
+    if not os.path.exists(full_p):
+        raise FileNotFoundError(f"Ruta no encontrada en disco: {target_path}")
+
+    import subprocess
+    if sys.platform == "win32":
+        if os.path.isfile(full_p):
+            subprocess.Popen(["explorer", f"/select,{os.path.normpath(full_p)}"])
+        else:
+            subprocess.Popen(["explorer", os.path.normpath(full_p)])
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", "-R" if os.path.isfile(full_p) else "", full_p])
+    else:
+        subprocess.Popen(["xdg-open", os.path.dirname(full_p) if os.path.isfile(full_p) else full_p])
+
+    return {"status": "ok", "opened": full_p}
+
+
+def exclude_data_file(city_file: str, filename: str) -> Dict[str, Any]:
+    """Desvincula un archivo de la sesión/configuración del proyecto sin eliminarlo del disco."""
+    if not city_file or not filename:
+        raise ValueError("Parámetros 'file' y 'filename' requeridos")
+
+    cdata = load_city_data(city_file)
+    exclusions = cdata.get("data_exclusions", [])
+    clean_fn = os.path.basename(filename)
+    if clean_fn not in exclusions:
+        exclusions.append(clean_fn)
+    cdata["data_exclusions"] = exclusions
+    save_full_city_data(city_file, cdata)
+    return {"status": "ok", "excluded": clean_fn, "exclusions": exclusions}
+
+
+def relink_data_file(city_file: str, filename: str) -> Dict[str, Any]:
+    """Reactiva un archivo previamente desvinculado."""
+    if not city_file or not filename:
+        raise ValueError("Parámetros 'file' y 'filename' requeridos")
+
+    cdata = load_city_data(city_file)
+    exclusions = cdata.get("data_exclusions", [])
+    clean_fn = os.path.basename(filename)
+    if clean_fn in exclusions:
+        exclusions.remove(clean_fn)
+    cdata["data_exclusions"] = exclusions
+    save_full_city_data(city_file, cdata)
+    return {"status": "ok", "relinked": clean_fn, "exclusions": exclusions}
+
+
+def set_project_data_dir(city_file: str, new_dir: str) -> Dict[str, Any]:
+    """Actualiza la carpeta de datos personalizada del proyecto."""
+    if not city_file:
+        raise ValueError("Parámetro 'file' requerido")
+
+    cdata = load_city_data(city_file)
+    cdata["data_dir"] = new_dir.strip()
+    save_full_city_data(city_file, cdata)
+    return {"status": "ok", "data_dir": cdata["data_dir"]}
+
+
+def inspect_data_files(city_name: str = "", city_code: str = "", city_file: str = "", data_dir_override: str = "") -> Dict[str, Any]:
+    """
+    Escanea ÚNICAMENTE la carpeta de datos asignada al proyecto.
+    Cero escaneo en carpetas de otras ciudades o en la raíz para evitar duplicados.
+    """
+    target_dir = None
+    exclusions = set()
+
     if city_file:
-        base = os.path.splitext(os.path.basename(city_file))[0].lower()
-        candidates.append(base)
-    if city_code:
-        candidates.append(city_code.lower())
-    if city_name:
-        candidates.append(city_name.lower().split()[0])
-        candidates.append(city_name.lower().replace(" ", "_"))
-        candidates.append(city_name.lower().replace(" ", ""))
+        try:
+            cdata = load_city_data(city_file)
+            cfg_dir = cdata.get("data_dir")
+            if cfg_dir:
+                target_dir = cfg_dir if os.path.isabs(cfg_dir) else os.path.join(ROOT_DIR, cfg_dir)
+            for ex in cdata.get("data_exclusions", []):
+                exclusions.add(str(ex).strip().lower())
+        except Exception:
+            pass
 
-    for c in candidates:
-        cand_dir = os.path.join(DATA_DIR, c)
-        if os.path.exists(cand_dir) and cand_dir not in search_dirs:
-            search_dirs.append(cand_dir)
+    if data_dir_override:
+        target_dir = data_dir_override if os.path.isabs(data_dir_override) else os.path.join(ROOT_DIR, data_dir_override)
 
-    # 2. Agregar todos los subdirectorios existentes dentro de DATA_DIR
-    if os.path.exists(DATA_DIR):
-        for entry in os.scandir(DATA_DIR):
-            if entry.is_dir() and entry.path not in search_dirs:
-                search_dirs.append(entry.path)
+    if not target_dir:
+        slug = ""
+        if city_file:
+            slug = os.path.splitext(os.path.basename(city_file))[0].lower()
+        elif city_code:
+            slug = city_code.lower()
+        elif city_name:
+            slug = city_name.lower().split()[0]
 
-    # 3. Directorio base data/ y ROOT_DIR
-    if DATA_DIR not in search_dirs:
-        search_dirs.append(DATA_DIR)
-    if ROOT_DIR not in search_dirs:
-        search_dirs.append(ROOT_DIR)
+        target_dir = os.path.join(DATA_DIR, slug) if slug else DATA_DIR
+
+    try:
+        rel_active_dir = os.path.relpath(target_dir, ROOT_DIR).replace("\\", "/")
+    except ValueError:
+        rel_active_dir = target_dir.replace("\\", "/")
+
+    search_dirs = [target_dir] if os.path.exists(target_dir) else []
 
     def find_files(patterns: List[str]) -> List[Dict[str, Any]]:
         found = []
         seen = set()
         for sdir in search_dirs:
-            if not os.path.exists(sdir):
-                continue
             for pat in patterns:
                 for fpath in glob.glob(os.path.join(sdir, pat)):
                     abs_p = os.path.abspath(fpath)
+                    fname = os.path.basename(abs_p)
+                    if fname.lower() in exclusions:
+                        continue
                     if abs_p not in seen and os.path.isfile(abs_p):
                         seen.add(abs_p)
                         size_mb = os.path.getsize(abs_p) / (1024 * 1024)
-                        rel_p = os.path.relpath(abs_p, ROOT_DIR).replace("\\", "/")
+                        try:
+                            rel_p = os.path.relpath(abs_p, ROOT_DIR).replace("\\", "/")
+                        except ValueError:
+                            rel_p = abs_p.replace("\\", "/")
                         found.append({
                             "path": rel_p,
-                            "filename": os.path.basename(abs_p),
+                            "abs_path": abs_p,
+                            "filename": fname,
                             "size_mb": round(size_mb, 2),
                             "modified": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime(abs_p)))
                         })
@@ -306,15 +489,200 @@ def inspect_data_files(city_name: str = "", city_code: str = "", city_file: str 
     cpv = find_files(["*RESAGEBURB*.csv", "*resageburb*.csv", "*censo*.csv", "*cpv*.csv"])
     ce2024 = find_files(["*tr_ce*.csv", "*ce2024*.csv", "*ce_2024*.csv", "*ce*.csv"])
     conapo = find_files(["*conapo*.csv", "data-*.csv", "*proyeccion*.csv"])
+
+    # Para OSM: buscar en la carpeta del proyecto, y solo si falta, verificar extracto nacional en data/
     osm = find_files(["*.osm.pbf", "*.osm", "roads.geojson"])
+    if not osm and os.path.exists(DATA_DIR):
+        for fpath in glob.glob(os.path.join(DATA_DIR, "*.osm.pbf")):
+            abs_p = os.path.abspath(fpath)
+            fname = os.path.basename(abs_p)
+            if fname.lower() not in exclusions and os.path.isfile(abs_p):
+                size_mb = os.path.getsize(abs_p) / (1024 * 1024)
+                osm.append({
+                    "path": os.path.relpath(abs_p, ROOT_DIR).replace("\\", "/"),
+                    "abs_path": abs_p,
+                    "filename": fname,
+                    "size_mb": round(size_mb, 2),
+                    "modified": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime(abs_p)))
+                })
 
     return {
+        "active_dir": rel_active_dir,
+        "abs_active_dir": os.path.abspath(target_dir),
+        "dir_exists": os.path.exists(target_dir),
+        "exclusions": list(exclusions),
         "denue": {"status": "ok" if denue else "missing", "files": denue},
         "cpv": {"status": "ok" if cpv else "missing", "files": cpv},
         "ce2024": {"status": "ok" if ce2024 else "missing", "files": ce2024},
         "conapo": {"status": "ok" if conapo else "missing", "files": conapo},
         "osm": {"status": "ok" if osm else "missing", "files": osm},
         "all_ready": bool(denue and cpv)
+    }
+
+
+def delete_data_file(rel_or_abs_path: str) -> str:
+    """
+    Función de compatibilidad: desvincula sin eliminar físicamente.
+    """
+    return rel_or_abs_path
+
+
+def calculate_conapo_factors(city_file: str) -> Dict[str, Any]:
+    """
+    Calcula automáticamente los factores de sincronización intercensal CONAPO
+    cruzando las proyecciones (data-*.csv o *conapo*.csv) con el Censo CPV 2020.
+    Retorna nombres legibles, poblaciones 2020, poblaciones proyectadas,
+    año de proyección y si el municipio intersecta el BBOX.
+    """
+    import pandas as pd
+    import numpy as np
+
+    try:
+        cdata = load_city_data(city_file)
+    except Exception as e:
+        return {"status": "error", "message": f"No se pudo cargar la ciudad: {e}", "factors": []}
+
+    city_cfg = cdata.get("city", {})
+    city_code = city_cfg.get("code", "")
+    city_name = city_cfg.get("name", "")
+    bbox = city_cfg.get("bbox", [])
+
+    status = inspect_data_files(city_name=city_name, city_code=city_code, city_file=city_file)
+    conapo_files = status.get("conapo", {}).get("files", [])
+    cpv_files = status.get("cpv", {}).get("files", [])
+    denue_files = status.get("denue", {}).get("files", [])
+
+    if not conapo_files:
+        return {
+            "status": "missing_conapo",
+            "message": "No se detectó ningún archivo de proyecciones CONAPO en data/.",
+            "factors": []
+        }
+
+    conapo_path = os.path.join(ROOT_DIR, conapo_files[0]["path"])
+
+    # 1. Parsear CONAPO
+    conapo_dict = {}
+    proj_year = 2025
+    for enc in ['utf-8-sig', 'latin1', 'utf-8', 'cp1252']:
+        try:
+            df_con = pd.read_csv(conapo_path, encoding=enc, dtype=str)
+            cols = [c.strip().upper() for c in df_con.columns]
+            df_con.columns = cols
+            if 'CLAVE' in cols and any('POB' in c for c in cols):
+                col_pob = [c for c in cols if 'POB_MIT_MUN' in c or 'POB_TOTAL' in c or 'POBTOT' in c or c.startswith('POB')][0]
+                has_nom = 'NOM_MUN' in cols
+                has_ano = 'ANO' in cols
+                for _, row in df_con.iterrows():
+                    cve = str(row['CLAVE']).strip()
+                    if cve.isdigit():
+                        cve_5 = f"{int(cve):05d}"
+                        try:
+                            pob_val = float(str(row[col_pob]).replace(',', '').strip())
+                            nom_mun = str(row['NOM_MUN']).strip() if has_nom else f"Municipio {cve_5}"
+                            if has_ano:
+                                try:
+                                    proj_year = int(str(row['ANO']).strip())
+                                except Exception:
+                                    pass
+                            if pob_val > 0:
+                                conapo_dict[cve_5] = {
+                                    "pob_conapo": pob_val,
+                                    "name": nom_mun
+                                }
+                        except ValueError:
+                            continue
+                if conapo_dict:
+                    break
+        except Exception:
+            continue
+
+    if not conapo_dict:
+        return {
+            "status": "error",
+            "message": f"No se pudieron leer proyecciones válidas en {os.path.basename(conapo_path)}",
+            "factors": []
+        }
+
+    # 2. Parsear Censo CPV 2020 por municipio (suma de manzanas habitadas)
+    cpv_totals = {}
+    if cpv_files:
+        for finfo in cpv_files:
+            cpv_path = os.path.join(ROOT_DIR, finfo["path"])
+            for enc in ['utf-8-sig', 'latin1', 'utf-8']:
+                try:
+                    df_cen = pd.read_csv(cpv_path, encoding=enc, low_memory=False, dtype=str)
+                    df_cen.columns = [c.strip().upper() for c in df_cen.columns]
+                    if 'ENTIDAD' in df_cen.columns and 'MUN' in df_cen.columns and 'POBTOT' in df_cen.columns:
+                        mza_col = pd.to_numeric(df_cen['MZA'].replace('*', '1') if 'MZA' in df_cen.columns else '1', errors='coerce').fillna(0)
+                        pob_col = pd.to_numeric(df_cen['POBTOT'].replace('*', '1.5'), errors='coerce').fillna(0)
+                        df_sub = df_cen[(mza_col > 0) & (pob_col > 0)]
+                        for ent, mun, p in zip(df_sub['ENTIDAD'], df_sub['MUN'], pob_col[df_sub.index]):
+                            try:
+                                cve_mun = f"{int(str(ent).strip()):02d}{int(str(mun).strip()):03d}"
+                                cpv_totals[cve_mun] = cpv_totals.get(cve_mun, 0.0) + float(p)
+                            except Exception:
+                                continue
+                        break
+                except Exception:
+                    continue
+
+    # 3. Detectar municipios dentro del BBOX vía DENUE si está disponible
+    bbox_muns = set()
+    if denue_files and bbox and len(bbox) == 4:
+        min_lon, min_lat, max_lon, max_lat = bbox
+        denue_path = os.path.join(ROOT_DIR, denue_files[0]["path"])
+        for enc in ['utf-8-sig', 'latin1', 'utf-8']:
+            try:
+                df_den = pd.read_csv(denue_path, encoding=enc, low_memory=False, dtype=str)
+                df_den.columns = [c.strip().lower() for c in df_den.columns]
+                if 'longitud' in df_den.columns and 'latitud' in df_den.columns and 'cve_mun' in df_den.columns:
+                    lons = pd.to_numeric(df_den['longitud'], errors='coerce')
+                    lats = pd.to_numeric(df_den['latitud'], errors='coerce')
+                    mask = (lons >= min_lon) & (lons <= max_lon) & (lats >= min_lat) & (lats <= max_lat)
+                    muns_in = df_den.loc[mask, 'cve_mun'].dropna().unique()
+                    for m in muns_in:
+                        try:
+                            m_str = str(m).strip()
+                            if len(m_str) <= 3:
+                                ent_prefix = list(conapo_dict.keys())[0][:2] if conapo_dict else "23"
+                                bbox_muns.add(f"{ent_prefix}{int(m_str):03d}")
+                            else:
+                                bbox_muns.add(f"{int(m_str):05d}")
+                        except Exception:
+                            pass
+                    break
+            except Exception:
+                continue
+
+    # 4. Formar lista de resultados
+    factors_list = []
+    for cve_5, c_info in sorted(conapo_dict.items()):
+        if cpv_totals and cve_5 not in cpv_totals:
+            continue
+        pob_2020 = cpv_totals.get(cve_5, 0.0)
+        pob_proj = c_info["pob_conapo"]
+        if pob_2020 > 0:
+            ratio = float(np.clip(pob_proj / pob_2020, 0.90, 1.60))
+            calc_factor = round(ratio, 2)
+        else:
+            calc_factor = 1.05
+
+        in_bbox = (cve_5 in bbox_muns) if bbox_muns else True
+        factors_list.append({
+            "cve_mun": cve_5,
+            "name": c_info["name"],
+            "pob_2020": int(pob_2020) if pob_2020 > 0 else None,
+            "pob_conapo": int(pob_proj),
+            "factor": calc_factor,
+            "in_bbox": in_bbox
+        })
+
+    return {
+        "status": "ok",
+        "conapo_file": os.path.basename(conapo_path),
+        "projection_year": proj_year,
+        "factors": factors_list
     }
 
 
@@ -378,32 +746,40 @@ def run_pipeline_task(config_file: str, skip_map: bool = False):
 
         broadcast_log(f"🚀 Iniciando compilación para '{config_file}'...", progress=10, step_name="Cargando Configuración")
 
-        # Resolver data_dir inteligente si existe carpeta de la ciudad en data/
-        city_base = os.path.splitext(os.path.basename(config_file))[0].lower()
-        candidate_data_dirs = [
-            os.path.join(DATA_DIR, city_base),
-            DATA_DIR,
-            ROOT_DIR
-        ]
+        # Resolver data_dir inteligente priorizando el configurado en la ciudad
         effective_data_dir = None
-        for cd in candidate_data_dirs:
-            if os.path.exists(cd) and os.path.isdir(cd):
-                if glob.glob(os.path.join(cd, "*denue*.csv")) or glob.glob(os.path.join(cd, "*RESAGEBURB*.csv")):
-                    effective_data_dir = cd
-                    break
+        try:
+            cdata = load_city_data(config_file)
+            cfg_dir = cdata.get("data_dir")
+            if cfg_dir:
+                effective_data_dir = cfg_dir if os.path.isabs(cfg_dir) else os.path.join(ROOT_DIR, cfg_dir)
+        except Exception:
+            pass
+
+        if not effective_data_dir or not os.path.exists(effective_data_dir):
+            city_base = os.path.splitext(os.path.basename(config_file))[0].lower()
+            cand = os.path.join(DATA_DIR, city_base)
+            effective_data_dir = cand if os.path.exists(cand) else DATA_DIR
 
         old_stdout = sys.stdout
         sys.stdout = LogCaptureStream(old_stdout)
 
         try:
-            broadcast_log("📊 Procesando fuentes de datos INEGI y Modelo Gravitatorio...", progress=30, step_name="Ingesta INEGI")
+            if not skip_map:
+                broadcast_log("🗺️ Ejecutando compilación cartográfica 3D (MapGen vía WSL 2)...", progress=15, step_name="Cartografía 3D")
+            else:
+                broadcast_log("📊 Procesando fuentes de datos INEGI y Modelo Gravitatorio...", progress=30, step_name="Ingesta INEGI")
+            city_base = os.path.splitext(os.path.basename(config_file))[0].lower()
+            city_out_dir = os.path.join(DIST_DIR, city_base)
+            os.makedirs(city_out_dir, exist_ok=True)
+            resolved_config = _resolve_city_path(config_file)
             execute_pipeline(
-                config_path=config_file,
+                config_path=resolved_config,
                 skip_map=skip_map,
-                output_dir=ROOT_DIR,
+                output_dir=city_out_dir,
                 data_dir=effective_data_dir
             )
-            broadcast_log("✨ ¡Compilación completada exitosamente!", progress=100, step_name="Finalizado")
+            broadcast_log("✨ ¡Compilación y empaquetado final completados con éxito!", progress=100, step_name="Finalizado")
             with build_lock:
                 active_build["running"] = False
                 active_build["status"] = "success"
@@ -449,8 +825,18 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
 
         if path in ["/", "/index.html"]:
             self.serve_html()
-        elif path == "/api/cities":
+        elif path in ["/api/cities", "/api/projects"]:
             self.serve_json({"cities": get_available_cities()})
+        elif path == "/api/system-check":
+            from sb_mexico.cartography import is_wsl_available
+            wsl_ok, distro, tools = is_wsl_available()
+            self.serve_json({
+                "status": "ok",
+                "platform": sys.platform,
+                "wsl_ready": wsl_ok,
+                "distro": distro,
+                "tools": tools
+            })
         elif path == "/api/city":
             city_file = query.get("file", [""])[0]
             if not city_file:
@@ -465,8 +851,16 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
             city_code = query.get("city", [""])[0]
             city_name = query.get("name", [""])[0]
             city_file = query.get("file", [""])[0]
-            status = inspect_data_files(city_name=city_name, city_code=city_code, city_file=city_file)
+            data_dir = query.get("data_dir", [""])[0]
+            status = inspect_data_files(city_name=city_name, city_code=city_code, city_file=city_file, data_dir_override=data_dir)
             self.serve_json(status)
+        elif path == "/api/conapo/calculate":
+            city_file = query.get("file", [""])[0]
+            if not city_file:
+                self.serve_error("Parámetro 'file' faltante", 400)
+                return
+            factors_res = calculate_conapo_factors(city_file)
+            self.serve_json(factors_res)
         elif path == "/api/density":
             from tools.poi_studio import load_demand_sample
             city_file = query.get("file", [""])[0]
@@ -487,17 +881,13 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 
                 cdata = l_city(city_file) if city_file else {}
                 bbox = cdata.get("city", {}).get("bbox")
-                city_base = os.path.splitext(os.path.basename(city_file))[0] if city_file else ""
+                st = inspect_data_files(city_file=city_file)
+                denue_files = st.get("denue", {}).get("files", [])
 
-                denue_candidates = []
-                if city_base:
-                    denue_candidates.extend(glob.glob(os.path.join(DATA_DIR, city_base, "*denue*.csv")))
-                denue_candidates.extend(glob.glob(os.path.join(DATA_DIR, "*denue*.csv")))
-                denue_candidates.extend(glob.glob(os.path.join(ROOT_DIR, "*denue*.csv")))
-
-                valid = [c for c in denue_candidates if os.path.isfile(c)]
-                if valid and bbox:
-                    suggs = extract_settlement_suggestions(valid[0], bbox, min_count=10)
+                if denue_files and bbox:
+                    first_f = denue_files[0]
+                    denue_path = first_f.get("abs_path") or os.path.join(ROOT_DIR, first_f["path"])
+                    suggs = extract_settlement_suggestions(denue_path, bbox, min_count=10)
                 else:
                     suggs = []
                 self.serve_json({"suggestions": suggs})
@@ -505,37 +895,47 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 self.serve_json({"suggestions": [], "error": str(e)})
         elif path == "/api/demand-preview":
             city_file = query.get("file", [""])[0]
-            city_base = os.path.splitext(os.path.basename(city_file))[0] if city_file else ""
-            candidates = [
-                os.path.join(DIST_DIR, city_base, "demand_data.json") if city_base else "",
-                os.path.join(ROOT_DIR, "demand_data.json"),
-                os.path.join(DIST_DIR, "demand_data.json")
-            ]
-            found_path = None
-            for c in candidates:
-                if c and os.path.exists(c):
-                    found_path = c
-                    break
+            city_base = os.path.splitext(os.path.basename(city_file))[0].lower() if city_file else ""
 
-            if found_path:
+            # Buscar demand_data.json EXCLUSIVAMENTE dentro de dist/<city_base>/
+            target_path = os.path.join(DIST_DIR, city_base, "demand_data.json") if city_base else ""
+            if target_path and os.path.exists(target_path):
                 try:
-                    with open(found_path, "r", encoding="utf-8") as f:
+                    with open(target_path, "r", encoding="utf-8") as f:
                         demand_json = json.load(f)
                     self.serve_json(demand_json)
                 except Exception as e:
-                    self.serve_error(f"Error al leer demand_data.json: {e}", 500)
+                    self.serve_error(f"Error al leer demand_data.json de {city_base}: {e}", 500)
             else:
-                self.serve_json({"points": [], "metadata": {"status": "not_compiled"}})
+                self.serve_json({"points": [], "metadata": {"status": "not_compiled", "city": city_base}})
         elif path == "/api/build/stream":
             self.serve_sse_stream()
         elif path == "/api/build/status":
             self.serve_json(active_build)
         elif path == "/api/download":
             city_file = query.get("file", [""])[0]
-            city_base = os.path.splitext(os.path.basename(city_file))[0] if city_file else ""
-            zip_candidates = glob.glob(os.path.join(DIST_DIR, f"*{city_base}*.zip")) or glob.glob(os.path.join(DIST_DIR, "*.zip"))
-            if zip_candidates:
-                target_zip = zip_candidates[0]
+            city_base = os.path.splitext(os.path.basename(city_file))[0].lower() if city_file else ""
+            city_code = ""
+            if city_file:
+                try:
+                    cdata = load_city_data(city_file)
+                    city_code = cdata.get("city", {}).get("code", "").upper()
+                except Exception:
+                    pass
+
+            zip_candidates = []
+            if city_base:
+                zip_candidates.extend(glob.glob(os.path.join(DIST_DIR, city_base, "*.zip")))
+                zip_candidates.extend(glob.glob(os.path.join(DIST_DIR, f"*{city_base}*.zip")))
+            if city_code:
+                zip_candidates.extend(glob.glob(os.path.join(DIST_DIR, f"{city_code}.zip")))
+                zip_candidates.extend(glob.glob(os.path.join(DIST_DIR, city_base, f"{city_code}.zip")))
+
+            # Deduplicar preservando orden
+            valid_zips = [z for z in dict.fromkeys(zip_candidates) if os.path.isfile(z)]
+
+            if valid_zips:
+                target_zip = valid_zips[0]
                 with open(target_zip, "rb") as zf:
                     data = zf.read()
                 self.send_response(200)
@@ -545,13 +945,14 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(data)
             else:
-                self.serve_error("No se encontró ningún paquete .zip compilado", 404)
+                self.serve_error(f"No se encontró ningún paquete .zip compilado para '{city_base or 'este proyecto'}'. Debes compilarlo primero.", 404)
         else:
             self.serve_error("Ruta no encontrada", 404)
 
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        query = parse_qs(parsed.query)
 
         if path == "/api/city/save":
             try:
@@ -565,55 +966,115 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                     return
 
                 saved_path = save_full_city_data(city_file, req_data)
-                self.serve_json({"status": "ok", "path": saved_path})
+                self.serve_json({"status": "ok", "saved_path": saved_path})
             except Exception as e:
                 self.serve_error(str(e), 500)
 
-        elif path == "/api/city/create":
+        elif path in ["/api/project/new", "/api/city/create"]:
             try:
                 content_len = int(self.headers.get('Content-Length', 0))
                 post_body = self.rfile.read(content_len)
                 req_data = json.loads(post_body.decode('utf-8'))
 
-                code = req_data.get("code", "NEW").upper()
-                name = req_data.get("name", "Nueva Ciudad")
-                filename = f"{code.lower()}.yaml"
-                fpath = os.path.join(CITIES_DIR, filename)
+                name = req_data.get("name", "").strip()
+                code = req_data.get("code", "").strip()
+                creator = req_data.get("creator", "Creador").strip()
+                data_dir = req_data.get("data_dir", "").strip()
 
-                if os.path.exists(fpath):
-                    self.serve_error(f"Ya existe una ciudad con el código '{code}' ({filename})", 400)
+                if not name or not code:
+                    self.serve_error("Nombre y código son obligatorios", 400)
                     return
 
-                default_data = {
-                    "city": {
-                        "code": code,
-                        "name": name,
-                        "description": req_data.get("description", f"Zona Metropolitana de {name}"),
-                        "bbox": req_data.get("bbox", [-99.25, 19.30, -99.05, 19.50]),
-                        "creator": req_data.get("creator", "Creador"),
-                        "grid_size": 0.0025,
-                        "min_residents": 10,
-                        "min_jobs": 3,
-                        "initial_zoom": 11.5,
-                        "building_filter_size": 15.0,
-                        "building_simplification": 0.2,
-                        "include_ocean": False
-                    },
-                    "macroeconomics": {
-                        "tasa_pea": 0.62,
-                        "til_1_state": 0.45,
-                        "sample_threshold": 500,
-                        "default_growth_factor": 1.05,
-                        "gravity_beta": 0.12,
-                        "max_distance_km": 50.0,
-                        "max_pop_size": 150,
-                        "growth_factors": {}
-                    },
-                    "pois": [],
-                    "places": []
-                }
-                save_full_city_data(fpath, default_data)
-                self.serve_json({"status": "ok", "filename": filename, "file": f"cities/{filename}"})
+                proj_info = create_new_project(name, code, creator, data_dir)
+                self.serve_json(proj_info)
+            except Exception as e:
+                self.serve_error(str(e), 500)
+
+        elif path == "/api/project/delete":
+            try:
+                content_len = int(self.headers.get('Content-Length', 0))
+                post_body = self.rfile.read(content_len)
+                req_data = json.loads(post_body.decode('utf-8'))
+
+                city_file = req_data.get("file")
+                delete_data = bool(req_data.get("delete_data_folder", False))
+                if not city_file:
+                    self.serve_error("Falta el parámetro 'file'", 400)
+                    return
+
+                del_res = delete_project(city_file, delete_data)
+                self.serve_json(del_res)
+            except Exception as e:
+                self.serve_error(str(e), 500)
+
+        elif path == "/api/data/open-location":
+            try:
+                content_len = int(self.headers.get('Content-Length', 0))
+                post_body = self.rfile.read(content_len)
+                req_data = json.loads(post_body.decode('utf-8'))
+
+                target_path = req_data.get("path")
+                if not target_path:
+                    self.serve_error("Falta el parámetro 'path'", 400)
+                    return
+
+                res = open_file_location(target_path)
+                self.serve_json(res)
+            except Exception as e:
+                self.serve_error(str(e), 500)
+
+        elif path in ["/api/data/unlink", "/api/data/exclude", "/api/data/delete"]:
+            try:
+                content_len = int(self.headers.get('Content-Length', 0))
+                post_body = self.rfile.read(content_len)
+                req_data = json.loads(post_body.decode('utf-8'))
+
+                city_file = req_data.get("file")
+                filename = req_data.get("filename") or os.path.basename(req_data.get("path", ""))
+
+                if not city_file or not filename:
+                    self.serve_error("Faltan parámetros 'file' o 'filename'", 400)
+                    return
+
+                # Desvincular de la configuración SIN BORRAR DEL DISCO
+                res = exclude_data_file(city_file, filename)
+                self.serve_json(res)
+            except Exception as e:
+                self.serve_error(str(e), 500)
+
+        elif path == "/api/data/relink":
+            try:
+                content_len = int(self.headers.get('Content-Length', 0))
+                post_body = self.rfile.read(content_len)
+                req_data = json.loads(post_body.decode('utf-8'))
+
+                city_file = req_data.get("file")
+                filename = req_data.get("filename")
+
+                if not city_file or not filename:
+                    self.serve_error("Faltan parámetros 'file' o 'filename'", 400)
+                    return
+
+                res = relink_data_file(city_file, filename)
+                self.serve_json(res)
+            except Exception as e:
+                self.serve_error(str(e), 500)
+
+        elif path == "/api/data/set-directory":
+            try:
+                content_len = int(self.headers.get('Content-Length', 0))
+                post_body = self.rfile.read(content_len)
+                req_data = json.loads(post_body.decode('utf-8'))
+
+                city_file = req_data.get("file")
+                new_dir = req_data.get("data_dir", "").strip()
+
+                if not city_file:
+                    self.serve_error("Falta el parámetro 'file'", 400)
+                    return
+
+                res = set_project_data_dir(city_file, new_dir)
+                self.serve_json(res)
             except Exception as e:
                 self.serve_error(str(e), 500)
 
@@ -628,6 +1089,30 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
 
                 boundary = content_type.split("boundary=")[-1].strip().encode('utf-8')
                 body = self.rfile.read(content_len)
+
+                # Resolver destino de subcarpeta priorizando data_dir del proyecto
+                city_file_param = query.get("file", [""])[0]
+                city_param = query.get("city", [""])[0] or query.get("folder", [""])[0]
+
+                target_dir = None
+                if city_file_param:
+                    try:
+                        cdata = load_city_data(city_file_param)
+                        cfg_d = cdata.get("data_dir")
+                        if cfg_d:
+                            target_dir = cfg_d if os.path.isabs(cfg_d) else os.path.join(ROOT_DIR, cfg_d)
+                    except Exception:
+                        pass
+
+                if not target_dir:
+                    target_sub = ""
+                    if city_param:
+                        target_sub = os.path.basename(city_param).lower()
+                    elif city_file_param:
+                        target_sub = os.path.splitext(os.path.basename(city_file_param))[0].lower()
+                    target_dir = os.path.join(DATA_DIR, target_sub) if target_sub else DATA_DIR
+
+                os.makedirs(target_dir, exist_ok=True)
 
                 parts = body.split(b"--" + boundary)
                 uploaded_files = []
@@ -646,21 +1131,31 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                         clean_fn = os.path.basename(raw_fn)
 
                         if clean_fn:
-                            target_dir = DATA_DIR
-                            os.makedirs(target_dir, exist_ok=True)
                             out_path = os.path.join(target_dir, clean_fn)
                             with open(out_path, "wb") as out_f:
                                 out_f.write(file_bytes)
                             
+                            try:
+                                rel_out = os.path.relpath(out_path, ROOT_DIR).replace("\\", "/")
+                            except ValueError:
+                                rel_out = out_path.replace("\\", "/")
+
                             uploaded_files.append({
                                 "filename": clean_fn,
                                 "size_mb": round(len(file_bytes) / (1024 * 1024), 2),
-                                "path": os.path.relpath(out_path, ROOT_DIR).replace("\\", "/")
+                                "path": rel_out,
+                                "abs_path": out_path
                             })
+
+                try:
+                    display_target = os.path.relpath(target_dir, ROOT_DIR).replace("\\", "/")
+                except ValueError:
+                    display_target = target_dir.replace("\\", "/")
 
                 self.serve_json({
                     "status": "ok",
                     "uploaded_count": len(uploaded_files),
+                    "target_dir": display_target,
                     "files": uploaded_files
                 })
             except Exception as e:

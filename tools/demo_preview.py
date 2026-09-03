@@ -46,7 +46,13 @@ pops = simulate_gravity_demand(demand_points=points, beta=0.12, max_pop_size=150
 
 clean_points = sanitize_demand_points(points)
 
-with open("demand_data.json", "w", encoding="utf-8") as f:
+out_demo_dir = os.path.join("dist", "cancun")
+os.makedirs(out_demo_dir, exist_ok=True)
+demand_path = os.path.join(out_demo_dir, "demand_data.json")
+config_path = os.path.join(out_demo_dir, "config.json")
+preview_path = os.path.join(out_demo_dir, "preview_cancun.html")
+
+with open(demand_path, "w", encoding="utf-8") as f:
     json.dump({"points": clean_points, "pops": pops}, f)
 
 config_data = {
@@ -65,7 +71,7 @@ config_data = {
     "version": "6.3.0"
 }
 
-with open("config.json", "w", encoding="utf-8") as f:
+with open(config_path, "w", encoding="utf-8") as f:
     json.dump(config_data, f, indent=2)
 
-generate_html_viewer("demand_data.json", "config.json", "preview_cancun.html")
+generate_html_viewer(demand_path, config_path, preview_path)

@@ -54,10 +54,22 @@ def _dedup_glob(patterns: List[str]) -> List[str]:
 
 def load_city_config(config_path: str) -> Dict[str, Any]:
     """Carga y valida el archivo YAML de configuración de la ciudad."""
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"No se encontró el archivo de configuración en '{config_path}'")
+    resolved = config_path
+    if not os.path.isabs(resolved):
+        candidates = [
+            os.path.abspath(resolved),
+            os.path.abspath(os.path.join(ROOT_DIR, resolved)),
+            os.path.abspath(os.path.join(ROOT_DIR, "cities", os.path.basename(resolved)))
+        ]
+        for c in candidates:
+            if os.path.exists(c):
+                resolved = c
+                break
 
-    with open(config_path, "r", encoding="utf-8") as f:
+    if not os.path.exists(resolved):
+        raise FileNotFoundError(f"No se encontró el archivo de configuración en '{config_path}' (buscado en: '{resolved}')")
+
+    with open(resolved, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
     # Validaciones mínimas requeridas
@@ -95,30 +107,38 @@ def execute_pipeline(
         "max_lat": bbox_list[3]
     }
 
-    out_dir = os.path.abspath(output_dir)
+    # Garantizar salida aislada en dist/<ciudad> si no se especifica una ruta dedicada
+    if output_dir in (".", ROOT_DIR, ""):
+        out_dir = os.path.join(ROOT_DIR, "dist", city_base)
+    else:
+        out_dir = os.path.abspath(output_dir)
     os.makedirs(out_dir, exist_ok=True)
 
-    # Resolución universal de directorios de búsqueda de datos
+    # Resolución estrictamente aislada de fuentes de datos por proyecto
     search_dirs = []
+
+    # 1. Carpeta específica del proyecto
+    project_dir = None
     if data_dir:
-        search_dirs.append(os.path.abspath(data_dir))
+        project_dir = os.path.abspath(data_dir)
+    elif cfg.get("data_dir"):
+        c_dir = cfg.get("data_dir")
+        project_dir = c_dir if os.path.isabs(c_dir) else os.path.join(ROOT_DIR, c_dir)
+    else:
+        cand_base = os.path.join(ROOT_DIR, "data", city_base)
+        cand_code = os.path.join(ROOT_DIR, "data", city_code.lower())
+        if os.path.exists(cand_base):
+            project_dir = cand_base
+        elif os.path.exists(cand_code):
+            project_dir = cand_code
 
-    candidate_subdirs = [
-        os.path.join(ROOT_DIR, "data", city_base),
-        os.path.join(ROOT_DIR, "data", city_code.lower()),
-        os.path.join(ROOT_DIR, "data"),
-        out_dir,
-        ROOT_DIR
-    ]
-    for d in candidate_subdirs:
-        if os.path.exists(d) and d not in search_dirs:
-            search_dirs.append(d)
+    if project_dir and os.path.exists(project_dir):
+        search_dirs.append(project_dir)
 
-    data_parent = os.path.join(ROOT_DIR, "data")
-    if os.path.exists(data_parent):
-        for entry in os.scandir(data_parent):
-            if entry.is_dir() and entry.path not in search_dirs:
-                search_dirs.append(entry.path)
+    # 2. Raíz de data/ reservada exclusivamente para datasets nacionales (OSM PBF y CONAPO)
+    national_data_dir = os.path.join(ROOT_DIR, "data")
+    if os.path.exists(national_data_dir) and national_data_dir not in search_dirs:
+        search_dirs.append(national_data_dir)
 
     def find_sources(patterns: List[str]) -> List[str]:
         candidates = []
@@ -270,10 +290,13 @@ def execute_pipeline(
     roads_path = os.path.join(out_dir, "roads.geojson")
     if not os.path.exists(roads_path) and os.path.exists(os.path.join(src_dir, "roads.geojson")):
         roads_path = os.path.join(src_dir, "roads.geojson")
-    if not os.path.exists(roads_path):
-        raise FileNotFoundError(f"roads.geojson no encontrado en '{out_dir}' ni en '{src_dir}'. Compila el mapa primero.")
 
-    roads_gdf = gpd.read_file(roads_path)
+    if os.path.exists(roads_path):
+        roads_gdf = gpd.read_file(roads_path)
+        console.print(f"-> Snapping vial activado: [cyan]{len(roads_gdf):,}[/cyan] segmentos de vía ({os.path.basename(roads_path)}).")
+    else:
+        roads_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+        console.print("[yellow]-> roads.geojson no encontrado. La malla de demanda se posicionará en los centroides urbanos sin snapping vial.[/yellow]")
 
     grid_size = city_info.get("grid_size", 0.0025)
     demand_points, poi_audit = build_demand_grid(
@@ -417,14 +440,27 @@ def execute_pipeline(
     zip_name = f"{city_code}.zip"
     zip_path = os.path.join(out_dir, zip_name)
 
-    # Validación estricta de artefactos obligatorios
-    mandatory_files = ["config.json", "demand_data.json", f"{city_code}.pmtiles", "roads.geojson"]
-    missing_mandatory = [f for f in mandatory_files if not os.path.exists(os.path.join(out_dir, f))]
-    if missing_mandatory:
-        raise RuntimeError(
-            f"No se puede generar el archivo {zip_name}. Faltan artefactos obligatorios en '{out_dir}': "
-            f"{', '.join(missing_mandatory)}"
-        )
+    # Validación de artefactos generados
+    mandatory_data_files = ["config.json", "demand_data.json"]
+    missing_data = [f for f in mandatory_data_files if not os.path.exists(os.path.join(out_dir, f))]
+    if missing_data:
+        raise RuntimeError(f"Faltan artefactos esenciales de demanda en '{out_dir}': {', '.join(missing_data)}")
+
+    mandatory_map_files = [f"{city_code}.pmtiles", "roads.geojson"]
+    missing_map = [f for f in mandatory_map_files if not os.path.exists(os.path.join(out_dir, f))]
+
+    if missing_map:
+        console.print(Panel.fit(
+            f"[bold green]¡DEMANDA Y CONFIGURACIÓN GENERADAS EXITOSAMENTE AL 100%![/bold green]\n"
+            f"Archivos exportados a: [cyan]{out_dir}[/cyan]\n"
+            f"• demand_data.json: {len(clean_demand_points):,} nodos | {len(pops):,} cohortes | {total_viajeros:,} viajeros\n"
+            f"• config.json: Viewport baricéntrico y metadatos listos para el Visor (Paso 6)\n\n"
+            f"[yellow]Nota para el paquete final del juego ({zip_name}):[/yellow]\n"
+            f"Para generar el .zip importable a Subway Builder se requieren: {', '.join(missing_map)}.\n"
+            f"Puedes compilar la cartografía en WSL/Linux o colocar los archivos generados en la carpeta del proyecto.",
+            style="yellow"
+        ))
+        return demand_out_path
 
     files_to_pack = [
         "config.json",

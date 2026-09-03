@@ -189,28 +189,36 @@ def save_city_pois(rel_or_abs_path: str, new_pois: List[Dict[str, Any]]) -> None
 
 def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Dict[str, Any]]:
     """
-    Carga puntos de demanda reales a partir de:
-    1. dist/<ciudad>/demand_data.json (si ya fue compilado)
-    2. Datos directos del DENUE y CPV en data/
-    3. demand_data.json en raíz
+    Carga puntos de demanda reales de forma estrictamente aislada:
+    1. dist/<ciudad>/demand_data.json (si este proyecto específico ya fue compilado).
+    2. DENUE en tiempo real EXCLUSIVAMENTE desde la carpeta asignada a este proyecto (data_dir).
+    Si el proyecto no ha sido compilado y no tiene DENUE propio, retorna [] (cero contaminación cruzada).
     """
     city_base = ""
+    target_data_dir = None
     if city_file:
-        city_base = os.path.basename(city_file).replace(".yaml", "")
+        city_base = os.path.splitext(os.path.basename(city_file))[0].lower()
+        try:
+            cdata = load_city_data(city_file)
+            cfg_dir = cdata.get("data_dir")
+            if cfg_dir:
+                target_data_dir = cfg_dir if os.path.isabs(cfg_dir) else os.path.join(ROOT_DIR, cfg_dir)
+            if not bbox:
+                bbox = cdata.get("city", {}).get("bbox")
+        except Exception:
+            pass
 
-    # 1. Buscar demand_data.json compilado en dist/<ciudad>/ o dist/
-    candidates_demand = []
+    if not target_data_dir and city_base:
+        cand_dir = os.path.join(ROOT_DIR, "data", city_base)
+        if os.path.exists(cand_dir):
+            target_data_dir = cand_dir
+
+    # 1. Buscar demand_data.json compilado EXCLUSIVAMENTE para esta ciudad
     if city_base:
-        candidates_demand.append(os.path.join(ROOT_DIR, "dist", city_base, "demand_data.json"))
-    candidates_demand.extend([
-        os.path.join(ROOT_DIR, "dist", "cancun", "demand_data.json"),
-        os.path.join(ROOT_DIR, "demand_data.json")
-    ])
-
-    for dpath in candidates_demand:
-        if os.path.exists(dpath):
+        city_demand_path = os.path.join(ROOT_DIR, "dist", city_base, "demand_data.json")
+        if os.path.exists(city_demand_path):
             try:
-                with open(dpath, "r", encoding="utf-8") as f:
+                with open(city_demand_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 points = data.get("points", [])
                 if bbox and len(bbox) == 4:
@@ -225,65 +233,62 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
                 if points:
                     return points
             except Exception as e:
-                print(f"[WARN] Error al leer {dpath}: {e}")
+                print(f"[WARN] Error al leer {city_demand_path}: {e}")
 
-    # Estrategia 2: Si no hay demand_data compilado, procesar DENUE en tiempo real
-    denue_patterns = [
-        os.path.join(ROOT_DIR, "data", "*", "*denue*.csv"),
-        os.path.join(ROOT_DIR, "data", "*denue*.csv"),
-        os.path.join(ROOT_DIR, "*denue*.csv")
-    ]
-    denue_files = []
-    for pat in denue_patterns:
-        denue_files.extend(glob.glob(pat))
+    # Estrategia 2: Si no hay demand_data compilado para esta ciudad,
+    # procesar DENUE en tiempo real ÚNICAMENTE desde su propia carpeta de datos
+    if target_data_dir and os.path.exists(target_data_dir) and bbox and len(bbox) == 4:
+        denue_files = glob.glob(os.path.join(target_data_dir, "*denue*.csv")) + glob.glob(os.path.join(target_data_dir, "*DENUE*.csv"))
+        if denue_files:
+            try:
+                import pandas as pd
+                import math
+                df = pd.read_csv(denue_files[0], encoding='latin1', low_memory=False, dtype=str)
+                lat_cols = [c for c in df.columns if 'latitud' in c.lower()]
+                lon_cols = [c for c in df.columns if 'longitud' in c.lower()]
+                if lat_cols and lon_cols:
+                    lat_col = lat_cols[0]
+                    lon_col = lon_cols[0]
 
-    if denue_files and bbox and len(bbox) == 4:
-        try:
-            import pandas as pd
-            import math
-            df = pd.read_csv(denue_files[0], encoding='latin1', low_memory=False, dtype=str)
-            lat_col = [c for c in df.columns if 'latitud' in c.lower()][0]
-            lon_col = [c for c in df.columns if 'longitud' in c.lower()][0]
+                    df['lat'] = pd.to_numeric(df[lat_col], errors='coerce')
+                    df['lon'] = pd.to_numeric(df[lon_col], errors='coerce')
 
-            df['lat'] = pd.to_numeric(df[lat_col], errors='coerce')
-            df['lon'] = pd.to_numeric(df[lon_col], errors='coerce')
+                    margin_lon = (bbox[2] - bbox[0]) * 0.35
+                    margin_lat = (bbox[3] - bbox[1]) * 0.35
+                    min_lon, max_lon = bbox[0] - margin_lon, bbox[2] + margin_lon
+                    min_lat, max_lat = bbox[1] - margin_lat, bbox[3] + margin_lat
 
-            margin_lon = (bbox[2] - bbox[0]) * 0.35
-            margin_lat = (bbox[3] - bbox[1]) * 0.35
-            min_lon, max_lon = bbox[0] - margin_lon, bbox[2] + margin_lon
-            min_lat, max_lat = bbox[1] - margin_lat, bbox[3] + margin_lat
+                    df = df[
+                        (df['lon'] >= min_lon) & (df['lon'] <= max_lon) &
+                        (df['lat'] >= min_lat) & (df['lat'] <= max_lat)
+                    ].dropna(subset=['lat', 'lon'])
 
-            df = df[
-                (df['lon'] >= min_lon) & (df['lon'] <= max_lon) &
-                (df['lat'] >= min_lat) & (df['lat'] <= max_lat)
-            ].dropna(subset=['lat', 'lon'])
+                    # Bins de agregación espacial rápida (~250m)
+                    grid_size = 0.0025
+                    grid = {}
+                    for _, r in df.iterrows():
+                        r_lon = r['lon']
+                        r_lat = r['lat']
+                        k = f"{int(math.floor(r_lon / grid_size))}_{int(math.floor(r_lat / grid_size))}"
+                        if k not in grid:
+                            grid[k] = {'sum_lon': 0.0, 'sum_lat': 0.0, 'count': 0}
+                        grid[k]['sum_lon'] += r_lon
+                        grid[k]['sum_lat'] += r_lat
+                        grid[k]['count'] += 1
 
-            # Bins de agregación espacial rápida (~250m)
-            grid_size = 0.0025
-            grid = {}
-            for _, r in df.iterrows():
-                r_lon = r['lon']
-                r_lat = r['lat']
-                k = f"{int(math.floor(r_lon / grid_size))}_{int(math.floor(r_lat / grid_size))}"
-                if k not in grid:
-                    grid[k] = {'sum_lon': 0.0, 'sum_lat': 0.0, 'count': 0}
-                grid[k]['sum_lon'] += r_lon
-                grid[k]['sum_lat'] += r_lat
-                grid[k]['count'] += 1
-
-            pts = []
-            for idx, (k, cell) in enumerate(grid.items()):
-                c_lon = cell['sum_lon'] / cell['count']
-                c_lat = cell['sum_lat'] / cell['count']
-                pts.append({
-                    'id': f"denue_{idx+1:04d}",
-                    'location': [round(c_lon, 5), round(c_lat, 5)],
-                    'jobs': int(cell['count'] * 4.5),
-                    'residents': 0
-                })
-            return pts
-        except Exception as e:
-            print(f"[WARN] Error al procesar DENUE en tiempo real: {e}")
+                    pts = []
+                    for idx, (k, cell) in enumerate(grid.items()):
+                        c_lon = cell['sum_lon'] / cell['count']
+                        c_lat = cell['sum_lat'] / cell['count']
+                        pts.append({
+                            'id': f"denue_{idx+1:04d}",
+                            'location': [round(c_lon, 5), round(c_lat, 5)],
+                            'jobs': int(cell['count'] * 4.5),
+                            'residents': 0
+                        })
+                    return pts
+            except Exception as e:
+                print(f"[WARN] Error al procesar DENUE en tiempo real para {city_base}: {e}")
 
     return []
 

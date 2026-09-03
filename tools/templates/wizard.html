@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es" class="dark">
+<html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,20 +9,21 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
-      darkMode: 'class',
       theme: {
         extend: {
           colors: {
             metro: {
-              orange: '#F37021', // Línea 1/7 CDMX
-              green: '#00805B',  // Verde Bandera / Línea 8
-              pink: '#E4007C',   // Rosa Mexicano / Línea 1
-              blue: '#0033A0',   // Azul Índigo
-              dark: '#0e1015',
-              card: '#161821',
-              panel: '#1e212b',
-              border: '#2a2f3d',
-              accent: '#f37021'
+              orange: '#D95F18', // Naranja Wyman
+              green: '#15803D',  // Verde Bandera sólido
+              pink: '#C80068',   // Rosa Mexicano Wyman
+              blue: '#0284C7',   // Azul Índigo
+              dark: '#F7F5F0',   // Base cálida limpia
+              card: '#FFFFFF',   // Tarjetas blanco puro de alto contraste
+              panel: '#F3EFE6',  // Panel secundario arena suave
+              border: '#D8D1C5', // Borde nítido y limpio
+              text: '#181615',   // Carbón espresso de máximo contraste
+              muted: '#524B42',  // Texto secundario legible
+              accent: '#D95F18'
             }
           },
           fontFamily: {
@@ -42,15 +43,95 @@
   <script src="https://unpkg.com/lucide@latest"></script>
 
   <style>
-    /* Estilo Wyman y Scrollbar Minimalista */
+    :root {
+      --bg-base: #F7F5F0;
+      --bg-card: #FFFFFF;
+      --bg-panel: #F3EFE6;
+      --border-color: #D8D1C5;
+      --text-main: #181615;
+      --text-muted: #524B42;
+      --accent-orange: #D95F18;
+    }
+
+    body {
+      background-color: #F7F5F0;
+      color: #181615;
+    }
+
+    /* Reglas universales para contraste impecable */
+    h1, h2, h3, h4, th, td, label:not(.badge-colored) {
+      color: #181615;
+    }
+    
+    .text-white:not(button, button *, .btn-accent, .bg-metro-orange *, .bg-metro-green *, .bg-emerald-600 *, .bg-emerald-700 *, .badge-colored *, .bg-rose-500 *, .bg-rose-600 *, .bg-amber-500 *, .bg-amber-600 *, .bg-blue-600 *, .bg-blue-700 *, .bg-purple-600 *, .bg-stone-800 *, .bg-stone-900 *) {
+      color: #181615 !important;
+    }
+
+    .text-gray-100, .text-gray-200, .text-gray-300 {
+      color: #181615;
+    }
+    .text-gray-400, .text-gray-500 {
+      color: #524B42;
+    }
+
+    input, select, textarea {
+      color: #181615 !important;
+      background-color: #FFFFFF !important;
+      border: 1px solid #D8D1C5 !important;
+    }
+    input:focus, select:focus, textarea:focus {
+      border-color: #D95F18 !important;
+      box-shadow: 0 0 0 2px rgba(217,95,24,0.2) !important;
+      outline: none;
+    }
+    input::placeholder {
+      color: #8C8479 !important;
+    }
+
+    /* Estilo Wyman y Scrollbar Minimalista Beige */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #0e1015; }
-    ::-webkit-scrollbar-thumb { background: #2a2f3d; border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: #f37021; }
+    ::-webkit-scrollbar-track { background: #F7F5F0; }
+    ::-webkit-scrollbar-thumb { background: #D8D1C5; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #D95F18; }
+
+    /* POI Custom Marker Icon & Hover Tooltip */
+    .poi-marker-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 2px solid #ffffff;
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 800;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+      cursor: grab;
+      transition: transform 0.15s ease-out;
+    }
+    .poi-marker-icon:hover {
+      transform: scale(1.2);
+    }
+    .poi-marker-icon:active {
+      cursor: grabbing;
+    }
+
+    .poi-custom-tooltip {
+      background: #FFFFFF !important;
+      border: 1px solid #D8D1C5 !important;
+      border-radius: 10px !important;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.15) !important;
+      padding: 0 !important;
+      color: #181615 !important;
+    }
+    .poi-custom-tooltip::before {
+      border-top-color: #FFFFFF !important;
+    }
 
     /* Forzar contención estricta de Leaflet dentro de sus cajas */
     .leaflet-container {
-      background: #0e1015 !important;
+      background: #F4F0E8 !important;
       font-family: inherit;
       width: 100% !important;
       height: 100% !important;
@@ -60,44 +141,63 @@
       z-index: 20 !important;
     }
     .leaflet-popup-content-wrapper {
-      background: #161821 !important;
-      color: #f3f4f6 !important;
-      border: 1px solid #2a2f3d !important;
+      background: #E8E1D3 !important;
+      color: #231F1C !important;
+      border: 1px solid #C4B9A5 !important;
       border-radius: 8px !important;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5) !important;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15) !important;
     }
-    .leaflet-popup-tip { background: #161821 !important; }
+    .leaflet-popup-tip { background: #E8E1D3 !important; }
 
-    /* Estilo del Control de Capas Leaflet en Dark Theme */
+    /* Estilo del Control de Capas Leaflet en Tema Beige */
     .leaflet-control-layers {
-      background: rgba(22, 24, 33, 0.94) !important;
+      background: rgba(232, 225, 211, 0.96) !important;
       backdrop-filter: blur(12px) !important;
       -webkit-backdrop-filter: blur(12px) !important;
-      color: #e5e7eb !important;
-      border: 1px solid rgba(255, 255, 255, 0.12) !important;
+      color: #231F1C !important;
+      border: 1px solid #C4B9A5 !important;
       border-radius: 10px !important;
       padding: 6px 12px !important;
       font-size: 11px !important;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6) !important;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1) !important;
       z-index: 1000 !important;
     }
     .leaflet-control-layers-expanded {
-      background: rgba(22, 24, 33, 0.96) !important;
-      color: #e5e7eb !important;
+      background: rgba(232, 225, 211, 0.98) !important;
+      color: #231F1C !important;
       padding: 10px 14px !important;
     }
     .leaflet-control-layers label {
       margin-bottom: 6px !important;
-      font-weight: 500 !important;
+      font-weight: 600 !important;
       cursor: pointer !important;
       display: flex !important;
       align-items: center !important;
       gap: 6px !important;
+      color: #231F1C !important;
     }
     .leaflet-control-layers-toggle {
       background-size: 18px 18px !important;
       width: 32px !important;
       height: 32px !important;
+    }
+    .leaflet-bar a {
+      background-color: #E8E1D3 !important;
+      color: #231F1C !important;
+      border-bottom: 1px solid #C4B9A5 !important;
+    }
+    .leaflet-bar a:hover {
+      background-color: #DCD4C4 !important;
+      color: #D95F18 !important;
+    }
+
+    .draggable-bbox-rect {
+      cursor: move !important;
+      pointer-events: auto !important;
+    }
+    .draggable-bbox-rect:hover {
+      fill-opacity: 0.25 !important;
+      stroke-width: 3px !important;
     }
 
     .terminal-scroll {
@@ -108,7 +208,7 @@
   </style>
 </head>
 
-<body class="bg-metro-dark text-gray-100 font-sans h-screen flex flex-col overflow-hidden select-none">
+<body class="bg-metro-dark text-metro-text font-sans h-screen flex flex-col overflow-hidden select-none">
 
   <!-- ========================================================================= -->
   <!-- 1. HEADER PRINCIPAL (Identidad Lance Wyman / Metro CDMX) -->
@@ -136,31 +236,34 @@
     </div>
 
     <!-- Selector de Ciudad & Controles Rápidos -->
-    <div class="flex items-center space-x-4">
-      <div class="flex items-center space-x-2 bg-metro-panel px-3 py-1.5 rounded-lg border border-metro-border">
-        <i data-lucide="map-pin" class="w-4 h-4 text-metro-orange"></i>
-        <select id="citySelect" onchange="onCitySelected(this.value)" class="bg-transparent text-sm font-semibold text-white focus:outline-none cursor-pointer pr-2">
-          <option value="" disabled selected>Cargando ciudades...</option>
-        </select>
-        <button onclick="openNewCityModal()" title="Crear Nueva Ciudad" class="text-gray-400 hover:text-white p-1 hover:bg-metro-border rounded transition">
-          <i data-lucide="plus" class="w-4 h-4"></i>
-        </button>
-      </div>
+    <div class="flex items-center space-x-3">
+      <!-- Botón Gestor de Proyectos -->
+      <button onclick="openProjectsModal()" class="flex items-center space-x-2 bg-white hover:bg-stone-50 text-stone-900 px-3 py-1.5 rounded-lg border border-stone-300 shadow-sm transition">
+        <i data-lucide="folder-kanban" class="w-4 h-4 text-metro-orange"></i>
+        <span id="headerProjectLabel" class="text-xs font-bold font-mono">Seleccionar Proyecto</span>
+        <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-stone-500"></i>
+      </button>
+
+      <!-- Botón Crear Nuevo Proyecto Directo -->
+      <button onclick="openNewProjectModal()" title="Crear Nuevo Proyecto" class="flex items-center space-x-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-bold px-2.5 py-1.5 rounded-lg border border-stone-300 transition shadow-sm">
+        <i data-lucide="plus" class="w-4 h-4 text-metro-green"></i>
+        <span class="hidden sm:inline">Nuevo</span>
+      </button>
 
       <!-- Indicador de Auto-guardado -->
-      <div id="saveStatusIndicator" class="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono text-emerald-400 bg-emerald-950/40 border border-emerald-800/40" title="Auto-guardado activo en disco y memoria local">
-        <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400" id="saveStatusIcon"></i>
-        <span id="saveStatusText">Guardado</span>
+      <div id="saveStatusIndicator" class="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono text-emerald-800 bg-emerald-50 border border-emerald-300 shadow-sm" title="Auto-guardado activo en disco y memoria local">
+        <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-700" id="saveStatusIcon"></i>
+        <span id="saveStatusText" class="font-semibold">Guardado</span>
       </div>
 
       <!-- Estado de Conexión / Build -->
-      <div id="buildStatusBadge" class="flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-mono bg-gray-800 text-gray-300 border border-gray-700">
+      <div id="buildStatusBadge" class="flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-mono bg-white text-stone-900 border border-stone-300 shadow-sm">
         <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-        <span id="buildStatusText">Listo</span>
+        <span id="buildStatusText" class="font-medium">Listo</span>
       </div>
 
       <!-- Botón Guardar Global -->
-      <button onclick="saveCurrentCity(false)" id="btnSaveGlobal" class="flex items-center space-x-2 bg-metro-green hover:bg-emerald-600 text-white text-xs font-bold px-3 py-2 rounded-lg transition shadow-md">
+      <button onclick="saveCurrentCity(false)" id="btnSaveGlobal" class="flex items-center space-x-1.5 bg-metro-green hover:bg-emerald-700 text-white text-xs font-bold px-3.5 py-1.5 rounded-lg transition shadow">
         <i data-lucide="save" class="w-4 h-4"></i>
         <span>Guardar YAML</span>
       </button>
@@ -338,18 +441,46 @@
     <!-- --------------------------------------------------------------------- -->
     <section id="stepView-2" class="step-view hidden absolute inset-0 p-6 flex flex-col md:flex-row gap-6 overflow-y-auto w-full h-full">
       <div class="w-full md:w-1/2 flex flex-col space-y-4">
-        <div class="bg-metro-card border border-metro-border rounded-xl p-5 shadow-xl">
-          <div class="flex justify-between items-start mb-2">
-            <h2 class="text-base font-bold text-white flex items-center space-x-2">
+        <div class="bg-white border border-stone-200 rounded-xl p-5 shadow-sm">
+          <div class="flex justify-between items-center mb-3">
+            <h2 class="text-base font-bold text-stone-900 flex items-center space-x-2">
               <i data-lucide="database" class="w-5 h-5 text-metro-green"></i>
-              <span>Estado de Fuentes de Datos (INEGI / OSM)</span>
+              <span>Fuentes de Datos del Proyecto (INEGI / OSM)</span>
             </h2>
-            <button onclick="openDataSourcesModal()" class="px-2.5 py-1 bg-metro-panel hover:bg-metro-border border border-metro-border text-metro-orange text-xs font-bold rounded-lg flex items-center space-x-1.5 transition">
-              <i data-lucide="help-circle" class="w-3.5 h-3.5"></i>
-              <span>¿Dónde descargar?</span>
-            </button>
+            <div class="flex items-center space-x-2">
+              <button onclick="refreshDataStatus(true)" title="Re-escanear y detectar archivos en la carpeta asignada" class="px-2.5 py-1 bg-stone-100 hover:bg-stone-200 border border-stone-300 text-stone-800 text-xs font-bold rounded-lg flex items-center space-x-1.5 transition">
+                <i data-lucide="refresh-cw" class="w-3.5 h-3.5 text-metro-green"></i>
+                <span>Detectar</span>
+              </button>
+              <button onclick="openDataSourcesModal()" class="px-2.5 py-1 bg-stone-100 hover:bg-stone-200 border border-stone-300 text-metro-orange text-xs font-bold rounded-lg flex items-center space-x-1.5 transition">
+                <i data-lucide="help-circle" class="w-3.5 h-3.5"></i>
+                <span>¿Dónde descargar?</span>
+              </button>
+            </div>
           </div>
-          <p class="text-xs text-gray-400 mb-3">El motor soporta **múltiples estados** simultáneos (ej. ZMVM: CDMX 09 + EdoMex 15). Busca en <code class="text-metro-orange font-mono">data/</code> o permite arrastrar varios archivos.</p>
+          
+          <!-- Carpeta de datos del proyecto -->
+          <div class="mb-4 bg-stone-50 border border-stone-300 p-3 rounded-xl space-y-2">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div class="flex items-center space-x-2 text-xs text-stone-900 font-bold">
+                <i data-lucide="folder" class="w-4 h-4 text-metro-orange shrink-0"></i>
+                <span>Carpeta de datos:</span>
+              </div>
+              <div class="flex items-center space-x-2 shrink-0">
+                <button onclick="openActiveDataFolder()" class="px-2.5 py-1 bg-white hover:bg-stone-100 border border-stone-300 text-stone-800 text-xs font-bold rounded-lg flex items-center space-x-1 transition" title="Abrir ubicación en el Explorador de archivos">
+                  <i data-lucide="folder-open" class="w-3.5 h-3.5 text-stone-600"></i>
+                  <span>Abrir ubicación</span>
+                </button>
+                <button onclick="promptChangeDataDir()" class="px-2.5 py-1 bg-white hover:bg-stone-100 border border-stone-300 text-stone-800 text-xs font-bold rounded-lg flex items-center space-x-1 transition" title="Cambiar carpeta de datos">
+                  <i data-lucide="pencil" class="w-3.5 h-3.5 text-stone-600"></i>
+                  <span>Cambiar carpeta</span>
+                </button>
+              </div>
+            </div>
+            <div class="flex items-center space-x-2">
+              <code id="activeDataFolderBadge" class="text-xs font-mono font-bold bg-white text-stone-900 px-2.5 py-1 rounded-lg border border-stone-300 break-all select-all flex-1">data/</code>
+            </div>
+          </div>
 
           <div class="space-y-3" id="dataStatusList">
             <!-- Renderizado dinámico -->
@@ -357,10 +488,10 @@
         </div>
 
         <div class="flex justify-between items-center pt-2">
-          <button onclick="goToStep(1)" class="px-4 py-2 bg-metro-panel hover:bg-metro-border text-gray-300 text-xs font-bold rounded-lg transition">
+          <button onclick="goToStep(1)" class="px-4 py-2 bg-white hover:bg-stone-100 border border-stone-300 text-stone-800 text-xs font-bold rounded-lg transition shadow-xs">
             &larr; Volver
           </button>
-          <button onclick="goToStep(3)" class="px-6 py-2.5 bg-metro-green hover:bg-emerald-600 text-white text-xs font-bold rounded-lg transition shadow-lg flex items-center space-x-2">
+          <button onclick="goToStep(3)" class="px-6 py-2.5 bg-metro-green hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition shadow-md flex items-center space-x-2">
             <span>Continuar a Macroeconomía</span>
             <i data-lucide="arrow-right" class="w-4 h-4"></i>
           </button>
@@ -369,37 +500,37 @@
 
       <!-- Zona de Carga Manual (Drag & Drop) -->
       <div class="w-full md:w-1/2 flex flex-col space-y-4">
-        <div class="bg-metro-card border border-metro-border rounded-xl p-6 shadow-xl flex flex-col flex-1">
-          <h3 class="text-sm font-bold text-white flex items-center space-x-2 mb-2">
+        <div class="bg-white border border-stone-200 rounded-xl p-6 shadow-sm flex flex-col flex-1">
+          <h3 class="text-sm font-bold text-stone-900 flex items-center space-x-2 mb-1">
             <i data-lucide="upload-cloud" class="w-5 h-5 text-metro-pink"></i>
-            <span>Carga Manual de Archivos</span>
+            <span>Cargar Archivos de Datos</span>
           </h3>
-          <p class="text-xs text-gray-400 mb-4">Arrastra tus archivos de microdatos censales (DENUE, RESAGEBURB, Censos Económicos o OSM PBF). Se guardarán en <code class="text-metro-orange font-mono">data/</code>.</p>
+          <p class="text-xs text-stone-500 mb-4">Arrastra o selecciona los microdatos necesarios para la modelación.</p>
 
           <!-- Dropzone -->
-          <div id="dropzone" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)" onclick="document.getElementById('manualFileInput').click()" class="border-2 border-dashed border-metro-border hover:border-metro-pink bg-metro-panel/50 rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer transition flex-1 min-h-[220px]">
+          <div id="dropzone" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)" onclick="document.getElementById('manualFileInput').click()" class="border-2 border-dashed border-stone-300 hover:border-metro-pink bg-stone-50 hover:bg-pink-50/20 rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer transition flex-1 min-h-[220px]">
             <input type="file" id="manualFileInput" multiple class="hidden" onchange="handleFileSelect(event)">
             <i data-lucide="file-up" class="w-12 h-12 text-metro-pink mb-3"></i>
-            <span class="text-sm font-bold text-white mb-1">Arrastra archivos aquí o haz clic para examinar</span>
-            <span class="text-xs text-gray-400 text-center">Formatos soportados: .csv, .zip, .osm.pbf, .geojson, .shp</span>
+            <span class="text-sm font-bold text-stone-900 mb-1">Arrastra archivos aquí o haz clic para examinar</span>
+            <span class="text-xs text-stone-500 text-center max-w-sm">Formatos soportados: .csv, .zip, .osm.pbf, .geojson</span>
           </div>
 
           <!-- Barra de Progreso de Subida -->
           <div id="uploadProgressContainer" class="hidden mt-4 space-y-2">
-            <div class="flex justify-between text-xs font-mono">
-              <span id="uploadFileName" class="text-gray-300">Subiendo archivo...</span>
+            <div class="flex justify-between text-xs font-mono font-bold">
+              <span id="uploadFileName" class="text-stone-800">Subiendo archivo...</span>
               <span id="uploadPercent" class="text-metro-pink">0%</span>
             </div>
-            <div class="w-full bg-metro-panel rounded-full h-2 overflow-hidden">
+            <div class="w-full bg-stone-100 rounded-full h-2.5 overflow-hidden border border-stone-200">
               <div id="uploadProgressBar" class="bg-metro-pink h-full w-0 transition-all duration-200"></div>
             </div>
           </div>
 
           <!-- Archivos Subidos Recientemente -->
           <div class="mt-4">
-            <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Archivos Subidos en esta Sesión:</h4>
-            <ul id="uploadedFilesList" class="text-xs space-y-1 text-gray-300 font-mono max-h-32 overflow-y-auto">
-              <li class="text-gray-500 italic">No hay archivos cargados recientemente.</li>
+            <h4 class="text-xs font-bold text-stone-600 uppercase tracking-wider mb-2">Archivos Incorporados en esta Sesión:</h4>
+            <ul id="uploadedFilesList" class="text-xs space-y-1.5 text-stone-800 font-mono max-h-32 overflow-y-auto">
+              <li class="text-stone-500 italic">No hay archivos cargados recientemente.</li>
             </ul>
           </div>
         </div>
@@ -481,20 +612,29 @@
               <i data-lucide="trending-up" class="w-5 h-5 text-metro-green"></i>
               <span>Proyecciones CONAPO por Municipio</span>
             </h3>
-            <p class="text-xs text-gray-400 mt-1">Factores de sincronización intercensal $\text{Pob}_{2026} / \text{Pob}_{2020}$.</p>
+            <p class="text-xs text-gray-400 mt-1" id="conapoSubtitleLabel">Factores de sincronización intercensal $\text{Pob}_{\text{proy}} / \text{Pob}_{2020}$.</p>
           </div>
-          <button onclick="addGrowthFactorRow()" class="px-2.5 py-1 bg-metro-green hover:bg-emerald-600 text-white text-xs font-bold rounded flex items-center space-x-1">
-            <i data-lucide="plus" class="w-3.5 h-3.5"></i>
-            <span>Añadir</span>
-          </button>
+          <div class="flex items-center space-x-2">
+            <button onclick="autoCalculateConapo()" id="btnAutoConapo" class="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-bold rounded-lg flex items-center space-x-1.5 transition shadow-xs">
+              <i data-lucide="zap" class="w-3.5 h-3.5 text-emerald-700"></i>
+              <span>Sincronizar con CONAPO</span>
+            </button>
+            <button onclick="addGrowthFactorRow()" class="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 border border-stone-300 text-stone-800 text-xs font-bold rounded-lg flex items-center space-x-1 transition">
+              <i data-lucide="plus" class="w-3.5 h-3.5 text-metro-green"></i>
+              <span>Añadir</span>
+            </button>
+          </div>
         </div>
 
         <div class="flex-1 overflow-y-auto">
           <table class="w-full text-xs text-left">
-            <thead class="text-gray-400 bg-metro-panel uppercase font-mono text-[10px]">
+            <thead class="text-stone-700 bg-stone-100 uppercase font-mono text-[10px] border-b border-stone-200">
               <tr>
-                <th class="p-2.5">Clave Municipio (EEMMM)</th>
-                <th class="p-2.5">Factor de Crecimiento</th>
+                <th class="p-2.5">Clave</th>
+                <th class="p-2.5">Municipio</th>
+                <th class="p-2.5">Pob. 2020</th>
+                <th class="p-2.5">Pob. Proy.</th>
+                <th class="p-2.5">Factor</th>
                 <th class="p-2.5 text-right">Acciones</th>
               </tr>
             </thead>
@@ -507,58 +647,299 @@
     </section>
 
     <!-- --------------------------------------------------------------------- -->
-    <!-- PASO 4: POI STUDIO INTEGRADO (CALIBRADOR DE RADIOS Y ABSORCIÓN) -->
+    <!-- PASO 4: POI STUDIO INTEGRADO (CALIBRADOR DE RADIOS, ABSORCIÓN Y COLONIAS) -->
     <!-- --------------------------------------------------------------------- -->
     <section id="stepView-4" class="step-view hidden absolute inset-0 p-4 flex gap-4 overflow-hidden w-full h-full">
-      <!-- Panel de Lista de POIs Colapsable -->
-      <div id="sidebar-4" class="w-96 bg-metro-card border border-metro-border rounded-xl p-5 flex flex-col shrink-0 shadow-xl overflow-hidden transition-all duration-300 relative z-20">
-        <div class="flex justify-between items-center border-b border-metro-border pb-3 shrink-0">
+      <!-- Panel Lateral de POI Studio (430px) -->
+      <div id="sidebar-4" class="w-[430px] bg-metro-card border border-metro-border rounded-xl flex flex-col shrink-0 shadow-xl overflow-hidden transition-all duration-300 relative z-20">
+        
+        <!-- Header del Sidebar -->
+        <div class="px-4 py-3 bg-metro-panel/70 border-b border-metro-border flex justify-between items-center shrink-0">
           <div>
-            <h2 class="text-base font-bold text-white flex items-center space-x-2">
-              <i data-lucide="map-pin" class="w-5 h-5 text-metro-orange"></i>
-              <span>Puntos de Interés (POIs)</span>
+            <h2 class="text-sm font-black text-metro-text flex items-center space-x-2 tracking-wide">
+              <i data-lucide="map-pin" class="w-4 h-4 text-metro-orange"></i>
+              <span>POI STUDIO</span>
+              <span class="text-[10px] bg-metro-orange/20 text-metro-orange px-1.5 py-0.5 rounded font-mono font-bold">PRO</span>
             </h2>
-            <span id="poiCountBadge" class="text-xs text-gray-400">0 POIs configurados</span>
+            <span id="poiCountBadge" class="text-[11px] text-metro-muted font-mono">0 POIs configurados</span>
           </div>
-          <div class="flex items-center space-x-1">
-            <button onclick="openNewPoiModal()" class="px-2.5 py-1.5 bg-metro-orange hover:bg-orange-600 text-white text-xs font-bold rounded-lg flex items-center space-x-1 shadow transition">
-              <i data-lucide="plus" class="w-4 h-4"></i>
+          <div class="flex items-center space-x-1.5">
+            <button onclick="openPoiEditorForNew()" class="px-2.5 py-1.5 bg-metro-orange hover:bg-orange-600 text-white text-xs font-bold rounded-lg flex items-center space-x-1 shadow transition">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
               <span>Nuevo POI</span>
             </button>
-            <button onclick="toggleSidebar(4)" title="Ocultar panel lateral" class="text-gray-400 hover:text-white p-1 hover:bg-metro-border rounded transition ml-1">
+            <button onclick="toggleSidebar(4)" title="Ocultar panel lateral" class="text-metro-muted hover:text-metro-text p-1 hover:bg-metro-border rounded transition">
               <i data-lucide="panel-left-close" class="w-4 h-4"></i>
             </button>
           </div>
         </div>
 
-        <!-- Lista scrolleable de POIs -->
-        <div id="poiListContainer" class="flex-1 overflow-y-auto py-3 space-y-2.5">
-          <!-- Renderizado dinámico de tarjetas de POIs -->
+        <!-- Pestañas de Navegación de POI Studio -->
+        <div class="flex bg-stone-100 border-b border-stone-200 shrink-0 text-xs font-bold">
+          <button id="poiTabBtn-list" onclick="switchPoiTab('list')" class="flex-1 py-2 px-1 text-center flex items-center justify-center space-x-1 border-b-2 border-metro-orange text-metro-orange bg-white transition">
+            <i data-lucide="list" class="w-3.5 h-3.5"></i>
+            <span>POIs (<span id="poiCountBadgeTab">0</span>)</span>
+          </button>
+          <button id="poiTabBtn-editor" onclick="switchPoiTab('editor')" class="flex-1 py-2 px-1 text-center flex items-center justify-center space-x-1 border-b-2 border-transparent text-stone-600 hover:text-stone-900 transition">
+            <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+            <span>Editor & Absorción</span>
+          </button>
+          <button id="poiTabBtn-places" onclick="switchPoiTab('places')" class="flex-1 py-2 px-1 text-center flex items-center justify-center space-x-1 border-b-2 border-transparent text-stone-600 hover:text-stone-900 transition">
+            <i data-lucide="tag" class="w-3.5 h-3.5"></i>
+            <span>Colonias</span>
+          </button>
         </div>
 
-        <!-- Botones de Navegación -->
-        <div class="pt-3 border-t border-metro-border flex justify-between shrink-0">
-          <button onclick="goToStep(3)" class="px-4 py-2 bg-metro-panel hover:bg-metro-border text-gray-300 text-xs font-bold rounded-lg transition">
-            &larr; Volver
+        <!-- CONTENIDO PESTAÑA 1: LISTA Y FILTROS -->
+        <div id="poiTab-list" class="flex-1 overflow-y-auto p-3.5 flex flex-col space-y-2.5">
+          <!-- Barra de Búsqueda -->
+          <div class="relative">
+            <i data-lucide="search" class="w-3.5 h-3.5 absolute left-3 top-2.5 text-stone-400"></i>
+            <input type="text" id="poiSearchInput" oninput="filterPoiList()" placeholder="Buscar por nombre o ID..." class="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-stone-300 rounded-lg text-stone-900 focus:outline-none focus:border-metro-orange">
+          </div>
+
+          <!-- Filtros Taxonómicos Rápidos -->
+          <div class="flex flex-wrap gap-1 text-[10px] font-bold">
+            <button onclick="setPoiTaxonomyFilter('ALL')" id="poiFilter-ALL" class="poi-filter-chip px-2 py-0.5 rounded bg-metro-orange text-white">Todos</button>
+            <button onclick="setPoiTaxonomyFilter('AIR')" id="poiFilter-AIR" class="poi-filter-chip px-2 py-0.5 rounded bg-stone-100 text-stone-600 hover:text-stone-900">✈️ AIR_</button>
+            <button onclick="setPoiTaxonomyFilter('UNI')" id="poiFilter-UNI" class="poi-filter-chip px-2 py-0.5 rounded bg-stone-100 text-stone-600 hover:text-stone-900">🎓 UNI_</button>
+            <button onclick="setPoiTaxonomyFilter('SPO')" id="poiFilter-SPO" class="poi-filter-chip px-2 py-0.5 rounded bg-stone-100 text-stone-600 hover:text-stone-900">🏟️ SPO_</button>
+            <button onclick="setPoiTaxonomyFilter('TOU')" id="poiFilter-TOU" class="poi-filter-chip px-2 py-0.5 rounded bg-stone-100 text-stone-600 hover:text-stone-900">🏖️ TOU_</button>
+            <button onclick="setPoiTaxonomyFilter('MED')" id="poiFilter-MED" class="poi-filter-chip px-2 py-0.5 rounded bg-stone-100 text-stone-600 hover:text-stone-900">🏥 MED_</button>
+            <button onclick="setPoiTaxonomyFilter('TRA')" id="poiFilter-TRA" class="poi-filter-chip px-2 py-0.5 rounded bg-stone-100 text-stone-600 hover:text-stone-900">🚆 TRA_</button>
+          </div>
+
+          <!-- Contenedor Scrolleable de Tarjetas de POI -->
+          <div id="poiListContainer" class="flex-1 overflow-y-auto space-y-2 pr-1">
+            <!-- Render dinámico -->
+          </div>
+        </div>
+
+        <!-- CONTENIDO PESTAÑA 2: EDITOR REACTIVO CON ABSORCIÓN INTEGRADA -->
+        <div id="poiTab-editor" class="hidden flex-1 overflow-y-auto p-3.5 space-y-3">
+          <div class="flex justify-between items-center pb-2 border-b border-stone-200">
+            <h3 id="editorTitleLabel" class="text-xs font-bold text-metro-orange">Nuevo POI</h3>
+            <button onclick="switchPoiTab('list')" class="text-[11px] text-stone-600 hover:text-stone-900 flex items-center space-x-1">
+              <i data-lucide="arrow-left" class="w-3 h-3"></i>
+              <span>Volver a lista</span>
+            </button>
+          </div>
+
+          <div class="space-y-1">
+            <label class="text-[10px] font-bold uppercase tracking-wider text-stone-500">Taxonomía / Tipo</label>
+            <select id="editPoiCategory" onchange="onPoiTaxonomyChanged(this.value)" class="w-full text-xs bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-medium">
+              <option value="AIR">✈️ Aeropuerto (AIR_*) - Radio 2500m</option>
+              <option value="UNI">🎓 Universidad (UNI_*) - Estudiantil 800m</option>
+              <option value="SPO">🏟️ Estadio / Arena (SPO_*) - Radio 800m</option>
+              <option value="TOU">🏖️ Atractor Turístico (TOU_*) - Radio 600m</option>
+              <option value="MED">🏥 Hospital / Salud (MED_*) - Radio 700m</option>
+              <option value="TRA">🚆 Terminal Central (TRA_*) - Radio 1000m</option>
+              <option value="CUSTOM">🏢 Centro Comercial / Ancla (750m)</option>
+            </select>
+          </div>
+
+          <div class="space-y-1">
+            <label class="text-[10px] font-bold uppercase tracking-wider text-stone-500">Identificador (ID Único)</label>
+            <input type="text" id="editPoiId" oninput="updatePoiPreviewFromForm()" placeholder="AIR_Cancún" class="w-full text-xs font-mono font-bold bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900">
+            <p class="text-[10px] text-stone-500">Para universidades y estadios usa nombres legibles con espacios (ej. UNI_Universidad del Caribe).</p>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div class="space-y-1">
+              <label class="text-[10px] font-bold uppercase tracking-wider text-stone-500">Nombre Español</label>
+              <input type="text" id="editPoiNameEs" placeholder="Nombre en español" class="w-full text-xs bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900">
+            </div>
+            <div class="space-y-1">
+              <label class="text-[10px] font-bold uppercase tracking-wider text-stone-500">Nombre Inglés (Opcional)</label>
+              <input type="text" id="editPoiNameEn" placeholder="English name" class="w-full text-xs bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900">
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <div class="flex justify-between items-center">
+              <label class="text-[10px] font-bold uppercase tracking-wider text-stone-500">Coordenadas [Lon, Lat]</label>
+              <button onclick="startPickingPoiLocation()" id="btnPickPoiLocation" class="text-[10px] font-bold text-metro-orange hover:underline flex items-center space-x-1">
+                <i data-lucide="crosshair" class="w-3 h-3"></i>
+                <span>📍 Ubicar en mapa</span>
+              </button>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <input type="number" step="0.00001" id="editPoiLon" oninput="updatePoiPreviewFromForm()" placeholder="Longitud (-86.87)" class="w-full font-mono text-xs bg-white border border-stone-300 rounded-lg px-2 py-1.5 text-stone-900">
+              <input type="number" step="0.00001" id="editPoiLat" oninput="updatePoiPreviewFromForm()" placeholder="Latitud (21.03)" class="w-full font-mono text-xs bg-white border border-stone-300 rounded-lg px-2 py-1.5 text-stone-900">
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <div class="flex justify-between items-center text-xs">
+              <label class="text-[10px] font-bold uppercase tracking-wider text-stone-500">Radio de Absorción</label>
+              <span id="editPoiRadiusDisplay" class="font-mono font-bold text-metro-orange">750 m</span>
+            </div>
+            <input type="range" min="200" max="3500" step="50" value="750" id="editPoiRadius" oninput="onPoiRadiusSlider(this.value)" class="w-full accent-metro-orange cursor-pointer">
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div class="space-y-1">
+              <label class="text-[10px] font-bold uppercase tracking-wider text-stone-500">Cuota Empleos / Viajes</label>
+              <input type="number" id="editPoiJobs" oninput="updatePoiPreviewFromForm()" value="5000" class="w-full font-mono text-xs bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-bold">
+            </div>
+            <div class="space-y-1">
+              <label class="text-[10px] font-bold uppercase tracking-wider text-stone-500">Modo Asignación</label>
+              <select id="editPoiMode" onchange="updatePoiPreviewFromForm()" class="w-full text-xs font-bold bg-white border border-stone-300 rounded-lg px-2 py-1.5 text-stone-900">
+                <option value="MAX">MAX (Recomendado)</option>
+                <option value="BOOST">BOOST (Suma)</option>
+                <option value="REPLACE">REPLACE (Fijo)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- PANEL INTEGRADO: TELEMETRÍA DE ABSORCIÓN & POIs AFECTADOS -->
+          <div class="p-3 bg-stone-50 border border-stone-200 rounded-xl space-y-2.5 shadow-xs">
+            <div class="flex items-center justify-between border-b border-stone-200 pb-1.5">
+              <span class="text-xs font-bold text-stone-900 flex items-center space-x-1.5">
+                <i data-lucide="activity" class="w-3.5 h-3.5 text-metro-orange"></i>
+                <span>Impacto de Absorción en Vivo</span>
+              </span>
+              <span id="editorStatModeBadge" class="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-orange-50 text-metro-orange border border-orange-200">MAX</span>
+            </div>
+
+            <!-- Mini Contadores en Grid 2x2 -->
+            <div class="grid grid-cols-2 gap-2 text-xs font-mono">
+              <div class="bg-white p-2 rounded-lg border border-stone-200">
+                <span class="text-[10px] text-stone-500 uppercase font-sans block">Empleos DENUE</span>
+                <strong id="statAbsorbedJobs" class="text-sm text-stone-900">0</strong>
+              </div>
+              <div class="bg-white p-2 rounded-lg border border-stone-200">
+                <span class="text-[10px] text-stone-500 uppercase font-sans block">Población Censal</span>
+                <strong id="statAbsorbedPop" class="text-sm text-stone-900">0</strong>
+              </div>
+              <div class="bg-white p-2 rounded-lg border border-stone-200">
+                <span class="text-[10px] text-stone-500 uppercase font-sans block">Nodos en Radio</span>
+                <strong id="statAbsorbedNodes" class="text-sm text-stone-900">0</strong>
+              </div>
+              <div class="bg-white p-2 rounded-lg border border-stone-200">
+                <span class="text-[10px] text-stone-500 uppercase font-sans block">Empleos Finales</span>
+                <strong id="statFinalJobs" class="text-sm text-emerald-800 font-bold">0</strong>
+              </div>
+            </div>
+
+            <!-- Diagnóstico de Asignación -->
+            <p id="statDiagnosisText" class="text-[11px] text-stone-600 bg-white p-2 rounded-lg border border-stone-200 leading-snug">
+              Ajusta el radio para calcular la absorción local.
+            </p>
+
+            <!-- POIs Afectados / Cercanos -->
+            <div class="pt-2 border-t border-stone-200 space-y-1.5">
+              <div class="flex items-center justify-between">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-stone-500">POIs en Radio o Solapados</span>
+                <span id="editorAffectedPoisCount" class="font-mono text-stone-600 text-[10px]">0 detectados</span>
+              </div>
+              <div id="editorAffectedPoisList" class="space-y-1.5 max-h-36 overflow-y-auto pr-0.5">
+                <!-- Render dinámico -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Botones de Acción del Editor -->
+          <div class="pt-2 flex gap-2">
+            <button onclick="savePoiFromEditor()" class="flex-1 py-2 bg-metro-green hover:bg-emerald-600 text-white text-xs font-bold rounded-lg shadow transition flex items-center justify-center space-x-1.5">
+              <i data-lucide="check" class="w-4 h-4"></i>
+              <span>Guardar POI</span>
+            </button>
+            <button id="btnDeleteEditorPoi" onclick="deleteCurrentEditorPoi()" class="hidden px-3 py-2 bg-rose-600/20 text-rose-700 hover:bg-rose-600/30 border border-rose-400/40 text-xs font-bold rounded-lg transition" title="Eliminar POI">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- CONTENIDO PESTAÑA 4: COLONIAS Y TOPONIMIA (PLACES) -->
+        <div id="poiTab-places" class="hidden flex-1 overflow-y-auto p-3.5 space-y-3">
+          <div class="flex justify-between items-center border-b border-metro-border pb-2">
+            <div>
+              <h3 class="text-xs font-bold text-metro-text">Toponimia y Colonias</h3>
+              <p class="text-[10px] text-metro-muted">Rotulación de asentamientos en Subway Builder.</p>
+            </div>
+            <button onclick="requestSettlementSuggestions()" id="btnAutoPlaces" class="px-2 py-1 bg-metro-orange/20 text-metro-orange hover:bg-metro-orange/30 text-[10px] font-bold rounded border border-metro-orange/40 flex items-center space-x-1 transition">
+              <i data-lucide="sparkles" class="w-3 h-3"></i>
+              <span>Sugerencias</span>
+            </button>
+          </div>
+
+          <div class="flex justify-between items-center">
+            <span id="placesCountBadge" class="text-[11px] font-mono text-metro-muted">0 colonias</span>
+            <button onclick="addNewPlaceRow()" class="text-[11px] text-metro-orange hover:underline font-bold flex items-center space-x-1">
+              <i data-lucide="plus" class="w-3 h-3"></i>
+              <span>Añadir colonia</span>
+            </button>
+          </div>
+
+          <div id="placesListContainer" class="space-y-2 overflow-y-auto flex-1 max-h-[380px]">
+            <!-- Renderizado dinámico de colonias -->
+          </div>
+        </div>
+
+        <!-- Footer del Sidebar con Navegación -->
+        <div class="p-3 bg-metro-panel/60 border-t border-metro-border flex justify-between items-center shrink-0">
+          <button onclick="goToStep(3)" class="px-3.5 py-1.5 bg-metro-panel hover:bg-metro-border text-metro-text text-xs font-bold rounded-lg transition">
+            &larr; Paso 3
           </button>
-          <button onclick="goToStep(5)" class="px-5 py-2 bg-metro-orange hover:bg-orange-600 text-white text-xs font-bold rounded-lg transition shadow flex items-center space-x-2">
-            <span>Ir a Compilación</span>
-            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+          <button onclick="goToStep(5)" class="px-4 py-1.5 bg-metro-orange hover:bg-orange-600 text-white text-xs font-bold rounded-lg transition shadow flex items-center space-x-1.5">
+            <span>Paso 5 (Compilar)</span>
+            <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
           </button>
         </div>
       </div>
 
       <!-- Botón Flotante para Reabrir Barra Lateral -->
-      <button id="btnExpand-4" onclick="toggleSidebar(4)" class="hidden absolute top-6 left-6 z-[1000] bg-metro-card/90 backdrop-blur border border-metro-border text-white p-2 rounded-xl shadow-2xl hover:bg-metro-panel transition">
+      <button id="btnExpand-4" onclick="toggleSidebar(4)" class="hidden absolute top-6 left-6 z-[1000] bg-metro-card/95 backdrop-blur border border-metro-border text-metro-text p-2 rounded-xl shadow-2xl hover:bg-metro-panel transition">
         <i data-lucide="panel-left-open" class="w-5 h-5 text-metro-orange"></i>
       </button>
 
-      <!-- Mapa POI Studio Contenido -->
+      <!-- Contenedor del Mapa Leaflet -->
       <div class="flex-1 h-full bg-metro-card border border-metro-border rounded-xl overflow-hidden relative shadow-xl z-0">
         <div id="mapPoi" class="w-full h-full"></div>
-        <div class="absolute bottom-4 left-4 bg-metro-card/90 backdrop-blur border border-metro-border px-3.5 py-2 rounded-lg text-xs text-gray-300 z-[999] shadow-lg flex items-center space-x-3 pointer-events-none">
-          <span class="flex items-center space-x-1"><span class="w-3 h-3 rounded-full bg-amber-500 inline-block"></span> <span>POIs Especiales</span></span>
-          <span class="flex items-center space-x-1"><span class="w-3 h-3 rounded-full bg-rose-500/40 border border-rose-500 inline-block"></span> <span>Radio Absorción</span></span>
+
+        <!-- Barra Flotante de Herramientas del Mapa (Top-Left) -->
+        <div class="absolute top-4 left-4 z-[990] flex gap-2">
+          <button id="btnToggleDensityJobs" onclick="toggleDensityLayer('jobs')" class="px-2.5 py-1.5 bg-metro-card/90 backdrop-blur border border-metro-border text-metro-text text-[11px] font-bold rounded-lg shadow hover:bg-metro-panel transition flex items-center space-x-1.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block"></span>
+            <span>🔴 Empleos DENUE</span>
+          </button>
+          <button id="btnToggleDensityPop" onclick="toggleDensityLayer('pop')" class="px-2.5 py-1.5 bg-metro-card/90 backdrop-blur border border-metro-border text-metro-text text-[11px] font-bold rounded-lg shadow hover:bg-metro-panel transition flex items-center space-x-1.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block"></span>
+            <span>🔵 Residentes CPV</span>
+          </button>
+          <button id="btnToggleBoxSelect" onclick="toggleBoxSelectMode()" class="px-2.5 py-1.5 bg-metro-card/90 backdrop-blur border border-metro-border text-metro-text text-[11px] font-bold rounded-lg shadow hover:bg-metro-panel transition flex items-center space-x-1.5">
+            <i data-lucide="box-select" class="w-3.5 h-3.5 text-amber-600"></i>
+            <span>📐 Medir Área (Box)</span>
+          </button>
+        </div>
+
+        <!-- HUD Flotante de Selección de Área (Box Select) -->
+        <div id="areaMeasureHud" class="hidden absolute top-16 left-4 z-[995] bg-metro-card/95 backdrop-blur border border-amber-600/50 p-3 rounded-xl shadow-2xl w-64 space-y-2">
+          <div class="flex justify-between items-center text-xs font-bold text-amber-700">
+            <span class="flex items-center space-x-1">
+              <i data-lucide="scan" class="w-3.5 h-3.5"></i>
+              <span>Área Seleccionada</span>
+            </span>
+            <button onclick="clearAreaSelection()" class="text-metro-muted hover:text-rose-600 text-[11px]">&times; Cerrar</button>
+          </div>
+          <div class="grid grid-cols-2 gap-1.5 text-[11px] font-mono">
+            <div class="bg-metro-panel/80 p-1.5 rounded"><span>Área:</span> <strong id="measArea" class="block text-metro-text">0 km²</strong></div>
+            <div class="bg-metro-panel/80 p-1.5 rounded"><span>Empleos:</span> <strong id="measJobs" class="block text-metro-green">0</strong></div>
+            <div class="bg-metro-panel/80 p-1.5 rounded"><span>Población:</span> <strong id="measPop" class="block text-blue-600">0</strong></div>
+            <div class="bg-metro-panel/80 p-1.5 rounded"><span>Nodos:</span> <strong id="measNodes" class="block text-metro-text">0</strong></div>
+          </div>
+          <button onclick="createPoiFromBoxSelection()" class="w-full py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded shadow transition flex items-center justify-center space-x-1">
+            <i data-lucide="plus" class="w-3 h-3"></i>
+            <span>Crear POI con esta masa</span>
+          </button>
+        </div>
+
+        <!-- Leyenda / Dock Inferior Izquierdo -->
+        <div class="absolute bottom-4 left-4 bg-metro-card/90 backdrop-blur border border-metro-border px-3 py-1.5 rounded-lg text-[11px] text-metro-text z-[990] shadow flex items-center space-x-3 pointer-events-none font-medium">
+          <span class="flex items-center space-x-1"><span class="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block"></span> <span>POIs Especiales</span></span>
+          <span class="flex items-center space-x-1"><span class="w-2.5 h-2.5 rounded-full bg-rose-500/40 border border-rose-500 inline-block"></span> <span>Radio Absorción</span></span>
+          <span class="flex items-center space-x-1"><span class="w-2.5 h-2.5 rounded-full bg-sky-500 inline-block"></span> <span>Toponimia</span></span>
         </div>
       </div>
     </section>
@@ -570,17 +951,23 @@
       <!-- Control Superior de Ejecución -->
       <div class="bg-metro-card border border-metro-border rounded-xl p-5 flex flex-col md:flex-row justify-between items-center gap-4 shrink-0 shadow-xl">
         <div>
-          <h2 class="text-lg font-bold text-white flex items-center space-x-2">
-            <i data-lucide="terminal" class="w-5 h-5 text-metro-orange"></i>
-            <span>Compilación y Generación en Vivo</span>
-          </h2>
-          <p class="text-xs text-gray-400 mt-0.5">Ejecuta el pipeline de Subway Builder México transmitiendo la telemetría en tiempo real.</p>
+          <div class="flex items-center space-x-3">
+            <h2 class="text-lg font-bold text-white flex items-center space-x-2">
+              <i data-lucide="terminal" class="w-5 h-5 text-metro-orange"></i>
+              <span>Compilación y Generación en Vivo</span>
+            </h2>
+            <span id="wslStatusBadge" class="text-[11px] px-2.5 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700 flex items-center space-x-1.5">
+              <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>
+              <span>Comprobando WSL...</span>
+            </span>
+          </div>
+          <p class="text-xs text-gray-400 mt-0.5">Ejecuta el pipeline unificado (Cartografía 3D vía WSL 2 + Demanda INEGI + Empaquetado final .ZIP).</p>
         </div>
 
         <div class="flex items-center space-x-3">
-          <label class="flex items-center space-x-2 text-xs text-gray-300 cursor-pointer">
+          <label class="flex items-center space-x-2 text-xs text-gray-300 cursor-pointer" title="Omitir generación cartográfica si ya cuentas con .pmtiles y roads.geojson">
             <input type="checkbox" id="chkSkipMap" class="w-4 h-4 accent-metro-orange rounded">
-            <span>Omitir mapa (--skip-map)</span>
+            <span>Omitir mapa 3D (--skip-map)</span>
           </label>
 
           <button onclick="startBuild()" id="btnStartBuild" class="px-5 py-2.5 bg-metro-orange hover:bg-orange-600 text-white text-xs font-bold rounded-lg shadow-lg flex items-center space-x-2 transition">
@@ -592,6 +979,11 @@
             <span>Ver Demanda &rarr;</span>
             <i data-lucide="arrow-right" class="w-4 h-4"></i>
           </button>
+
+          <a id="btnDownloadZipStep5" href="#" class="hidden px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg shadow-lg flex items-center space-x-2 transition" download>
+            <i data-lucide="package" class="w-4 h-4"></i>
+            <span id="lblDownloadZip">Descargar ZIP</span>
+          </a>
         </div>
       </div>
 
@@ -705,195 +1097,171 @@
   <!-- ========================================================================= -->
   <!-- MODALES: NUEVA CIUDAD Y NUEVO POI -->
   <!-- ========================================================================= -->
-  <!-- Modal Nueva Ciudad -->
-  <div id="modalNewCity" class="hidden fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-    <div class="bg-metro-card border border-metro-border rounded-xl p-6 w-full max-w-md shadow-2xl space-y-4">
-      <h3 class="text-base font-bold text-white flex items-center space-x-2">
-        <i data-lucide="plus-circle" class="w-5 h-5 text-metro-orange"></i>
-        <span>Crear Nueva Ciudad</span>
-      </h3>
-      <div class="space-y-3 text-xs">
+  <!-- MODALES: PROYECTOS, CAMBIO DE CARPETA Y GUÍA DE FUENTES -->
+  <!-- ========================================================================= -->
+  
+  <!-- Modal Gestión y Selección de Proyectos -->
+  <div id="modalProjects" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white border border-stone-200 rounded-2xl p-6 w-full max-w-2xl shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+      <div class="flex justify-between items-center border-b border-stone-200 pb-3 shrink-0">
         <div>
-          <label class="block text-gray-400 font-semibold mb-1">Código ISO / Clave (3 letras)</label>
-          <input type="text" id="new_city_code" maxlength="4" class="w-full uppercase font-mono bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white" placeholder="GDL">
+          <h3 class="text-base font-bold text-stone-900 flex items-center space-x-2">
+            <i data-lucide="folder-kanban" class="w-5 h-5 text-metro-orange"></i>
+            <span>Proyectos de Modelación Demográfica</span>
+          </h3>
+          <p class="text-xs text-stone-500 mt-0.5">Selecciona un proyecto existente o crea uno nuevo con su carpeta aislada.</p>
         </div>
-        <div>
-          <label class="block text-gray-400 font-semibold mb-1">Nombre Oficial</label>
-          <input type="text" id="new_city_name" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white" placeholder="Guadalajara y Zapopan">
+        <button id="btnCloseModalProjects" onclick="closeProjectsModal()" class="text-stone-400 hover:text-stone-800 p-1.5 rounded-lg hover:bg-stone-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Formulario Crear Nuevo Proyecto -->
+      <div class="bg-stone-50 border border-stone-300 p-4 rounded-xl space-y-3 shrink-0">
+        <div class="flex justify-between items-center">
+          <span class="text-xs font-bold text-stone-900 flex items-center space-x-1.5">
+            <i data-lucide="plus-circle" class="w-4 h-4 text-metro-green"></i>
+            <span>Crear Nuevo Proyecto</span>
+          </span>
+          <span class="text-[11px] text-stone-500">Crea su archivo YAML y su carpeta de datos al instante</span>
         </div>
-        <div>
-          <label class="block text-gray-400 font-semibold mb-1">Descripción Breve</label>
-          <input type="text" id="new_city_desc" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white" placeholder="Área Metropolitana de Guadalajara">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+          <div>
+            <label class="block text-stone-700 font-semibold mb-1">Nombre de Ciudad</label>
+            <input type="text" id="newProj_name" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium" placeholder="ej. Puebla">
+          </div>
+          <div>
+            <label class="block text-stone-700 font-semibold mb-1">Código Clave (3 letras)</label>
+            <input type="text" id="newProj_code" maxlength="4" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-mono font-bold uppercase" placeholder="PUE">
+          </div>
+          <div class="flex items-end">
+            <button onclick="submitCreateNewProject()" class="w-full bg-metro-orange hover:bg-orange-600 text-white font-bold text-xs py-2.5 px-4 rounded-lg transition shadow flex items-center justify-center space-x-1.5">
+              <i data-lucide="sparkles" class="w-4 h-4"></i>
+              <span>Crear Proyecto</span>
+            </button>
+          </div>
         </div>
       </div>
-      <div class="flex justify-end space-x-3 pt-3">
-        <button onclick="closeNewCityModal()" class="px-4 py-2 bg-metro-panel text-gray-300 text-xs font-bold rounded-lg">Cancelar</button>
-        <button onclick="submitCreateCity()" class="px-5 py-2 bg-metro-orange text-white text-xs font-bold rounded-lg shadow">Crear Ciudad</button>
+
+      <!-- Lista de Proyectos Existentes -->
+      <div class="flex-1 overflow-y-auto space-y-2 pr-1 min-h-[220px]" id="projectsListContainer">
+        <!-- Renderizado dinámico -->
       </div>
     </div>
   </div>
 
-  <!-- Modal Nuevo/Editar POI -->
-  <div id="modalPoi" class="hidden fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-    <div class="bg-metro-card border border-metro-border rounded-xl p-6 w-full max-w-md shadow-2xl space-y-4">
-      <h3 id="modalPoiTitle" class="text-base font-bold text-white flex items-center space-x-2">
-        <i data-lucide="map-pin" class="w-5 h-5 text-metro-orange"></i>
-        <span>Editar POI</span>
-      </h3>
-      <div class="space-y-3 text-xs">
-        <div>
-          <label class="block text-gray-400 font-semibold mb-1">Identificador ID (ej. AIR_Cancún, UNI_UNAM)</label>
-          <input type="text" id="poi_id" class="w-full font-mono bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white" placeholder="AIR_Nombre">
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-gray-400 font-semibold mb-1">Nombre en Español</label>
-            <input type="text" id="poi_name_es" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white">
-          </div>
-          <div>
-            <label class="block text-gray-400 font-semibold mb-1">Nombre en Inglés</label>
-            <input type="text" id="poi_name_en" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white">
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-gray-400 font-semibold mb-1">Tipo Canónico</label>
-            <select id="poi_type" class="w-full bg-metro-panel border border-metro-border rounded-lg px-2 py-2 text-white">
-              <option value="airport">Aeropuerto (airport)</option>
-              <option value="university">Universidad (university)</option>
-              <option value="shopping_center">Centro Comercial</option>
-              <option value="sports_facility">Estadio / Deportivo</option>
-              <option value="resort">Zona Hotelera / Resort</option>
-              <option value="hospital">Complejo Médico</option>
-              <option value="transit_station">Terminal Central</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-gray-400 font-semibold mb-1">Modo de Absorción</label>
-            <select id="poi_mode" class="w-full bg-metro-panel border border-metro-border rounded-lg px-2 py-2 text-white">
-              <option value="MAX" selected>MAX (Absorbe DENUE)</option>
-              <option value="BOOST">BOOST (Aditivo)</option>
-              <option value="REPLACE">REPLACE (Sobrescribe)</option>
-            </select>
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-gray-400 font-semibold mb-1">Empleos / Pasajeros</label>
-            <input type="number" id="poi_jobs" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white font-mono" placeholder="10000">
-          </div>
-          <div>
-            <label class="block text-gray-400 font-semibold mb-1">Radio Físico (metros)</label>
-            <input type="number" id="poi_radius" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white font-mono" placeholder="750">
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-3 font-mono text-[11px]">
-          <div>
-            <label class="block text-gray-400 font-semibold mb-1">Longitud</label>
-            <input type="number" step="0.00001" id="poi_loc_lon" class="w-full bg-metro-panel border border-metro-border rounded-lg px-2 py-1.5 text-white">
-          </div>
-          <div>
-            <label class="block text-gray-400 font-semibold mb-1">Latitud</label>
-            <input type="number" step="0.00001" id="poi_loc_lat" class="w-full bg-metro-panel border border-metro-border rounded-lg px-2 py-1.5 text-white">
-          </div>
-        </div>
+  <!-- Modal Cambiar Carpeta de Datos -->
+  <div id="modalChangeDataDir" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white border border-stone-200 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4">
+      <div class="flex justify-between items-center border-b border-stone-200 pb-3">
+        <h3 class="text-base font-bold text-stone-900 flex items-center space-x-2">
+          <i data-lucide="folder-sync" class="w-5 h-5 text-metro-orange"></i>
+          <span>Carpeta de Datos</span>
+        </h3>
+        <button onclick="closeChangeDataDirModal()" class="text-stone-400 hover:text-stone-800 p-1.5 rounded-lg hover:bg-stone-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
       </div>
-      <div class="flex justify-between space-x-3 pt-3">
-        <button id="btnDeletePoi" onclick="deleteCurrentPoiModal()" class="px-3 py-2 bg-rose-900/50 hover:bg-rose-800 text-rose-300 text-xs font-bold rounded-lg">Eliminar</button>
-        <div class="flex space-x-2">
-          <button onclick="closePoiModal()" class="px-4 py-2 bg-metro-panel text-gray-300 text-xs font-bold rounded-lg">Cancelar</button>
-          <button onclick="submitPoiModal()" class="px-5 py-2 bg-metro-orange text-white text-xs font-bold rounded-lg shadow">Guardar POI</button>
-        </div>
+      <p class="text-xs text-stone-600">
+        Indica la ruta de la carpeta donde se encuentran los archivos de datos para este proyecto.
+      </p>
+      <div>
+        <label class="block text-stone-700 font-bold text-xs mb-1.5">Ruta del Directorio de Datos</label>
+        <input type="text" id="inputCustomDataDir" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-mono text-xs" placeholder="ej. D:/Censos_INEGI/Puebla/ o data/puebla">
+      </div>
+      <div class="flex justify-end space-x-2 pt-2">
+        <button onclick="closeChangeDataDirModal()" class="px-4 py-2 bg-stone-100 text-stone-700 text-xs font-bold rounded-lg hover:bg-stone-200 transition">Cancelar</button>
+        <button onclick="submitChangeDataDir()" class="px-5 py-2 bg-metro-green text-white text-xs font-bold rounded-lg hover:bg-emerald-700 transition shadow">Guardar y Escanear</button>
       </div>
     </div>
   </div>
 
   <!-- Modal Guía de Fuentes de Datos INEGI / CONAPO -->
-  <div id="modalDataSources" class="hidden fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-    <div class="bg-metro-card border border-metro-border rounded-xl p-6 w-full max-w-2xl shadow-2xl space-y-4 max-h-[85vh] flex flex-col">
-      <div class="flex justify-between items-start border-b border-metro-border pb-3 shrink-0">
+  <div id="modalDataSources" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white border border-stone-200 rounded-2xl p-6 w-full max-w-2xl shadow-2xl space-y-4 max-h-[85vh] flex flex-col">
+      <div class="flex justify-between items-start border-b border-stone-200 pb-3 shrink-0">
         <div>
-          <h3 class="text-base font-bold text-white flex items-center space-x-2">
+          <h3 class="text-base font-bold text-stone-900 flex items-center space-x-2">
             <i data-lucide="book-open" class="w-5 h-5 text-metro-orange"></i>
             <span>Guía de Descargas Oficiales (INEGI / CONAPO)</span>
           </h3>
-          <p class="text-xs text-gray-400 mt-0.5">Enlaces directos a los portales oficiales de datos abiertos de México.</p>
+          <p class="text-xs text-stone-500 mt-0.5">Enlaces directos a los portales oficiales de datos abiertos de México.</p>
         </div>
-        <button onclick="closeDataSourcesModal()" class="text-gray-400 hover:text-white p-1 hover:bg-metro-border rounded">
+        <button onclick="closeDataSourcesModal()" class="text-stone-400 hover:text-stone-800 p-1.5 rounded-lg hover:bg-stone-100 transition">
           <i data-lucide="x" class="w-5 h-5"></i>
         </button>
       </div>
 
-      <div class="flex-1 overflow-y-auto space-y-3.5 text-xs pr-1">
+      <div class="flex-1 overflow-y-auto space-y-3 text-xs pr-1">
         <!-- 1. DENUE -->
-        <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border space-y-1">
+        <div class="bg-stone-50 p-3.5 rounded-xl border border-stone-200 space-y-1">
           <div class="flex justify-between items-center">
             <span class="font-bold text-metro-orange">1. DENUE (Directorio de Establecimientos Económicos)</span>
-            <a href="https://www.inegi.org.mx/app/descarga/" target="_blank" class="text-[11px] bg-metro-orange/20 text-metro-orange hover:bg-metro-orange hover:text-white px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
+            <a href="https://www.inegi.org.mx/app/descarga/" target="_blank" class="text-[11px] bg-orange-100 text-orange-800 hover:bg-orange-200 px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
               <span>Abrir INEGI</span> <i data-lucide="external-link" class="w-3 h-3"></i>
             </a>
           </div>
-          <p class="text-gray-300">Descarga masiva por Entidad Federativa en formato CSV o ZIP.</p>
-          <p class="text-gray-500 font-mono text-[11px]">Archivo esperado: <code>denue_inegi_*.csv</code> (ej. <code>09</code> CDMX, <code>15</code> EdoMex, <code>23</code> Q. Roo).</p>
+          <p class="text-stone-700">Descarga masiva por Entidad Federativa en formato CSV o ZIP.</p>
+          <p class="text-stone-500 font-mono text-[11px]">Archivo esperado: <code>denue_inegi_*.csv</code> (ej. <code>09</code> CDMX, <code>15</code> EdoMex, <code>23</code> Q. Roo).</p>
         </div>
 
         <!-- 2. CPV 2020 -->
-        <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border space-y-1">
+        <div class="bg-stone-50 p-3.5 rounded-xl border border-stone-200 space-y-1">
           <div class="flex justify-between items-center">
             <span class="font-bold text-metro-green">2. Censo de Población y Vivienda 2020 (Microdatos Manzanas)</span>
-            <a href="https://www.inegi.org.mx/programas/ccpv/2020/#microdatos" target="_blank" class="text-[11px] bg-metro-green/20 text-metro-green hover:bg-metro-green hover:text-white px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
+            <a href="https://www.inegi.org.mx/programas/ccpv/2020/#microdatos" target="_blank" class="text-[11px] bg-emerald-100 text-emerald-800 hover:bg-emerald-200 px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
               <span>Abrir INEGI</span> <i data-lucide="external-link" class="w-3 h-3"></i>
             </a>
           </div>
-          <p class="text-gray-300">Ve a <em>Microdatos &rarr; Resultados por AGEB y Manzana Urbana</em> y selecciona la entidad.</p>
-          <p class="text-gray-500 font-mono text-[11px]">Archivo esperado: <code>RESAGEBURB_*.csv</code> (ej. <code>RESAGEBURB_09CSV20.csv</code>).</p>
+          <p class="text-stone-700">Ve a <em>Microdatos &rarr; Resultados por AGEB y Manzana Urbana</em> y selecciona la entidad.</p>
+          <p class="text-stone-500 font-mono text-[11px]">Archivo esperado: <code>RESAGEBURB_*.csv</code> (ej. <code>RESAGEBURB_09CSV20.csv</code>).</p>
         </div>
 
         <!-- 3. CE 2024 -->
-        <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border space-y-1">
+        <div class="bg-stone-50 p-3.5 rounded-xl border border-stone-200 space-y-1">
           <div class="flex justify-between items-center">
             <span class="font-bold text-metro-pink">3. Censos Económicos 2024 (SAIC - Personal Ocupado H001A)</span>
-            <a href="https://www.inegi.org.mx/app/saic/" target="_blank" class="text-[11px] bg-metro-pink/20 text-metro-pink hover:bg-metro-pink hover:text-white px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
+            <a href="https://www.inegi.org.mx/app/saic/" target="_blank" class="text-[11px] bg-pink-100 text-pink-800 hover:bg-pink-200 px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
               <span>Abrir SAIC</span> <i data-lucide="external-link" class="w-3 h-3"></i>
             </a>
           </div>
-          <p class="text-gray-300">Consulta de variable H001A Personal Ocupado Total por municipio.</p>
-          <p class="text-gray-500 font-mono text-[11px]">Archivo esperado: <code>tr_ce_*.csv</code> o <code>SAIC_Exporta_*.csv</code>.</p>
+          <p class="text-stone-700">Consulta de variable H001A Personal Ocupado Total por municipio.</p>
+          <p class="text-stone-500 font-mono text-[11px]">Archivo esperado: <code>tr_ce_*.csv</code> o <code>SAIC_Exporta_*.csv</code>.</p>
         </div>
 
         <!-- 4. CONAPO -->
-        <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border space-y-1">
+        <div class="bg-stone-50 p-3.5 rounded-xl border border-stone-200 space-y-1">
           <div class="flex justify-between items-center">
-            <span class="font-bold text-blue-400">4. Proyecciones Demográficas CONAPO (2020-2050)</span>
-            <a href="https://datos.gob.mx/busca/dataset/proyecciones-de-la-poblacion-de-mexico-y-de-las-entidades-federativas-2020-2050" target="_blank" class="text-[11px] bg-blue-500/20 text-blue-400 hover:bg-blue-600 hover:text-white px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
+            <span class="font-bold text-blue-600">4. Proyecciones Demográficas CONAPO (2020-2050)</span>
+            <a href="https://datos.gob.mx/busca/dataset/proyecciones-de-la-poblacion-de-mexico-y-de-las-entidades-federativas-2020-2050" target="_blank" class="text-[11px] bg-sky-100 text-sky-800 hover:bg-sky-200 px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
               <span>Abrir Datos.gob.mx</span> <i data-lucide="external-link" class="w-3 h-3"></i>
             </a>
           </div>
-          <p class="text-gray-300">Tabulado municipal para cálculo del factor de crecimiento intercensal.</p>
-          <p class="text-gray-500 font-mono text-[11px]">Archivo esperado: <code>data-*.csv</code> o <code>*conapo*.csv</code>.</p>
+          <p class="text-stone-700">Tabulado municipal para cálculo del factor de crecimiento intercensal.</p>
+          <p class="text-stone-500 font-mono text-[11px]">Archivo esperado: <code>data-*.csv</code> o <code>*conapo*.csv</code>.</p>
         </div>
 
         <!-- 5. OpenStreetMap -->
-        <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border space-y-1">
+        <div class="bg-stone-50 p-3.5 rounded-xl border border-stone-200 space-y-1">
           <div class="flex justify-between items-center">
-            <span class="font-bold text-amber-400">5. Cartografía OpenStreetMap (PBF México)</span>
-            <a href="https://download.geofabrik.de/central-america/mexico.html" target="_blank" class="text-[11px] bg-amber-500/20 text-amber-400 hover:bg-amber-500 hover:text-white px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
+            <span class="font-bold text-amber-700">5. Cartografía OpenStreetMap (PBF México)</span>
+            <a href="https://download.geofabrik.de/central-america/mexico.html" target="_blank" class="text-[11px] bg-amber-100 text-amber-900 hover:bg-amber-200 px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
               <span>Abrir Geofabrik</span> <i data-lucide="external-link" class="w-3 h-3"></i>
             </a>
           </div>
-          <p class="text-gray-300">Extracto OSM para toda la República Mexicana.</p>
-          <p class="text-gray-500 font-mono text-[11px]">Archivo esperado: <code>mexico-latest.osm.pbf</code>.</p>
+          <p class="text-stone-700">Extracto OSM para toda la República Mexicana.</p>
+          <p class="text-stone-500 font-mono text-[11px]">Archivo esperado: <code>mexico-latest.osm.pbf</code>.</p>
         </div>
 
         <!-- Zonas Metropolitanas Multi-Estado -->
-        <div class="bg-amber-950/30 border border-amber-800/40 p-3.5 rounded-lg text-amber-200">
-          <strong class="block text-white mb-1">🗺️ Zonas Metropolitanas Interestatales / Multi-Estado:</strong>
-          <p>Para zonas conurbadas que cruzan límites estatales (ej. ZMVM, La Laguna, Puebla-Tlaxcala, Puerto Vallarta), puedes colocar los archivos de los 2 o 3 estados correspondientes. El motor los concatenará automáticamente y los filtrará por el BBOX.</p>
+        <div class="bg-amber-50 border border-amber-300 p-3.5 rounded-xl text-amber-900">
+          <strong class="block text-amber-950 mb-1">🗺️ Zonas Metropolitanas Interestatales / Multi-Estado:</strong>
+          <p>Para zonas conurbadas que cruzan límites estatales (ej. ZMVM, La Laguna, Puebla-Tlaxcala, Puerto Vallarta), puedes colocar los archivos de los estados correspondientes en la carpeta del proyecto. El motor los concatenará automáticamente y los filtrará por el BBOX sin duplicar datos.</p>
         </div>
       </div>
 
-      <div class="flex justify-end pt-3 border-t border-metro-border shrink-0">
-        <button onclick="closeDataSourcesModal()" class="px-5 py-2 bg-metro-panel text-white text-xs font-bold rounded-lg hover:bg-metro-border transition">Cerrar</button>
+      <div class="flex justify-end pt-3 border-t border-stone-200 shrink-0">
+        <button onclick="closeDataSourcesModal()" class="px-5 py-2 bg-stone-100 text-stone-800 text-xs font-bold rounded-lg hover:bg-stone-200 transition">Cerrar</button>
       </div>
     </div>
   </div>
@@ -902,11 +1270,11 @@
   <!-- SISTEMA REACTIVO JAVASCRIPT & ESTADO DEL WIZARD -->
   <!-- ========================================================================= -->
   <script>
-    // Configuración de Mapas y API Key de CartoDB
-    const CARTO_API_KEY = "cb1_2ocu_1_608c083d4c57c5e5c398b9b4";
+    // Configuración de Mapas (Esri Dark Canvas como basemap oscuro por defecto)
+    const CARTO_API_KEY = "";
 
-    // Estado de la aplicación
-    let currentCityFile = "cities/cancun.yaml";
+    // Estado de la aplicación (Sin proyecto por defecto al inicio a menos que venga en la URL)
+    let currentCityFile = null;
     let cityData = { city: {}, macroeconomics: {}, pois: [], places: [] };
     let currentStep = 1;
     let mapBbox = null, mapPoi = null, mapDemand = null;
@@ -925,13 +1293,269 @@
       initMaps();
       const urlParams = new URLSearchParams(window.location.search);
       const cityParam = urlParams.get('city');
+      await fetchCitiesList();
       if (cityParam) {
         currentCityFile = cityParam;
+        await loadCityData(currentCityFile);
+      } else {
+        // Regla: No abrir un yaml existente por defecto; mostrar gestor de proyectos
+        openProjectsModal();
       }
-      await fetchCitiesList();
-      await loadCityData(currentCityFile);
       initSSE();
+      checkSystemHealth();
     });
+
+    // -------------------------------------------------------------------------
+    // GESTIÓN DE PROYECTOS (CREAR, ABRIR, ELIMINAR)
+    // -------------------------------------------------------------------------
+    async function openProjectsModal() {
+      const modal = document.getElementById('modalProjects');
+      if (!modal) return;
+      modal.classList.remove('hidden');
+      const closeBtn = document.getElementById('btnCloseModalProjects');
+      if (closeBtn) {
+        closeBtn.style.display = currentCityFile ? 'block' : 'none';
+      }
+      await renderProjectsList();
+      lucide.createIcons();
+    }
+
+    function closeProjectsModal() {
+      if (!currentCityFile) {
+        showToast("Por favor selecciona o crea un proyecto para continuar", "warning");
+        return;
+      }
+      const modal = document.getElementById('modalProjects');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function openNewProjectModal() {
+      openProjectsModal();
+      const input = document.getElementById('newProj_name');
+      if (input) {
+        input.focus();
+        input.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+
+    async function renderProjectsList() {
+      const cont = document.getElementById('projectsListContainer');
+      if (!cont) return;
+      cont.innerHTML = '<div class="text-center py-6 text-stone-500 font-mono text-xs">Cargando proyectos...</div>';
+
+      try {
+        const res = await fetch('/api/projects');
+        const json = await res.json();
+        const cities = json.cities || [];
+
+        if (cities.length === 0) {
+          cont.innerHTML = `
+            <div class="text-center py-8 bg-stone-50 border border-stone-200 rounded-xl text-stone-500 text-xs">
+              <i data-lucide="folder-x" class="w-8 h-8 text-stone-400 mx-auto mb-2"></i>
+              <span>No hay proyectos creados aún. ¡Crea el primero usando el formulario superior!</span>
+            </div>
+          `;
+          lucide.createIcons();
+          return;
+        }
+
+        cont.innerHTML = cities.map(c => {
+          const isCurrent = c.path === currentCityFile;
+          const poiCount = c.poi_count || 0;
+          const bboxStr = c.bbox ? `[${c.bbox.map(n => typeof n === 'number' ? n.toFixed(2) : n).join(', ')}]` : 'Sin BBOX';
+          const dataDirStr = c.data_dir || `data/${c.code ? c.code.toLowerCase() : ''}`;
+
+          return `
+            <div class="p-3.5 rounded-xl border transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+              isCurrent 
+                ? 'bg-amber-50/80 border-amber-400 shadow-xs' 
+                : 'bg-white hover:bg-stone-50 border-stone-200 shadow-xs'
+            }">
+              <div class="overflow-hidden space-y-1">
+                <div class="flex items-center space-x-2">
+                  <span class="font-bold text-stone-900 text-sm truncate">${c.name}</span>
+                  <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-stone-100 text-stone-800 border border-stone-300 uppercase">${c.code}</span>
+                  ${isCurrent ? '<span class="text-[10px] bg-amber-200 text-amber-900 px-2 py-0.5 rounded font-bold">Activo</span>' : ''}
+                </div>
+                <div class="flex flex-wrap items-center gap-x-3 text-[11px] text-stone-600 font-mono">
+                  <span>📍 POIs: <strong>${poiCount}</strong></span>
+                  <span>🗺️ BBOX: ${bboxStr}</span>
+                  <span>📂 Carpeta: <code class="text-stone-800 font-bold bg-stone-100 px-1 rounded">${dataDirStr}</code></span>
+                </div>
+              </div>
+              <div class="flex items-center space-x-2 shrink-0">
+                <button onclick="selectAndLoadProject('${c.path}')" class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 ${
+                  isCurrent 
+                    ? 'bg-amber-200 text-amber-900 cursor-default' 
+                    : 'bg-metro-orange hover:bg-orange-600 text-white shadow'
+                }">
+                  <i data-lucide="check" class="w-3.5 h-3.5"></i>
+                  <span>${isCurrent ? 'Abierto' : 'Abrir'}</span>
+                </button>
+                <button onclick="confirmDeleteProject('${c.path}', '${c.name}')" class="p-1.5 rounded-lg text-rose-600 hover:text-rose-800 hover:bg-rose-50 transition border border-transparent hover:border-rose-200" title="Eliminar proyecto">
+                  <i data-lucide="trash-2" class="w-4 h-4"></i>
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('');
+        lucide.createIcons();
+      } catch (e) {
+        cont.innerHTML = `<div class="p-4 text-rose-600 text-xs">Error al cargar proyectos: ${e.message}</div>`;
+      }
+    }
+
+    async function selectAndLoadProject(filePath) {
+      currentCityFile = filePath;
+      window.history.replaceState({}, '', `?city=${encodeURIComponent(filePath)}`);
+      await fetchCitiesList();
+      await loadCityData(filePath);
+      const modal = document.getElementById('modalProjects');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    async function submitCreateNewProject() {
+      const name = document.getElementById('newProj_name').value.trim();
+      const code = document.getElementById('newProj_code').value.trim().toUpperCase();
+
+      if (!name || !code) {
+        showToast("Nombre y código son obligatorios", "error");
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/project/new', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, code, creator: 'Creador' })
+        });
+        const json = await res.json();
+        if (json.status === 'ok') {
+          showToast(`Proyecto '${name}' creado exitosamente`, "success");
+          document.getElementById('newProj_name').value = '';
+          document.getElementById('newProj_code').value = '';
+          await selectAndLoadProject(json.file || `cities/${json.filename}`);
+        } else {
+          showToast(json.error || "No se pudo crear el proyecto", "error");
+        }
+      } catch (e) {
+        showToast(e.message, "error");
+      }
+    }
+
+    async function confirmDeleteProject(filePath, cityName) {
+      if (!confirm(`¿Eliminar el proyecto '${cityName}'?`)) return;
+
+      try {
+        const res = await fetch('/api/project/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file: filePath, delete_data_folder: false })
+        });
+        const json = await res.json();
+        if (json.status === 'ok') {
+          showToast(`Proyecto '${cityName}' eliminado`, "info");
+          if (currentCityFile === filePath) {
+            currentCityFile = null;
+            window.history.replaceState({}, '', window.location.pathname);
+          }
+          await fetchCitiesList();
+          await renderProjectsList();
+        } else {
+          showToast(json.error || "Error al eliminar proyecto", "error");
+        }
+      } catch (e) {
+        showToast(e.message, "error");
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // GESTIÓN DE CARPETA DE DATOS DEL PROYECTO
+    // -------------------------------------------------------------------------
+    function promptChangeDataDir() {
+      const currentDir = (cityData && cityData.data_dir) ? cityData.data_dir : (document.getElementById('activeDataFolderBadge').innerText || 'data/');
+      const modal = document.getElementById('modalChangeDataDir');
+      const input = document.getElementById('inputCustomDataDir');
+      if (input) input.value = currentDir;
+      if (modal) modal.classList.remove('hidden');
+    }
+
+    function closeChangeDataDirModal() {
+      const modal = document.getElementById('modalChangeDataDir');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    async function submitChangeDataDir() {
+      const input = document.getElementById('inputCustomDataDir');
+      if (!input) return;
+      const newDir = input.value.trim();
+      if (!newDir) {
+        showToast("Debes ingresar una ruta válida", "error");
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/data/set-directory', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file: currentCityFile, data_dir: newDir })
+        });
+        const json = await res.json();
+        if (json.status === 'ok') {
+          cityData.data_dir = newDir;
+          closeChangeDataDirModal();
+          showToast(`Carpeta asignada: ${newDir}`, "success");
+          await refreshDataStatus(true);
+        } else {
+          showToast(json.error || "Error al cambiar carpeta", "error");
+        }
+      } catch (e) {
+        showToast(e.message, "error");
+      }
+    }
+
+    async function openFileLocation(targetPath) {
+      if (!targetPath) return;
+      try {
+        const res = await fetch('/api/data/open-location', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: targetPath })
+        });
+        const json = await res.json();
+        if (json.status === 'ok') {
+          showToast(`Abriendo ubicación: ${targetPath}`, "info");
+        } else {
+          showToast(json.error || "No se pudo abrir la ubicación", "error");
+        }
+      } catch (e) {
+        showToast(e.message, "error");
+      }
+    }
+
+    async function openActiveDataFolder() {
+      const badge = document.getElementById('activeDataFolderBadge');
+      const folderPath = badge ? badge.innerText.trim() : 'data/';
+      await openFileLocation(folderPath);
+    }
+
+    async function unlinkDataFile(filename) {
+      try {
+        const res = await fetch('/api/data/unlink', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file: currentCityFile, filename })
+        });
+        const json = await res.json();
+        if (json.status === 'ok') {
+          await refreshDataStatus(false);
+        } else {
+          showToast(json.error || "No se pudo quitar el archivo", "error");
+        }
+      } catch (e) {
+        showToast(e.message, "error");
+      }
+    }
 
     // -------------------------------------------------------------------------
     // COLAPSO / EXPANSIÓN DE BARRAS LATERALES
@@ -969,15 +1593,15 @@
       });
       document.querySelectorAll('.step-tab').forEach((el, idx) => {
         const isActive = idx + 1 === step;
-        el.className = `step-tab flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+        el.className = `step-tab flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition ${
           isActive 
-            ? 'text-metro-orange bg-metro-orange/10 border border-metro-orange/30' 
-            : 'text-gray-400 hover:text-gray-200'
+            ? 'text-white bg-metro-orange shadow-sm border border-transparent' 
+            : 'text-stone-700 hover:text-stone-950 bg-stone-100 hover:bg-stone-200 border border-stone-300/80'
         }`;
         const badge = el.querySelector('span:first-child');
         if (badge) {
-          badge.className = `w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono ${
-            isActive ? 'bg-metro-orange text-white' : 'bg-gray-700 text-gray-300'
+          badge.className = `w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono font-bold ${
+            isActive ? 'bg-white text-metro-orange' : 'bg-stone-300 text-stone-700'
           }`;
         }
       });
@@ -987,7 +1611,9 @@
         if (step === 1 && mapBbox) mapBbox.invalidateSize();
         if (step === 4 && mapPoi) {
           mapPoi.invalidateSize();
+          renderPoiList();
           renderPoiMarkersOnMap();
+          loadDemandDensityForPoi();
         }
         if (step === 6 && mapDemand) {
           mapDemand.invalidateSize();
@@ -996,20 +1622,39 @@
       }, 100);
 
       if (step === 2) refreshDataStatus();
+      if (step === 3 && (!window.conapoMetadata || Object.keys(window.conapoMetadata).length === 0)) {
+        fetch(`/api/conapo/calculate?file=${encodeURIComponent(currentCityFile)}`)
+          .then(r => r.json())
+          .then(data => {
+            if (data.status === 'ok') {
+              window.conapoMetadata = window.conapoMetadata || {};
+              data.factors.forEach(f => { window.conapoMetadata[f.cve_mun] = f; });
+              if (document.getElementById('conapoSubtitleLabel')) {
+                document.getElementById('conapoSubtitleLabel').innerText = `Factores de sincronización intercensal Pob_${data.projection_year || 2025} / Pob_2020 (${data.conapo_file || 'CONAPO'}).`;
+              }
+              renderGrowthFactorsTable();
+            }
+          }).catch(() => {});
+      }
     }
 
     // -------------------------------------------------------------------------
     // MAPAS LEAFLET Y CAPAS
     // -------------------------------------------------------------------------
     function createBaseLayers() {
-      const darkCarto = L.tileLayer(`https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?api_key=${CARTO_API_KEY}`, {
-        attribution: '&copy; CARTO',
-        maxNativeZoom: 19,
+      const lightEsri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+        attribution: '&copy; Esri, HERE, Garmin, &copy; OpenStreetMap contributors',
+        maxNativeZoom: 16,
         maxZoom: 20
       });
       const darkEsri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-        attribution: '&copy; Esri',
+        attribution: '&copy; Esri, HERE, Garmin, &copy; OpenStreetMap contributors',
         maxNativeZoom: 16,
+        maxZoom: 20
+      });
+      const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+        maxNativeZoom: 19,
         maxZoom: 20
       });
       const satEsri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
@@ -1017,19 +1662,14 @@
         maxNativeZoom: 19,
         maxZoom: 20
       });
-      const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap',
-        maxNativeZoom: 19,
-        maxZoom: 20
-      });
 
       return {
-        baseMapDefault: darkCarto,
+        baseMapDefault: lightEsri,
         layerControl: {
-          "CartoDB Dark": darkCarto,
+          "Esri Light Gray": lightEsri,
           "Esri Dark Canvas": darkEsri,
-          "Satélite HD": satEsri,
-          "OpenStreetMap": osm
+          "OpenStreetMap": osm,
+          "Satélite HD": satEsri
         }
       };
     }
@@ -1056,9 +1696,7 @@
       L.control.layers(b2.layerControl, null, { position: 'topright' }).addTo(mapPoi);
       poiMarkersGroup = L.layerGroup().addTo(mapPoi);
 
-      mapPoi.on('click', (e) => {
-        openNewPoiModal(e.latlng.lng, e.latlng.lat);
-      });
+      setupBoxSelectionForPoi();
 
       // 3. Mapa Demand Viewer
       const b3 = createBaseLayers();
@@ -1079,10 +1717,13 @@
             justify-content: center;
             width: 22px;
             height: 22px;
-            background: #161821;
-            border: 2.5px solid #F37021;
+            background: #E8E1D3;
+            border: 2.5px solid #D95F18;
             border-radius: 50%;
-            box-shadow: 0 0 10px rgba(243,112,33,0.9);
+            box-shadow: 0 0 10px rgba(217,95,24,0.7);
+            color: #231F1C;
+            font-size: 9px;
+            font-weight: 800;
             cursor: grab;
           ">
             <div style="width: 6px; height: 6px; background: #FFFFFF; border-radius: 50%;"></div>
@@ -1108,9 +1749,89 @@
         color: '#F37021',
         weight: 2.5,
         fillColor: '#F37021',
-        fillOpacity: 0.15,
-        dashArray: '6, 6'
+        fillOpacity: 0.16,
+        dashArray: '6, 6',
+        className: 'draggable-bbox-rect'
       }).addTo(mapBbox);
+
+      bboxRectangle.bindTooltip("<strong>Área de Delimitación BBOX</strong><br><span class='text-[11px]'>📍 Arrastra para mover el cuadro &bull; Esquinas para redimensionar</span>", {
+        sticky: true,
+        direction: 'top',
+        className: 'poi-custom-tooltip'
+      });
+
+      // Permitir mover el cuadro completo arrastrándolo
+      let isDraggingBox = false;
+      let dragStartLatLng = null;
+      let startB0 = 0, startB1 = 0, startB2 = 0, startB3 = 0;
+
+      function onBoxDragStart(e) {
+        if (e.originalEvent) {
+          L.DomEvent.stopPropagation(e);
+          L.DomEvent.preventDefault(e);
+        }
+        isDraggingBox = true;
+        dragStartLatLng = e.latlng;
+        startB0 = parseFloat(document.getElementById('cfg_bbox_0').value) || minLon;
+        startB1 = parseFloat(document.getElementById('cfg_bbox_1').value) || minLat;
+        startB2 = parseFloat(document.getElementById('cfg_bbox_2').value) || maxLon;
+        startB3 = parseFloat(document.getElementById('cfg_bbox_3').value) || maxLat;
+
+        mapBbox.dragging.disable();
+        mapBbox.getContainer().style.cursor = 'grabbing';
+        if (bboxRectangle.getElement()) {
+          bboxRectangle.getElement().style.cursor = 'grabbing';
+        }
+
+        mapBbox.on('mousemove touchmove', onBoxDragMove);
+        mapBbox.on('mouseup touchend', onBoxDragEnd);
+        L.DomEvent.on(document, 'mouseup touchend', onBoxDragEnd);
+      }
+
+      function onBoxDragMove(e) {
+        if (!isDraggingBox || !dragStartLatLng || !e.latlng) return;
+
+        const deltaLng = e.latlng.lng - dragStartLatLng.lng;
+        const deltaLat = e.latlng.lat - dragStartLatLng.lat;
+
+        const newB0 = parseFloat((startB0 + deltaLng).toFixed(4));
+        const newB1 = parseFloat((startB1 + deltaLat).toFixed(4));
+        const newB2 = parseFloat((startB2 + deltaLng).toFixed(4));
+        const newB3 = parseFloat((startB3 + deltaLat).toFixed(4));
+
+        document.getElementById('cfg_bbox_0').value = newB0.toFixed(4);
+        document.getElementById('cfg_bbox_1').value = newB1.toFixed(4);
+        document.getElementById('cfg_bbox_2').value = newB2.toFixed(4);
+        document.getElementById('cfg_bbox_3').value = newB3.toFixed(4);
+
+        cityData.city.bbox = [newB0, newB1, newB2, newB3];
+        bboxRectangle.setBounds([[newB1, newB0], [newB3, newB2]]);
+
+        if (bboxCornerMarkers.NW) bboxCornerMarkers.NW.setLatLng([newB3, newB0]);
+        if (bboxCornerMarkers.NE) bboxCornerMarkers.NE.setLatLng([newB3, newB2]);
+        if (bboxCornerMarkers.SE) bboxCornerMarkers.SE.setLatLng([newB1, newB2]);
+        if (bboxCornerMarkers.SW) bboxCornerMarkers.SW.setLatLng([newB1, newB0]);
+      }
+
+      function onBoxDragEnd() {
+        if (!isDraggingBox) return;
+        isDraggingBox = false;
+        dragStartLatLng = null;
+
+        mapBbox.off('mousemove touchmove', onBoxDragMove);
+        mapBbox.off('mouseup touchend', onBoxDragEnd);
+        L.DomEvent.off(document, 'mouseup touchend', onBoxDragEnd);
+
+        mapBbox.dragging.enable();
+        mapBbox.getContainer().style.cursor = '';
+        if (bboxRectangle.getElement()) {
+          bboxRectangle.getElement().style.cursor = 'move';
+        }
+
+        triggerAutoSave();
+      }
+
+      bboxRectangle.on('mousedown touchstart', onBoxDragStart);
 
       if (fit) {
         mapBbox.fitBounds(bounds, { padding: [40, 40] });
@@ -1209,7 +1930,44 @@
 
     let autoSaveTimer = null;
 
+    function resetProjectSession() {
+      densityPoints = [];
+      densityLoadedCityFile = null;
+      if (mapPoi) {
+        if (densityLayers.jobs) {
+          mapPoi.removeLayer(densityLayers.jobs);
+          densityLayers.jobs = null;
+        }
+        if (densityLayers.pop) {
+          mapPoi.removeLayer(densityLayers.pop);
+          densityLayers.pop = null;
+        }
+        if (editorPreviewLayer) {
+          editorPreviewLayer.clearLayers();
+        }
+        if (boxSelectionLayer) {
+          mapPoi.removeLayer(boxSelectionLayer);
+          boxSelectionLayer = null;
+        }
+      }
+      document.getElementById('btnToggleDensityJobs')?.classList.remove('bg-rose-500/30', 'border-rose-500');
+      document.getElementById('btnToggleDensityPop')?.classList.remove('bg-blue-500/30', 'border-blue-500');
+      document.getElementById('btnToggleBoxSelect')?.classList.remove('bg-amber-600/30', 'border-amber-600');
+      isBoxSelectActive = false;
+
+      if (demandLayers && demandLayers.residents) demandLayers.residents.clearLayers();
+      if (demandLayers && demandLayers.jobs) demandLayers.jobs.clearLayers();
+      if (demandLayers && demandLayers.pois) demandLayers.pois.clearLayers();
+      const metricPea = document.getElementById('metricTotalPea');
+      const metricPts = document.getElementById('metricDemandPoints');
+      if (metricPea) metricPea.innerText = "0";
+      if (metricPts) metricPts.innerText = "0";
+
+      activeEditingPoiIndex = -1;
+    }
+
     async function loadCityData(filePath) {
+      resetProjectSession();
       try {
         const res = await fetch(`/api/city?file=${encodeURIComponent(filePath)}`);
         if (!res.ok) throw new Error("No se pudo cargar la ciudad");
@@ -1230,6 +1988,10 @@
         }
 
         populateFormFields();
+        const headerLabel = document.getElementById('headerProjectLabel');
+        if (headerLabel && cityData.city) {
+          headerLabel.textContent = `${cityData.city.name || 'Proyecto'} (${cityData.city.code || ''})`;
+        }
         await refreshDataStatus();
         showToast("Configuración lista", "success");
       } catch (e) {
@@ -1365,6 +2127,7 @@
       renderGrowthFactorsTable();
       renderPoiList();
       renderPoiMarkersOnMap();
+      renderPlacesList();
     }
 
     // -------------------------------------------------------------------------
@@ -1419,13 +2182,21 @@
     function openDataSourcesModal() { document.getElementById('modalDataSources').classList.remove('hidden'); }
     function closeDataSourcesModal() { document.getElementById('modalDataSources').classList.add('hidden'); }
 
-    async function refreshDataStatus() {
+    async function refreshDataStatus(isManual = false) {
+      if (!currentCityFile) return;
       const code = cityData.city ? (cityData.city.code || "") : "";
       const name = cityData.city ? (cityData.city.name || "") : "";
       try {
         const res = await fetch(`/api/data-status?city=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&file=${encodeURIComponent(currentCityFile)}`);
         const status = await res.json();
+        
+        const folderBadge = document.getElementById('activeDataFolderBadge');
+        if (folderBadge) {
+          folderBadge.innerText = status.active_dir ? `${status.active_dir}/` : 'data/';
+        }
+
         const container = document.getElementById('dataStatusList');
+        if (!container) return;
         container.innerHTML = '';
 
         const sources = [
@@ -1446,32 +2217,63 @@
           if (count === 1) {
             fileDesc = `${files[0].filename} (${files[0].size_mb} MB)`;
           } else if (count > 1) {
-            fileDesc = `${count} archivos: ` + files.map(f => f.filename).join(', ');
+            fileDesc = `${count} archivos detectados en carpeta`;
+          }
+
+          let filesDetailHtml = '';
+          if (isOk && files.length > 0) {
+            filesDetailHtml = `
+              <div class="mt-2.5 pt-2.5 border-t border-emerald-200/80 space-y-1.5 w-full">
+                ${files.map(f => `
+                  <div class="flex items-center justify-between text-xs bg-white px-3 py-2 rounded-lg border border-stone-200 shadow-xs">
+                    <div class="flex items-center space-x-2 truncate mr-2">
+                      <span class="text-emerald-700 font-black text-sm">&bull;</span>
+                      <span class="truncate text-stone-900 font-mono font-bold" title="${f.path}">${f.filename}</span>
+                      <span class="text-stone-500 font-mono shrink-0">(${f.size_mb} MB)</span>
+                    </div>
+                    <div class="flex items-center space-x-1 shrink-0">
+                      <button onclick="openFileLocation('${(f.abs_path || f.path).replace(/\\/g, '/')}')" class="text-stone-500 hover:text-stone-800 p-1.5 rounded-md hover:bg-stone-100 transition" title="Abrir ubicación">
+                        <i data-lucide="folder-open" class="w-4 h-4"></i>
+                      </button>
+                      <button onclick="unlinkDataFile('${f.filename}')" class="text-stone-400 hover:text-rose-600 p-1.5 rounded-md hover:bg-rose-50 transition" title="Quitar archivo">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                      </button>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            `;
           }
 
           const card = document.createElement('div');
-          card.className = `p-3.5 rounded-lg border flex items-center justify-between text-xs ${
-            isOk ? 'bg-emerald-950/20 border-emerald-800/40 text-gray-200' : 'bg-metro-panel border-metro-border text-gray-400'
+          card.className = `p-4 rounded-xl border flex flex-col text-xs transition ${
+            isOk ? 'bg-emerald-50/70 border-emerald-300 text-stone-900 shadow-xs' : 'bg-white border-stone-200 text-stone-700 shadow-xs'
           }`;
           card.innerHTML = `
-            <div class="flex items-center space-x-3 overflow-hidden mr-2">
-              <span class="p-2 rounded-lg shrink-0 ${isOk ? 'bg-emerald-900/50 text-emerald-400' : 'bg-gray-800 text-gray-500'}">
-                <i data-lucide="${s.icon}" class="w-4 h-4"></i>
-              </span>
-              <div class="overflow-hidden">
-                <span class="font-bold text-white block truncate">${s.label}</span>
-                <span class="text-[11px] text-gray-400 font-mono block truncate" title="${fileDesc}">${fileDesc}</span>
+            <div class="flex items-center justify-between w-full">
+              <div class="flex items-center space-x-3 overflow-hidden mr-2">
+                <span class="p-2 rounded-lg shrink-0 ${isOk ? 'bg-emerald-100 text-emerald-800' : 'bg-stone-100 text-stone-600'}">
+                  <i data-lucide="${s.icon}" class="w-4 h-4"></i>
+                </span>
+                <div class="overflow-hidden">
+                  <span class="font-bold text-stone-900 block text-sm truncate">${s.label}</span>
+                  <span class="text-[11px] ${isOk ? 'text-emerald-800 font-medium' : 'text-stone-500 font-mono'} block truncate" title="${fileDesc}">${fileDesc}</span>
+                </div>
               </div>
+              <span class="px-2.5 py-1 rounded text-[10px] font-bold font-mono shrink-0 ${
+                isOk ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' : 'bg-stone-100 text-stone-600 border border-stone-300'
+              }">
+                ${isOk ? (count > 1 ? `${count} ARCHIVOS &check;` : 'DETECTADO &check;') : 'PENDIENTE'}
+              </span>
             </div>
-            <span class="px-2.5 py-1 rounded text-[10px] font-bold font-mono shrink-0 ${
-              isOk ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-gray-800 text-gray-400'
-            }">
-              ${isOk ? (count > 1 ? `${count} ARCHIVOS &check;` : 'DETECTADO &check;') : 'PENDIENTE'}
-            </span>
+            ${filesDetailHtml}
           `;
           container.appendChild(card);
         });
         lucide.createIcons();
+        if (isManual) {
+          showToast("Fuentes de datos actualizadas", "success");
+        }
       } catch (e) {
         console.error("Error al obtener estado de datos:", e);
       }
@@ -1508,6 +2310,9 @@
 
       progressCont.classList.remove('hidden');
 
+      const code = cityData.city ? (cityData.city.code || "") : "";
+      const uploadUrl = `/api/upload?file=${encodeURIComponent(currentCityFile)}&city=${encodeURIComponent(code)}`;
+
       for (let file of files) {
         fileNameLabel.innerText = `Subiendo ${file.name}...`;
         const formData = new FormData();
@@ -1515,7 +2320,7 @@
 
         try {
           const xhr = new XMLHttpRequest();
-          xhr.open("POST", "/api/upload", true);
+          xhr.open("POST", uploadUrl, true);
 
           xhr.upload.onprogress = (e) => {
             if (e.lengthComputable) {
@@ -1527,10 +2332,12 @@
 
           xhr.onload = () => {
             if (xhr.status === 200) {
-              showToast(`Archivo '${file.name}' subido a data/`, "success");
+              const resp = JSON.parse(xhr.responseText || '{}');
+              const targetFolder = resp.target_dir ? `${resp.target_dir}/` : 'data/';
+              showToast(`Archivo '${file.name}' guardado en ${targetFolder}`, "success");
               const li = document.createElement('li');
               li.className = "text-emerald-400 flex items-center space-x-1";
-              li.innerHTML = `<span>&check;</span> <span>${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)</span>`;
+              li.innerHTML = `<span>&check;</span> <span>${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB) &rarr; ${targetFolder}</span>`;
               if (uploadedList.querySelector('li.italic')) uploadedList.innerHTML = '';
               uploadedList.appendChild(li);
               refreshDataStatus();
@@ -1549,21 +2356,87 @@
     // -------------------------------------------------------------------------
     // PASO 3: TABLA DE PROYECCIONES CONAPO
     // -------------------------------------------------------------------------
+    async function autoCalculateConapo() {
+      const btn = document.getElementById('btnAutoConapo');
+      if (btn) btn.disabled = true;
+      showToast("Consultando proyecciones oficiales de CONAPO...", "info");
+      try {
+        const res = await fetch(`/api/conapo/calculate?file=${encodeURIComponent(currentCityFile)}`);
+        const data = await res.json();
+        if (data.status === 'ok') {
+          window.conapoMetadata = window.conapoMetadata || {};
+          window.conapoYear = data.projection_year;
+          if (document.getElementById('conapoSubtitleLabel')) {
+            document.getElementById('conapoSubtitleLabel').innerText = `Factores de sincronización intercensal Pob_${data.projection_year || 2025} / Pob_2020 (${data.conapo_file || 'CONAPO'}).`;
+          }
+          if (!cityData.macroeconomics) cityData.macroeconomics = {};
+          if (!cityData.macroeconomics.growth_factors) cityData.macroeconomics.growth_factors = {};
+
+          let added = 0;
+          data.factors.forEach(f => {
+            window.conapoMetadata[f.cve_mun] = f;
+            if (f.in_bbox || Object.keys(cityData.macroeconomics.growth_factors).length === 0) {
+              cityData.macroeconomics.growth_factors[f.cve_mun] = f.factor;
+              added++;
+            }
+          });
+
+          if (added === 0 && data.factors.length > 0) {
+            data.factors.slice(0, 4).forEach(f => {
+              cityData.macroeconomics.growth_factors[f.cve_mun] = f.factor;
+            });
+          }
+
+          renderGrowthFactorsTable();
+          triggerAutoSave();
+          showToast(`Sincronizados factores CONAPO (${data.factors.length} municipios, Año ${data.projection_year})`, "success");
+        } else {
+          showToast(data.message || "No se detectó archivo CONAPO en data/", "error");
+        }
+      } catch (e) {
+        showToast(`Error al consultar CONAPO: ${e.message}`, "error");
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
     function renderGrowthFactorsTable() {
       const tbody = document.getElementById('growthFactorsTableBody');
       tbody.innerHTML = '';
       const factors = (cityData.macroeconomics && cityData.macroeconomics.growth_factors) || {};
+      const entries = Object.entries(factors);
 
-      Object.entries(factors).forEach(([code, val]) => {
+      if (entries.length === 0) {
+        const emptyTr = document.createElement('tr');
+        emptyTr.innerHTML = `
+          <td colspan="6" class="p-6 text-center text-gray-400">
+            <span>No hay factores de proyección asignados.</span>
+            <button onclick="autoCalculateConapo()" class="text-emerald-400 hover:text-emerald-300 font-bold underline ml-1.5">Sincronizar automáticamente con CONAPO</button>
+          </td>
+        `;
+        tbody.appendChild(emptyTr);
+        lucide.createIcons();
+        return;
+      }
+
+      entries.forEach(([code, val]) => {
+        const meta = (window.conapoMetadata && window.conapoMetadata[code]) || {};
+        const munName = meta.name || `Municipio ${code}`;
+        const pob2020Str = meta.pob_2020 ? Number(meta.pob_2020).toLocaleString() : "-";
+        const pobProjStr = meta.pob_conapo ? Number(meta.pob_conapo).toLocaleString() : "-";
+
         const tr = document.createElement('tr');
         tr.className = "hover:bg-metro-panel/50 transition";
         tr.innerHTML = `
-          <td class="p-2.5 font-bold text-white">${code}</td>
+          <td class="p-2.5 font-bold text-white font-mono">${code}</td>
+          <td class="p-2.5 text-gray-200 font-sans">${munName}</td>
+          <td class="p-2.5 text-gray-400 font-mono">${pob2020Str}</td>
+          <td class="p-2.5 text-emerald-400 font-mono font-bold">${pobProjStr}</td>
           <td class="p-2.5">
-            <input type="number" step="0.01" value="${val}" onchange="updateGrowthFactor('${code}', this.value)" class="bg-metro-card border border-metro-border rounded px-2 py-1 text-white w-24">
+            <input type="number" step="0.01" value="${val}" onchange="updateGrowthFactor('${code}', this.value)" class="bg-metro-card border border-metro-border rounded px-2 py-1 text-white w-20 font-mono text-center">
           </td>
           <td class="p-2.5 text-right">
-            <button onclick="deleteGrowthFactor('${code}')" class="text-rose-400 hover:text-rose-300 p-1">
+            <button onclick="deleteGrowthFactor('${code}')" class="text-rose-400 hover:text-rose-300 p-1 rounded hover:bg-rose-950/30 transition" title="Eliminar factor">
               <i data-lucide="trash-2" class="w-4 h-4"></i>
             </button>
           </td>
@@ -1593,33 +2466,484 @@
     }
 
     // -------------------------------------------------------------------------
-    // PASO 4: POI STUDIO (EDITOR DE POIS Y RADIOS)
+    // PASO 4: POI STUDIO INTEGRADO (CALIBRADOR DE RADIOS, ABSORCIÓN Y COLONIAS)
     // -------------------------------------------------------------------------
+    let currentPoiFilter = 'ALL';
+    let activeEditingPoiIndex = -1;
+    let isPickingLocation = false;
+    let densityPoints = [];
+    let densityLayers = { jobs: null, pop: null };
+    let isBoxSelectActive = false;
+    let boxStartLatLng = null;
+    let boxSelectionLayer = null;
+    let isMouseDownForBox = false;
+    let currentAreaStats = null;
+    let editorPreviewLayer = null;
+
+    const TAXONOMY_META = {
+      AIR: { prefix: 'AIR_', label: 'Aeropuerto', defaultRadius: 2500, defaultJobs: 25000, color: '#C80068', icon: 'plane' },
+      UNI: { prefix: 'UNI_', label: 'Universidad', defaultRadius: 800, defaultJobs: 12000, color: '#007A54', icon: 'graduation-cap' },
+      SPO: { prefix: 'SPO_', label: 'Estadio / Arena', defaultRadius: 800, defaultJobs: 15000, color: '#D95F18', icon: 'trophy' },
+      TOU: { prefix: 'TOU_', label: 'Atractor Turístico', defaultRadius: 600, defaultJobs: 8000, color: '#b45309', icon: 'sun' },
+      MED: { prefix: 'MED_', label: 'Hospital / Complejo', defaultRadius: 700, defaultJobs: 6000, color: '#dc2626', icon: 'cross' },
+      TRA: { prefix: 'TRA_', label: 'Terminal / Central', defaultRadius: 1000, defaultJobs: 18000, color: '#0284c7', icon: 'train' },
+      CUSTOM: { prefix: '', label: 'General / Comercial', defaultRadius: 750, defaultJobs: 5000, color: '#4f46e5', icon: 'building' }
+    };
+
+    function detectPoiTaxonomy(id) {
+      if (!id) return 'CUSTOM';
+      for (let k of ['AIR', 'UNI', 'SPO', 'TOU', 'MED', 'TRA']) {
+        if (id.startsWith(k + '_')) return k;
+      }
+      return 'CUSTOM';
+    }
+
+    function switchPoiTab(tabName) {
+      if (tabName === 'absorption') tabName = 'editor';
+      const tabs = ['list', 'editor', 'places'];
+      tabs.forEach(t => {
+        const btn = document.getElementById(`poiTabBtn-${t}`);
+        const content = document.getElementById(`poiTab-${t}`);
+        if (t === tabName) {
+          if (btn) btn.className = "flex-1 py-2 px-1 text-center flex items-center justify-center space-x-1 border-b-2 border-metro-orange text-metro-orange bg-white transition font-bold";
+          if (content) content.classList.remove('hidden');
+        } else {
+          if (btn) btn.className = "flex-1 py-2 px-1 text-center flex items-center justify-center space-x-1 border-b-2 border-transparent text-stone-600 hover:text-stone-900 transition font-bold";
+          if (content) content.classList.add('hidden');
+        }
+      });
+      if (tabName === 'places') renderPlacesList();
+      if (tabName === 'editor') updatePoiPreviewFromForm();
+      lucide.createIcons();
+    }
+
+    function setPoiTaxonomyFilter(tax) {
+      currentPoiFilter = tax;
+      document.querySelectorAll('.poi-filter-chip').forEach(el => {
+        el.className = "poi-filter-chip px-2 py-0.5 rounded bg-metro-panel text-metro-muted hover:text-metro-text transition";
+      });
+      const activeBtn = document.getElementById(`poiFilter-${tax}`);
+      if (activeBtn) activeBtn.className = "poi-filter-chip px-2 py-0.5 rounded bg-metro-orange text-white transition";
+      renderPoiList();
+    }
+
+    function filterPoiList() {
+      renderPoiList();
+    }
+
     function renderPoiList() {
       const pois = cityData.pois || [];
-      document.getElementById('poiCountBadge').innerText = `${pois.length} POIs configurados`;
+      const badge = document.getElementById('poiCountBadge');
+      const badgeTab = document.getElementById('poiCountBadgeTab');
+      if (badge) badge.innerText = `${pois.length} POIs configurados`;
+      if (badgeTab) badgeTab.innerText = pois.length;
       const cont = document.getElementById('poiListContainer');
+      if (!cont) return;
       cont.innerHTML = '';
 
-      pois.forEach((poi, idx) => {
-        const card = document.createElement('div');
-        card.className = "bg-metro-panel hover:border-metro-orange border border-metro-border p-3 rounded-lg text-xs cursor-pointer transition shadow flex flex-col space-y-1.5";
-        card.onclick = () => openEditPoiModal(idx);
+      const search = (document.getElementById('poiSearchInput')?.value || '').toLowerCase().trim();
 
+      const filtered = pois.map((p, idx) => ({ ...p, originalIndex: idx })).filter(p => {
+        const tax = detectPoiTaxonomy(p.id);
+        if (currentPoiFilter !== 'ALL' && tax !== currentPoiFilter) return false;
+        if (search) {
+          const nameStr = (typeof p.name === 'object' ? (p.name.es || p.name.en || '') : (p.name || '')).toLowerCase();
+          const idStr = (p.id || '').toLowerCase();
+          return idStr.includes(search) || nameStr.includes(search);
+        }
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        cont.innerHTML = `
+          <div class="p-6 text-center text-metro-muted text-xs bg-metro-panel/50 rounded-lg border border-metro-border">
+            <span>No se encontraron POIs con los filtros seleccionados.</span>
+          </div>
+        `;
+        return;
+      }
+
+      filtered.forEach(poi => {
+        const tax = detectPoiTaxonomy(poi.id);
+        const meta = TAXONOMY_META[tax] || TAXONOMY_META.CUSTOM;
         const nameStr = typeof poi.name === 'object' ? (poi.name.es || poi.name.en || poi.id) : (poi.name || poi.id);
-        const modeColor = poi.mode === 'MAX' ? 'bg-amber-500/20 text-amber-400' : 'bg-blue-500/20 text-blue-400';
+        const isCurrent = activeEditingPoiIndex === poi.originalIndex;
+
+        const card = document.createElement('div');
+        card.className = `p-3 rounded-lg border text-xs transition shadow-sm flex flex-col space-y-2 cursor-pointer ${
+          isCurrent ? 'bg-metro-orange/15 border-metro-orange' : 'bg-metro-panel hover:border-metro-orange/60 border-metro-border'
+        }`;
+        card.onclick = (e) => {
+          if (!e.target.closest('button')) {
+            openPoiEditor(poi.originalIndex);
+            focusPoiOnMap(poi.originalIndex);
+          }
+        };
 
         card.innerHTML = `
           <div class="flex justify-between items-start">
-            <span class="font-bold text-white truncate max-w-[180px]">${nameStr}</span>
-            <span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${modeColor}">${poi.mode || 'MAX'}</span>
+            <div class="flex items-center space-x-1.5 truncate mr-2">
+              <span class="w-2 h-2 rounded-full shrink-0" style="background-color: ${meta.color}"></span>
+              <span class="font-bold text-metro-text truncate font-sans text-xs" title="${nameStr}">${nameStr}</span>
+            </div>
+            <span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold shrink-0 bg-metro-card border border-metro-border text-metro-text">
+              ${poi.mode || 'MAX'}
+            </span>
           </div>
-          <div class="flex justify-between text-gray-400 text-[11px] font-mono">
-            <span>&bull; Empleos: <strong class="text-gray-200">${(poi.jobs || 0).toLocaleString()}</strong></span>
-            <span>&bull; Radio: <strong class="text-gray-200">${poi.radius_m || 750}m</strong></span>
+          <div class="flex justify-between text-[11px] font-mono text-metro-muted">
+            <span>ID: <strong class="text-metro-text">${poi.id}</strong></span>
+            <span>Radio: <strong class="text-metro-text">${poi.radius_m || 750}m</strong></span>
+            <span>Empleos: <strong class="text-metro-green">${(poi.jobs || 0).toLocaleString()}</strong></span>
+          </div>
+          <div class="flex justify-end space-x-1 pt-1 border-t border-metro-border/50">
+            <button onclick="focusPoiOnMap(${poi.originalIndex})" class="p-1 rounded text-metro-muted hover:text-metro-orange hover:bg-metro-card transition" title="Centrar en mapa">
+              <i data-lucide="crosshair" class="w-3.5 h-3.5"></i>
+            </button>
+            <button onclick="openPoiEditor(${poi.originalIndex})" class="p-1 rounded text-metro-muted hover:text-metro-text hover:bg-metro-card transition" title="Editar en Sidebar">
+              <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
+            </button>
+            <button onclick="deletePoiByIndex(${poi.originalIndex})" class="p-1 rounded text-metro-muted hover:text-rose-600 hover:bg-metro-card transition" title="Eliminar POI">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            </button>
           </div>
         `;
         cont.appendChild(card);
+      });
+      lucide.createIcons();
+    }
+
+    function openPoiEditorForNew(coords = null) {
+      activeEditingPoiIndex = -1;
+      document.getElementById('editorTitleLabel').innerText = "Nuevo POI Especial";
+      document.getElementById('editPoiCategory').value = "CUSTOM";
+      document.getElementById('editPoiId').value = "POI_Nuevo";
+      document.getElementById('editPoiNameEs').value = "";
+      document.getElementById('editPoiNameEn').value = "";
+      document.getElementById('editPoiJobs').value = 5000;
+      document.getElementById('editPoiRadius').value = 750;
+      document.getElementById('editPoiRadiusDisplay').innerText = "750 m";
+      document.getElementById('editPoiMode').value = "MAX";
+      document.getElementById('btnDeleteEditorPoi').classList.add('hidden');
+
+      const pt = coords || (mapPoi ? mapPoi.getCenter() : { lng: -86.85, lat: 21.16 });
+      const lng = (typeof pt.lng !== 'undefined' ? pt.lng : (pt[0] || 0));
+      const lat = (typeof pt.lat !== 'undefined' ? pt.lat : (pt[1] || 0));
+      document.getElementById('editPoiLon').value = Number(lng).toFixed(5);
+      document.getElementById('editPoiLat').value = Number(lat).toFixed(5);
+
+      switchPoiTab('editor');
+      updatePoiPreviewFromForm();
+    }
+
+    function openPoiEditor(idx) {
+      activeEditingPoiIndex = idx;
+      const poi = cityData.pois[idx];
+      const tax = detectPoiTaxonomy(poi.id);
+
+      document.getElementById('editorTitleLabel').innerText = `Editar: ${poi.id}`;
+      document.getElementById('editPoiCategory').value = tax;
+      document.getElementById('editPoiId').value = poi.id || "";
+      document.getElementById('editPoiNameEs').value = typeof poi.name === 'object' ? (poi.name.es || "") : (poi.name || "");
+      document.getElementById('editPoiNameEn').value = typeof poi.name === 'object' ? (poi.name.en || "") : "";
+      document.getElementById('editPoiJobs').value = poi.jobs || 5000;
+      document.getElementById('editPoiRadius').value = poi.radius_m || 750;
+      document.getElementById('editPoiRadiusDisplay').innerText = `${poi.radius_m || 750} m`;
+      document.getElementById('editPoiMode').value = poi.mode || "MAX";
+      document.getElementById('editPoiLon').value = poi.loc ? poi.loc[0].toFixed(5) : 0;
+      document.getElementById('editPoiLat').value = poi.loc ? poi.loc[1].toFixed(5) : 0;
+      document.getElementById('btnDeleteEditorPoi').classList.remove('hidden');
+
+      switchPoiTab('editor');
+      updatePoiPreviewFromForm();
+      renderPoiList();
+    }
+
+    function onPoiTaxonomyChanged(val) {
+      const meta = TAXONOMY_META[val] || TAXONOMY_META.CUSTOM;
+      const idInput = document.getElementById('editPoiId');
+      const currentId = idInput.value.trim();
+
+      let baseName = currentId;
+      for (let k of ['AIR', 'UNI', 'SPO', 'TOU', 'MED', 'TRA']) {
+        if (baseName.startsWith(k + '_')) {
+          baseName = baseName.substring((k + '_').length);
+          break;
+        }
+      }
+      if (meta.prefix) {
+        idInput.value = `${meta.prefix}${baseName || 'Punto'}`;
+      } else {
+        idInput.value = baseName || 'POI_Punto';
+      }
+
+      if (meta.defaultRadius) {
+        document.getElementById('editPoiRadius').value = meta.defaultRadius;
+        document.getElementById('editPoiRadiusDisplay').innerText = `${meta.defaultRadius} m`;
+      }
+      if (meta.defaultJobs) {
+        document.getElementById('editPoiJobs').value = meta.defaultJobs;
+      }
+      updatePoiPreviewFromForm();
+    }
+
+    function onPoiRadiusSlider(val) {
+      document.getElementById('editPoiRadiusDisplay').innerText = `${val} m`;
+      updatePoiPreviewFromForm();
+    }
+
+    function updatePoiPreviewFromForm() {
+      const lon = parseFloat(document.getElementById('editPoiLon').value);
+      const lat = parseFloat(document.getElementById('editPoiLat').value);
+      const radius = parseInt(document.getElementById('editPoiRadius').value) || 750;
+      const jobsManual = parseInt(document.getElementById('editPoiJobs').value) || 0;
+      const mode = document.getElementById('editPoiMode').value;
+      const cat = document.getElementById('editPoiCategory').value;
+      const meta = TAXONOMY_META[cat] || TAXONOMY_META.CUSTOM;
+
+      if (isNaN(lon) || isNaN(lat) || !mapPoi) return;
+
+      if (!editorPreviewLayer) {
+        editorPreviewLayer = L.layerGroup().addTo(mapPoi);
+      }
+      editorPreviewLayer.clearLayers();
+
+      const latLng = [lat, lon];
+      L.circle(latLng, {
+        radius: radius,
+        color: meta.color,
+        weight: 2,
+        fillColor: meta.color,
+        fillOpacity: 0.2
+      }).addTo(editorPreviewLayer);
+
+      L.circleMarker(latLng, {
+        radius: 8,
+        color: '#ffffff',
+        weight: 2,
+        fillColor: meta.color,
+        fillOpacity: 1
+      }).addTo(editorPreviewLayer);
+
+      // Métricas de Absorción en Vivo contra densityPoints
+      let absorbedJobs = 0;
+      let absorbedPop = 0;
+      let absorbedNodesCount = 0;
+
+      if (densityPoints && densityPoints.length > 0) {
+        densityPoints.forEach(p => {
+          const d = getDistanceMeters(lon, lat, p.location[0], p.location[1]);
+          if (d <= radius) {
+            absorbedJobs += (p.jobs || 0);
+            absorbedPop += (p.residents || 0);
+            absorbedNodesCount++;
+          }
+        });
+      }
+
+      let finalJobs = jobsManual;
+      let diagnosis = "";
+
+      if (mode === "MAX") {
+        finalJobs = Math.max(jobsManual, absorbedJobs);
+        if (absorbedJobs >= jobsManual && jobsManual > 0) {
+          diagnosis = `Piso DENUE alcanzado: los ${absorbedJobs.toLocaleString()} empleos locales superan la cuota manual de ${jobsManual.toLocaleString()}.`;
+        } else {
+          diagnosis = `Cuota manual fijada (${jobsManual.toLocaleString()} empleos): absorbe ${absorbedJobs.toLocaleString()} locales del DENUE e inyecta ${(jobsManual - absorbedJobs).toLocaleString()} exógenos.`;
+        }
+      } else if (mode === "BOOST") {
+        finalJobs = jobsManual + absorbedJobs;
+        diagnosis = `Suma exógena: +${absorbedJobs.toLocaleString()} empleos DENUE sumados sobre la cuota base de ${jobsManual.toLocaleString()}.`;
+      } else if (mode === "REPLACE") {
+        finalJobs = jobsManual;
+        diagnosis = `Sobrescritura forzada: cuota fija de ${jobsManual.toLocaleString()} empleos (reemplaza el DENUE local).`;
+      }
+
+      const elAbsJobs = document.getElementById('statAbsorbedJobs');
+      const elAbsPop = document.getElementById('statAbsorbedPop');
+      const elAbsNodes = document.getElementById('statAbsorbedNodes');
+      const elFinalJobs = document.getElementById('statFinalJobs');
+      const elDiagnosis = document.getElementById('statDiagnosisText');
+      const modeBadge = document.getElementById('editorStatModeBadge');
+
+      if (modeBadge) modeBadge.innerText = mode;
+      if (elAbsJobs) elAbsJobs.innerText = absorbedJobs.toLocaleString();
+      if (elAbsPop) elAbsPop.innerText = absorbedPop.toLocaleString();
+      if (elAbsNodes) elAbsNodes.innerText = absorbedNodesCount.toLocaleString();
+      if (elFinalJobs) elFinalJobs.innerText = finalJobs.toLocaleString();
+      if (elDiagnosis) elDiagnosis.innerText = diagnosis || "Ajusta las coordenadas y radio para ver la absorción en vivo.";
+
+      // Calcular y renderizar POIs afectados o solapados
+      const affectedListEl = document.getElementById('editorAffectedPoisList');
+      const countEl = document.getElementById('editorAffectedPoisCount');
+      if (affectedListEl) {
+        affectedListEl.innerHTML = '';
+        let overlappingCount = 0;
+        const pois = cityData.pois || [];
+        const affected = [];
+
+        pois.forEach((otherPoi, oIdx) => {
+          if (oIdx === activeEditingPoiIndex) return;
+          if (!otherPoi.loc || otherPoi.loc.length !== 2) return;
+          const dist = getDistanceMeters(lon, lat, otherPoi.loc[0], otherPoi.loc[1]);
+          const otherRad = otherPoi.radius_m || 750;
+          const overlap = dist < (radius + otherRad);
+          const isNear = dist <= (radius + otherRad + 600);
+
+          if (isNear) {
+            affected.push({
+              poi: otherPoi,
+              dist: Math.round(dist),
+              overlap: overlap,
+              otherRad: otherRad
+            });
+            if (overlap) overlappingCount++;
+          }
+        });
+
+        affected.sort((a, b) => a.dist - b.dist);
+
+        if (countEl) {
+          if (overlappingCount > 0) {
+            countEl.innerText = `${overlappingCount} solapado(s)`;
+            countEl.className = "font-mono font-bold text-amber-800 text-[10px]";
+          } else if (affected.length > 0) {
+            countEl.innerText = `${affected.length} próximo(s)`;
+            countEl.className = "font-mono font-medium text-stone-600 text-[10px]";
+          } else {
+            countEl.innerText = "0 en radio";
+            countEl.className = "font-mono text-stone-500 text-[10px]";
+          }
+        }
+
+        if (affected.length === 0) {
+          affectedListEl.innerHTML = `
+            <div class="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded-lg flex items-center space-x-1.5">
+              <span>&check; Sin interferencia con otros POIs especiales.</span>
+            </div>
+          `;
+        } else {
+          affected.forEach(item => {
+            const oPoi = item.poi;
+            const nameStr = typeof oPoi.name === 'object' ? (oPoi.name.es || oPoi.id) : (oPoi.name || oPoi.id);
+            const row = document.createElement('div');
+            row.className = `p-2 rounded-lg border text-[11px] flex items-center justify-between transition ${
+              item.overlap ? 'bg-amber-50 border-amber-300 text-stone-900' : 'bg-white border-stone-200 text-stone-700'
+            }`;
+            row.innerHTML = `
+              <div class="truncate mr-2">
+                <span class="font-bold block truncate text-stone-900">${nameStr}</span>
+                <span class="font-mono text-[10px] text-stone-500">${oPoi.id} &bull; radio ${item.otherRad}m</span>
+              </div>
+              <div class="text-right shrink-0">
+                <span class="font-mono font-bold block ${item.overlap ? 'text-amber-800' : 'text-stone-800'}">${item.dist} m</span>
+                <span class="text-[9px] font-bold uppercase ${item.overlap ? 'text-amber-800' : 'text-stone-500'}">
+                  ${item.overlap ? '⚠️ Solapado' : 'Próximo'}
+                </span>
+              </div>
+            `;
+            affectedListEl.appendChild(row);
+          });
+        }
+      }
+    }
+
+    function getDistanceMeters(lon1, lat1, lon2, lat2) {
+      const R = 6371000;
+      const phi1 = lat1 * Math.PI / 180;
+      const phi2 = lat2 * Math.PI / 180;
+      const dphi = (lat2 - lat1) * Math.PI / 180;
+      const dlam = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dphi / 2) * Math.sin(dphi / 2) +
+                Math.cos(phi1) * Math.cos(phi2) *
+                Math.sin(dlam / 2) * Math.sin(dlam / 2);
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function savePoiFromEditor() {
+      const pId = document.getElementById('editPoiId').value.trim();
+      if (!pId) {
+        showToast("El ID del POI no puede estar vacío", "error");
+        return;
+      }
+      const esName = document.getElementById('editPoiNameEs').value.trim();
+      const enName = document.getElementById('editPoiNameEn').value.trim();
+      const pCat = document.getElementById('editPoiCategory').value;
+      const pMode = document.getElementById('editPoiMode').value;
+      const pJobs = parseInt(document.getElementById('editPoiJobs').value) || 5000;
+      const pRad = parseInt(document.getElementById('editPoiRadius').value) || 750;
+      const lon = parseFloat(document.getElementById('editPoiLon').value);
+      const lat = parseFloat(document.getElementById('editPoiLat').value);
+
+      if (isNaN(lon) || isNaN(lat)) {
+        showToast("Coordenadas inválidas", "error");
+        return;
+      }
+
+      const poiObj = {
+        id: pId,
+        name: enName ? { es: esName || pId, en: enName } : (esName || pId),
+        type: pCat.toLowerCase(),
+        mode: pMode,
+        jobs: pJobs,
+        radius_m: pRad,
+        loc: [lon, lat]
+      };
+
+      if (!cityData.pois) cityData.pois = [];
+      if (activeEditingPoiIndex >= 0) {
+        cityData.pois[activeEditingPoiIndex] = poiObj;
+      } else {
+        cityData.pois.push(poiObj);
+        activeEditingPoiIndex = cityData.pois.length - 1;
+      }
+
+      if (editorPreviewLayer) editorPreviewLayer.clearLayers();
+      renderPoiList();
+      renderPoiMarkersOnMap();
+      triggerAutoSave();
+      showToast(`POI '${pId}' guardado correctamente`, "success");
+      switchPoiTab('list');
+    }
+
+    function deleteCurrentEditorPoi() {
+      if (activeEditingPoiIndex >= 0) {
+        deletePoiByIndex(activeEditingPoiIndex);
+      }
+    }
+
+    function deletePoiByIndex(idx) {
+      const poi = cityData.pois[idx];
+      if (!poi) return;
+      if (!confirm(`¿Eliminar el POI '${poi.id}'?`)) return;
+      cityData.pois.splice(idx, 1);
+      activeEditingPoiIndex = -1;
+      if (editorPreviewLayer) editorPreviewLayer.clearLayers();
+      renderPoiList();
+      renderPoiMarkersOnMap();
+      triggerAutoSave();
+      switchPoiTab('list');
+      showToast("POI eliminado", "info");
+    }
+
+    function focusPoiOnMap(idx) {
+      const poi = cityData.pois[idx];
+      if (!poi || !poi.loc || !mapPoi) return;
+      mapPoi.flyTo([poi.loc[1], poi.loc[0]], 14, { duration: 0.8 });
+    }
+
+    function startPickingPoiLocation() {
+      isPickingLocation = true;
+      mapPoi.getContainer().style.cursor = 'crosshair';
+      showToast("Haz clic en cualquier punto del mapa para posicionar el POI", "info");
+    }
+
+    function createPoiIcon(cat) {
+      const meta = TAXONOMY_META[cat] || TAXONOMY_META.CUSTOM;
+      return L.divIcon({
+        className: 'custom-poi-marker',
+        html: `<div class="poi-marker-icon" style="background-color: ${meta.color};">${meta.icon}</div>`,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14]
       });
     }
 
@@ -1631,113 +2955,454 @@
       pois.forEach((poi, idx) => {
         if (!poi.loc || poi.loc.length !== 2) return;
         const latLng = [poi.loc[1], poi.loc[0]];
+        const tax = detectPoiTaxonomy(poi.id);
+        const meta = TAXONOMY_META[tax] || TAXONOMY_META.CUSTOM;
 
-        L.circle(latLng, {
+        const circle = L.circle(latLng, {
           radius: poi.radius_m || 750,
-          color: '#E4007C',
+          color: meta.color,
           weight: 1.5,
-          fillColor: '#E4007C',
-          fillOpacity: 0.15
+          fillColor: meta.color,
+          fillOpacity: 0.16
         }).addTo(poiMarkersGroup);
 
-        const marker = L.circleMarker(latLng, {
-          radius: 6,
-          color: '#F37021',
-          fillColor: '#FFFFFF',
-          fillOpacity: 1,
-          weight: 2
+        const marker = L.marker(latLng, {
+          icon: createPoiIcon(tax),
+          draggable: true
         }).addTo(poiMarkersGroup);
 
         const nameStr = typeof poi.name === 'object' ? (poi.name.es || poi.id) : (poi.name || poi.id);
-        marker.bindTooltip(`<strong>${nameStr}</strong><br>Empleos: ${poi.jobs}<br>Radio: ${poi.radius_m}m`);
-        marker.on('click', () => openEditPoiModal(idx));
+
+        const toastHtml = `
+          <div class="p-2.5 bg-white text-stone-900 rounded-lg shadow-xl text-xs space-y-1 min-w-[190px]">
+            <div class="flex items-center justify-between space-x-2">
+              <span class="font-bold text-stone-900 truncate">${nameStr}</span>
+              <span class="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold" style="background: ${meta.color}22; color: ${meta.color}; border: 1px solid ${meta.color}66">${poi.mode || 'MAX'}</span>
+            </div>
+            <div class="text-[11px] font-mono text-stone-600">ID: <strong class="text-stone-900">${poi.id}</strong></div>
+            <div class="flex justify-between text-[11px] font-mono text-stone-700 pt-1 border-t border-stone-200">
+              <span>Radio: <strong class="text-stone-900">${poi.radius_m || 750}m</strong></span>
+              <span>Empleos: <strong class="text-emerald-700 font-bold">${(poi.jobs || 0).toLocaleString()}</strong></span>
+            </div>
+            <div class="text-[10px] text-stone-500 pt-1 border-t border-stone-200 flex items-center justify-between">
+              <span>📍 Arrastra para reubicar</span>
+              <span>🖱️ Clic para editar</span>
+            </div>
+          </div>
+        `;
+
+        marker.bindTooltip(toastHtml, {
+          direction: 'top',
+          offset: [0, -16],
+          className: 'poi-custom-tooltip'
+        });
+
+        marker.on('drag', (e) => {
+          const newPos = e.target.getLatLng();
+          circle.setLatLng(newPos);
+          poi.loc = [parseFloat(newPos.lng.toFixed(5)), parseFloat(newPos.lat.toFixed(5))];
+          if (activeEditingPoiIndex === idx) {
+            const elLon = document.getElementById('editPoiLon');
+            const elLat = document.getElementById('editPoiLat');
+            if (elLon) elLon.value = poi.loc[0];
+            if (elLat) elLat.value = poi.loc[1];
+            updatePoiPreviewFromForm();
+          }
+        });
+
+        marker.on('dragend', () => {
+          triggerAutoSave();
+        });
+
+        marker.on('click', (e) => {
+          L.DomEvent.stopPropagation(e);
+          openPoiEditor(idx);
+          focusPoiOnMap(idx);
+        });
       });
     }
 
-    function openNewPoiModal(lon = null, lat = null) {
-      editingPoiIndex = -1;
-      document.getElementById('modalPoiTitle').innerText = "Nuevo POI Especial";
-      document.getElementById('poi_id').value = "AIR_Nuevo";
-      document.getElementById('poi_name_es').value = "";
-      document.getElementById('poi_name_en').value = "";
-      document.getElementById('poi_jobs').value = 5000;
-      document.getElementById('poi_radius').value = 750;
-      document.getElementById('poi_mode').value = "MAX";
-      document.getElementById('btnDeletePoi').classList.add('hidden');
+    // Toponimia y Colonias (places)
+    function renderPlacesList() {
+      const places = cityData.places || [];
+      const badge = document.getElementById('placesCountBadge');
+      if (badge) badge.innerText = `${places.length} colonias`;
+      const cont = document.getElementById('placesListContainer');
+      if (!cont) return;
+      cont.innerHTML = '';
 
-      const center = lon && lat ? { lng: lon, lat: lat } : (mapPoi ? mapPoi.getCenter() : { lng: -86.85, lat: 21.16 });
-      document.getElementById('poi_loc_lon').value = center.lng.toFixed(5);
-      document.getElementById('poi_loc_lat').value = center.lat.toFixed(5);
+      if (places.length === 0) {
+        cont.innerHTML = `
+          <div class="p-6 text-center text-metro-muted text-xs bg-metro-panel/50 rounded-lg border border-metro-border">
+            <span>No hay colonias asignadas. Usa 'Sugerencias' para detectarlas automáticamente.</span>
+          </div>
+        `;
+        return;
+      }
 
-      document.getElementById('modalPoi').classList.remove('hidden');
+      places.forEach((pl, idx) => {
+        const row = document.createElement('div');
+        row.className = "p-2 bg-metro-panel border border-metro-border rounded-lg text-xs flex items-center justify-between space-x-2";
+        row.innerHTML = `
+          <div class="flex items-center space-x-2 flex-1">
+            <span class="w-2 h-2 rounded-full bg-sky-500 shrink-0"></span>
+            <input type="text" value="${pl.name || ''}" onchange="updatePlaceName(${idx}, this.value)" class="w-full text-xs font-bold text-metro-text bg-metro-card px-2 py-1 rounded border border-metro-border">
+          </div>
+          <select onchange="updatePlaceType(${idx}, this.value)" class="text-[11px] bg-metro-card border border-metro-border rounded px-1.5 py-1 text-metro-muted shrink-0">
+            <option value="suburb" ${pl.type === 'suburb' ? 'selected' : ''}>suburb</option>
+            <option value="quarter" ${pl.type === 'quarter' ? 'selected' : ''}>quarter</option>
+            <option value="neighbourhood" ${pl.type === 'neighbourhood' ? 'selected' : ''}>neighbourhood</option>
+          </select>
+          <button onclick="deletePlaceByIndex(${idx})" class="text-metro-muted hover:text-rose-600 p-1 shrink-0" title="Eliminar colonia">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+          </button>
+        `;
+        cont.appendChild(row);
+      });
+      lucide.createIcons();
     }
 
-    function openEditPoiModal(idx) {
-      editingPoiIndex = idx;
-      const poi = cityData.pois[idx];
-      document.getElementById('modalPoiTitle').innerText = `Editar POI: ${poi.id}`;
-      document.getElementById('poi_id').value = poi.id || "";
-      document.getElementById('poi_name_es').value = typeof poi.name === 'object' ? (poi.name.es || "") : (poi.name || "");
-      document.getElementById('poi_name_en').value = typeof poi.name === 'object' ? (poi.name.en || "") : "";
-      document.getElementById('poi_type').value = poi.type || "airport";
-      document.getElementById('poi_mode').value = poi.mode || "MAX";
-      document.getElementById('poi_jobs').value = poi.jobs || 5000;
-      document.getElementById('poi_radius').value = poi.radius_m || 750;
-      document.getElementById('poi_loc_lon').value = poi.loc ? poi.loc[0] : 0;
-      document.getElementById('poi_loc_lat').value = poi.loc ? poi.loc[1] : 0;
-      document.getElementById('btnDeletePoi').classList.remove('hidden');
-
-      document.getElementById('modalPoi').classList.remove('hidden');
+    function updatePlaceName(idx, val) {
+      if (cityData.places && cityData.places[idx]) {
+        cityData.places[idx].name = val;
+        triggerAutoSave();
+      }
+    }
+    function updatePlaceType(idx, val) {
+      if (cityData.places && cityData.places[idx]) {
+        cityData.places[idx].type = val;
+        triggerAutoSave();
+      }
+    }
+    function deletePlaceByIndex(idx) {
+      if (cityData.places) {
+        cityData.places.splice(idx, 1);
+        renderPlacesList();
+        triggerAutoSave();
+      }
+    }
+    function addNewPlaceRow() {
+      if (!cityData.places) cityData.places = [];
+      const center = mapPoi ? mapPoi.getCenter() : { lng: -86.85, lat: 21.16 };
+      cityData.places.push({
+        name: "Nueva Colonia",
+        loc: [parseFloat(center.lng.toFixed(5)), parseFloat(center.lat.toFixed(5))],
+        type: "suburb"
+      });
+      renderPlacesList();
+      triggerAutoSave();
+    }
+    async function requestSettlementSuggestions() {
+      showToast("Extrayendo sugerencias de colonias desde DENUE y Censo...", "info");
+      try {
+        const res = await fetch(`/api/settlement_suggestions?file=${encodeURIComponent(currentCityFile)}`);
+        const data = await res.json();
+        if (data.status === 'ok' && data.suggestions && data.suggestions.length > 0) {
+          if (!cityData.places) cityData.places = [];
+          let added = 0;
+          data.suggestions.slice(0, 15).forEach(s => {
+            if (!cityData.places.some(p => p.name.toLowerCase() === s.name.toLowerCase())) {
+              cityData.places.push({
+                name: s.name,
+                loc: s.loc,
+                type: s.type || 'suburb'
+              });
+              added++;
+            }
+          });
+          renderPlacesList();
+          triggerAutoSave();
+          showToast(`Se incorporaron ${added} colonias sugeridas`, "success");
+        } else {
+          showToast("No se encontraron sugerencias adicionales", "info");
+        }
+      } catch (e) {
+        showToast(`Error al consultar sugerencias: ${e.message}`, "error");
+      }
     }
 
-    function closePoiModal() {
-      document.getElementById('modalPoi').classList.add('hidden');
+    // Demanda y Box Selection
+    let densityLoadedCityFile = null;
+
+    async function loadDemandDensityForPoi(force = false) {
+      if (!force && densityLoadedCityFile === currentCityFile && densityPoints && densityPoints.length > 0) return;
+      try {
+        densityLoadedCityFile = currentCityFile;
+        const res = await fetch(`/api/density?file=${encodeURIComponent(currentCityFile)}`);
+        const data = await res.json();
+        densityPoints = data.points || [];
+        updatePoiPreviewFromForm();
+      } catch (e) {
+        console.warn("No se pudo precargar densidad para POI Studio:", e);
+      }
     }
 
-    function submitPoiModal() {
-      const pId = document.getElementById('poi_id').value.trim();
-      const esName = document.getElementById('poi_name_es').value.trim();
-      const enName = document.getElementById('poi_name_en').value.trim();
-      const pType = document.getElementById('poi_type').value;
-      const pMode = document.getElementById('poi_mode').value;
-      const pJobs = parseInt(document.getElementById('poi_jobs').value) || 5000;
-      const pRad = parseInt(document.getElementById('poi_radius').value) || 750;
-      const lon = parseFloat(document.getElementById('poi_loc_lon').value) || 0;
-      const lat = parseFloat(document.getElementById('poi_loc_lat').value) || 0;
+    function toggleDensityLayer(type) {
+      if (!mapPoi) return;
+      loadDemandDensityForPoi().then(() => {
+        if (type === 'jobs') {
+          if (densityLayers.jobs) {
+            mapPoi.removeLayer(densityLayers.jobs);
+            densityLayers.jobs = null;
+            document.getElementById('btnToggleDensityJobs')?.classList.remove('bg-rose-500/30', 'border-rose-500');
+          } else {
+            densityLayers.jobs = L.layerGroup();
+            densityPoints.filter(p => p.jobs > 0).forEach(p => {
+              const r = Math.min(18, Math.max(3.5, Math.sqrt(p.jobs) * 0.45));
+              const circle = L.circleMarker([p.location[1], p.location[0]], {
+                radius: r,
+                color: '#e11d48',
+                weight: 1.5,
+                fillColor: '#f43f5e',
+                fillOpacity: 0.45
+              });
 
-      const poiObj = {
-        id: pId,
-        name: enName ? { es: esName || pId, en: enName } : (esName || pId),
-        type: pType,
-        mode: pMode,
-        jobs: pJobs,
-        radius_m: pRad,
-        loc: [lon, lat]
+              circle.bindTooltip(`
+                <div class="p-2 text-xs font-sans">
+                  <div class="font-bold flex items-center space-x-1.5 text-rose-700">
+                    <span class="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block shrink-0"></span>
+                    <span>Nodo de Empleo (DENUE)</span>
+                  </div>
+                  <div class="mt-1 text-stone-900 font-mono font-bold text-sm">
+                    ${(p.jobs || 0).toLocaleString()} <span class="text-xs font-normal text-stone-600">empleos estimados</span>
+                  </div>
+                  <div class="text-[10px] text-stone-500 mt-0.5">
+                    Establecimientos comerciales y económicos
+                  </div>
+                  <div class="mt-1.5 text-[10px] text-metro-orange font-semibold flex items-center space-x-1 border-t border-stone-200/80 pt-1">
+                    <span>📍 Clic para colocar POI aquí</span>
+                  </div>
+                </div>
+              `, {
+                direction: 'top',
+                sticky: true,
+                className: 'poi-custom-tooltip'
+              });
+
+              circle.on('click', (e) => {
+                L.DomEvent.stopPropagation(e);
+                if (isBoxSelectActive) return;
+                const editorTab = document.getElementById('poiTab-editor');
+                const isEditorOpen = editorTab && !editorTab.classList.contains('hidden');
+                if (isEditorOpen) {
+                  document.getElementById('editPoiLon').value = p.location[0].toFixed(5);
+                  document.getElementById('editPoiLat').value = p.location[1].toFixed(5);
+                  updatePoiPreviewFromForm();
+                } else {
+                  openPoiEditorForNew({ lng: p.location[0], lat: p.location[1] });
+                }
+              });
+
+              circle.addTo(densityLayers.jobs);
+            });
+            densityLayers.jobs.addTo(mapPoi);
+            document.getElementById('btnToggleDensityJobs')?.classList.add('bg-rose-500/30', 'border-rose-500');
+          }
+        } else if (type === 'pop') {
+          if (densityLayers.pop) {
+            mapPoi.removeLayer(densityLayers.pop);
+            densityLayers.pop = null;
+            document.getElementById('btnToggleDensityPop')?.classList.remove('bg-blue-500/30', 'border-blue-500');
+          } else {
+            densityLayers.pop = L.layerGroup();
+            densityPoints.filter(p => p.residents > 0).forEach(p => {
+              const r = Math.min(18, Math.max(3.5, Math.sqrt(p.residents) * 0.45));
+              const circle = L.circleMarker([p.location[1], p.location[0]], {
+                radius: r,
+                color: '#0284c7',
+                weight: 1.5,
+                fillColor: '#38bdf8',
+                fillOpacity: 0.45
+              });
+
+              circle.bindTooltip(`
+                <div class="p-2 text-xs font-sans">
+                  <div class="font-bold flex items-center space-x-1.5 text-blue-700">
+                    <span class="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block shrink-0"></span>
+                    <span>Nodo Residencial (Censo CPV)</span>
+                  </div>
+                  <div class="mt-1 text-stone-900 font-mono font-bold text-sm">
+                    ${(p.residents || 0).toLocaleString()} <span class="text-xs font-normal text-stone-600">habitantes / PEA</span>
+                  </div>
+                  <div class="text-[10px] text-stone-500 mt-0.5">
+                    Población censal por manzana urbana
+                  </div>
+                  <div class="mt-1.5 text-[10px] text-metro-orange font-semibold flex items-center space-x-1 border-t border-stone-200/80 pt-1">
+                    <span>📍 Clic para colocar POI aquí</span>
+                  </div>
+                </div>
+              `, {
+                direction: 'top',
+                sticky: true,
+                className: 'poi-custom-tooltip'
+              });
+
+              circle.on('click', (e) => {
+                L.DomEvent.stopPropagation(e);
+                if (isBoxSelectActive) return;
+                const editorTab = document.getElementById('poiTab-editor');
+                const isEditorOpen = editorTab && !editorTab.classList.contains('hidden');
+                if (isEditorOpen) {
+                  document.getElementById('editPoiLon').value = p.location[0].toFixed(5);
+                  document.getElementById('editPoiLat').value = p.location[1].toFixed(5);
+                  updatePoiPreviewFromForm();
+                } else {
+                  openPoiEditorForNew({ lng: p.location[0], lat: p.location[1] });
+                }
+              });
+
+              circle.addTo(densityLayers.pop);
+            });
+            densityLayers.pop.addTo(mapPoi);
+            document.getElementById('btnToggleDensityPop')?.classList.add('bg-blue-500/30', 'border-blue-500');
+          }
+        }
+      });
+    }
+
+    function toggleBoxSelectMode() {
+      isBoxSelectActive = !isBoxSelectActive;
+      const btn = document.getElementById('btnToggleBoxSelect');
+      if (btn) {
+        btn.classList.toggle('bg-amber-600/30', isBoxSelectActive);
+        btn.classList.toggle('border-amber-600', isBoxSelectActive);
+      }
+
+      if (isBoxSelectActive) {
+        mapPoi.dragging.disable();
+        mapPoi.getContainer().style.cursor = 'crosshair';
+        showToast("Arrastra sobre el mapa para medir empleos y población en el área", "info");
+      } else {
+        mapPoi.dragging.enable();
+        mapPoi.getContainer().style.cursor = '';
+      }
+    }
+
+    function setupBoxSelectionForPoi() {
+      if (!mapPoi) return;
+
+      mapPoi.on('mousedown', (e) => {
+        if (isBoxSelectActive || e.originalEvent.shiftKey) {
+          isMouseDownForBox = true;
+          boxStartLatLng = e.latlng;
+          mapPoi.dragging.disable();
+          if (boxSelectionLayer) {
+            mapPoi.removeLayer(boxSelectionLayer);
+            boxSelectionLayer = null;
+          }
+        }
+      });
+
+      mapPoi.on('mousemove', (e) => {
+        if (isMouseDownForBox && boxStartLatLng) {
+          const bounds = L.latLngBounds(boxStartLatLng, e.latlng);
+          if (!boxSelectionLayer) {
+            boxSelectionLayer = L.rectangle(bounds, {
+              color: '#d97706',
+              weight: 2,
+              dashArray: '4, 4',
+              fillColor: '#f59e0b',
+              fillOpacity: 0.2
+            }).addTo(mapPoi);
+          } else {
+            boxSelectionLayer.setBounds(bounds);
+          }
+          calculateBoxStats(bounds);
+        }
+      });
+
+      mapPoi.on('mouseup', (e) => {
+        if (isMouseDownForBox) {
+          isMouseDownForBox = false;
+          if (!isBoxSelectActive && !e.originalEvent.shiftKey) {
+            mapPoi.dragging.enable();
+          }
+        }
+      });
+
+      mapPoi.on('click', (e) => {
+        if (isBoxSelectActive) return;
+
+        isPickingLocation = false;
+        mapPoi.getContainer().style.cursor = '';
+
+        const editorTab = document.getElementById('poiTab-editor');
+        const isEditorOpen = editorTab && !editorTab.classList.contains('hidden');
+
+        if (isEditorOpen) {
+          // Si el editor está abierto, actualizar las coordenadas del POI en edición
+          document.getElementById('editPoiLon').value = e.latlng.lng.toFixed(5);
+          document.getElementById('editPoiLat').value = e.latlng.lat.toFixed(5);
+          updatePoiPreviewFromForm();
+        } else {
+          // Al hacer clic en cualquier punto del mapa, colocar un nuevo POI Especial allí
+          openPoiEditorForNew(e.latlng);
+        }
+      });
+    }
+
+    function calculateBoxStats(bounds) {
+      let totalJobs = 0;
+      let totalPop = 0;
+      let count = 0;
+
+      densityPoints.forEach(p => {
+        if (bounds.contains([p.location[1], p.location[0]])) {
+          totalJobs += (p.jobs || 0);
+          totalPop += (p.residents || 0);
+          count++;
+        }
+      });
+
+      const sw = bounds.getSouthWest();
+      const ne = bounds.getNorthEast();
+      const widthKm = (ne.lng - sw.lng) * 111.32 * Math.cos((sw.lat + ne.lat) / 2 * Math.PI / 180);
+      const heightKm = (ne.lat - sw.lat) * 110.57;
+      const areaKm2 = Math.max(0.01, Math.abs(widthKm * heightKm));
+
+      currentAreaStats = {
+        bounds: bounds,
+        center: bounds.getCenter(),
+        areaKm2: areaKm2,
+        jobs: totalJobs,
+        pop: totalPop,
+        nodes: count
       };
 
-      if (!cityData.pois) cityData.pois = [];
-      if (editingPoiIndex >= 0) {
-        cityData.pois[editingPoiIndex] = poiObj;
-      } else {
-        cityData.pois.push(poiObj);
-      }
-
-      closePoiModal();
-      renderPoiList();
-      renderPoiMarkersOnMap();
-      triggerAutoSave();
-      showToast("POI guardado", "success");
+      document.getElementById('measJobs').innerText = totalJobs.toLocaleString();
+      document.getElementById('measPop').innerText = totalPop.toLocaleString();
+      document.getElementById('measNodes').innerText = count.toLocaleString();
+      document.getElementById('measArea').innerText = `${areaKm2.toFixed(2)} km²`;
+      document.getElementById('areaMeasureHud').classList.remove('hidden');
     }
 
-    function deleteCurrentPoiModal() {
-      if (editingPoiIndex >= 0) {
-        cityData.pois.splice(editingPoiIndex, 1);
-        closePoiModal();
-        renderPoiList();
-        renderPoiMarkersOnMap();
-        triggerAutoSave();
-        showToast("POI eliminado", "info");
+    function clearAreaSelection() {
+      if (boxSelectionLayer && mapPoi) {
+        mapPoi.removeLayer(boxSelectionLayer);
+        boxSelectionLayer = null;
       }
+      document.getElementById('areaMeasureHud').classList.add('hidden');
+      if (isBoxSelectActive) toggleBoxSelectMode();
+    }
+
+    function createPoiFromBoxSelection() {
+      if (!currentAreaStats) return;
+      const center = currentAreaStats.center;
+      const suggestedRadius = Math.min(3000, Math.max(500, Math.round(Math.sqrt((currentAreaStats.areaKm2 * 1000000) / Math.PI))));
+      const suggestedJobs = Math.max(3000, currentAreaStats.jobs);
+
+      openPoiEditorForNew();
+      document.getElementById('editPoiId').value = "POI_Cluster_Area";
+      document.getElementById('editPoiNameEs').value = "Cluster Comercial";
+      document.getElementById('editPoiLon').value = center.lng.toFixed(5);
+      document.getElementById('editPoiLat').value = center.lat.toFixed(5);
+      document.getElementById('editPoiRadius').value = suggestedRadius;
+      document.getElementById('editPoiRadiusDisplay').innerText = `${suggestedRadius} m`;
+      document.getElementById('editPoiJobs').value = suggestedJobs;
+
+      clearAreaSelection();
+      updatePoiPreviewFromForm();
+      showToast("POI inicializado con la masa económica del área seleccionada", "success");
     }
 
     // -------------------------------------------------------------------------
@@ -1799,32 +3464,60 @@
             if (btnIcon) btnIcon.setAttribute('data-lucide', 'play');
             if (btnResults) btnResults.classList.remove('hidden');
 
-            document.getElementById('buildProgressBar').className = "h-full bg-emerald-500 w-full transition-all duration-300";
-            document.getElementById('buildStepLabel').innerHTML = `<span class="text-emerald-400 font-bold">✨ ¡Compilación Completada Exitosamente!</span>`;
+            const btnDl = document.getElementById('btnDownloadZipStep5');
+            if (btnDl) {
+              const zipName = (currentCityData && currentCityData.city && currentCityData.city.code) 
+                ? `${currentCityData.city.code}.zip` 
+                : `${currentCityFile.replace(/.*\//, '').replace('.yaml', '')}.zip`;
+              btnDl.href = `/api/download?file=${encodeURIComponent(zipName)}`;
+              btnDl.classList.remove('hidden');
+            }
 
-            if (statusBadge) statusBadge.className = "flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-mono bg-emerald-950/60 text-emerald-300 border border-emerald-800";
+            document.getElementById('buildProgressBar').className = "h-full bg-emerald-500 w-full transition-all duration-300";
+            document.getElementById('buildStepLabel').innerHTML = `<span class="text-emerald-400 font-bold">✨ ¡Compilación y Empaquetado Completados!</span>`;
+
+            if (statusBadge) statusBadge.className = "flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-mono bg-emerald-100 text-emerald-900 border border-emerald-300";
             if (statusText) statusText.innerText = "Listo";
 
-            showToast("¡Compilación finalizada! Haz clic en 'Ver Demanda' para revisar los resultados.", "success");
+            showToast("¡Compilación finalizada! Ya puedes descargar tu archivo .zip.", "success");
             lucide.createIcons();
           }
         } catch (err) {}
       };
     }
 
+    async function checkSystemHealth() {
+      try {
+        const res = await fetch('/api/system-check');
+        const data = await res.json();
+        const badge = document.getElementById('wslStatusBadge');
+        if (!badge) return;
+
+        if (data.wsl_ready) {
+          badge.className = "text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center space-x-1.5";
+          badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> <span>WSL 2 + MapGen Listo</span>`;
+        } else {
+          badge.className = "text-[11px] px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center space-x-1.5";
+          badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> <span>WSL No Detectado (Modo Demanda)</span>`;
+        }
+      } catch (e) {}
+    }
+
     async function startBuild() {
       const skipMap = document.getElementById('chkSkipMap').checked;
       const btn = document.getElementById('btnStartBuild');
       const btnResults = document.getElementById('btnGoToResults');
+      const btnDl = document.getElementById('btnDownloadZipStep5');
       btn.disabled = true;
       btn.classList.add('opacity-50', 'cursor-not-allowed');
       if (btnResults) btnResults.classList.add('hidden');
+      if (btnDl) btnDl.classList.add('hidden');
 
       document.getElementById('buildProgressBar').className = "h-full bg-gradient-to-r from-metro-orange via-metro-green to-metro-pink w-0 transition-all duration-300";
       document.getElementById('buildStepLabel').innerText = "Fase: Iniciando Pipeline...";
       document.getElementById('buildPercentLabel').innerText = "0%";
       document.getElementById('buildStatusText').innerText = "Compilando...";
-      document.getElementById('buildStatusBadge').className = "flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-mono bg-gray-800 text-gray-300 border border-gray-700";
+      document.getElementById('buildStatusBadge').className = "flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-mono bg-metro-card text-metro-text border border-metro-border shadow-sm";
 
       showToast("Iniciando pipeline de compilación...", "info");
 
@@ -1891,22 +3584,48 @@
           totalJobs += (pt.jobs || 0);
 
           if (pt.residents > 0) {
-            L.circleMarker(latLng, {
+            const resCircle = L.circleMarker(latLng, {
               radius: Math.min(8, Math.max(3, Math.sqrt(pt.residents) * 0.8)),
-              color: '#3B82F6',
-              fillColor: '#60A5FA',
+              color: '#0284c7',
+              fillColor: '#38bdf8',
               fillOpacity: 0.6,
               weight: 1
-            }).addTo(demandLayers.residents);
+            });
+            resCircle.bindTooltip(`
+              <div class="p-2 text-xs font-sans">
+                <div class="font-bold flex items-center space-x-1.5 text-blue-700">
+                  <span class="w-2 h-2 rounded-full bg-blue-500 inline-block shrink-0"></span>
+                  <span>Demanda Residencial (Origen)</span>
+                </div>
+                <div class="mt-1 text-stone-900 font-mono font-bold text-sm">
+                  ${(pt.residents || 0).toLocaleString()} <span class="text-xs font-normal text-stone-600">habitantes (PEA)</span>
+                </div>
+                <div class="text-[10px] text-stone-500 mt-0.5">Población económicamente activa proyectada</div>
+              </div>
+            `, { direction: 'top', sticky: true, className: 'poi-custom-tooltip' });
+            resCircle.addTo(demandLayers.residents);
           }
           if (pt.jobs > 0) {
-            L.circleMarker(latLng, {
+            const jobCircle = L.circleMarker(latLng, {
               radius: Math.min(8, Math.max(3, Math.sqrt(pt.jobs) * 0.8)),
-              color: '#EF4444',
-              fillColor: '#F87171',
+              color: '#e11d48',
+              fillColor: '#f43f5e',
               fillOpacity: 0.6,
               weight: 1
-            }).addTo(demandLayers.jobs);
+            });
+            jobCircle.bindTooltip(`
+              <div class="p-2 text-xs font-sans">
+                <div class="font-bold flex items-center space-x-1.5 text-rose-700">
+                  <span class="w-2 h-2 rounded-full bg-rose-500 inline-block shrink-0"></span>
+                  <span>Atracción Laboral (Destino)</span>
+                </div>
+                <div class="mt-1 text-stone-900 font-mono font-bold text-sm">
+                  ${(pt.jobs || 0).toLocaleString()} <span class="text-xs font-normal text-stone-600">empleos</span>
+                </div>
+                <div class="text-[10px] text-stone-500 mt-0.5">Establecimientos y actividad económica DENUE / CE</div>
+              </div>
+            `, { direction: 'top', sticky: true, className: 'poi-custom-tooltip' });
+            jobCircle.addTo(demandLayers.jobs);
           }
         });
 
