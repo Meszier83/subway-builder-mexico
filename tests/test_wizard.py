@@ -231,5 +231,48 @@ class TestWizard(unittest.TestCase):
             if os.path.exists(tmp_city):
                 os.remove(tmp_city)
 
+    def test_poi_saving_and_serialization(self):
+        """Verifica que el wizard guarde POIs con nombres simples y bilingües correctamente."""
+        tmp_city = os.path.join(os.path.dirname(__file__), "tmp_poi_test.yaml")
+        data = {
+            "city": {
+                "name": "Test POIs",
+                "code": "TPO",
+                "bbox": [-86.9, 21.1, -86.8, 21.2]
+            },
+            "pois": [
+                {
+                    "id": "AIR_Cancún",
+                    "name": "Cancún",
+                    "type": "air",
+                    "mode": "MAX",
+                    "jobs": 25000,
+                    "radius_m": 2500,
+                    "loc": [-86.87, 21.04]
+                },
+                {
+                    "id": "UNI_Universidad del Caribe",
+                    "name": {"es": "Universidad del Caribe", "en": "Caribbean University"},
+                    "type": "uni",
+                    "mode": "MAX",
+                    "jobs": 12000,
+                    "radius_m": 800,
+                    "loc": [-86.82, 21.20]
+                }
+            ]
+        }
+        try:
+            saved_path = save_full_city_data(tmp_city, data)
+            reloaded = load_city_data(saved_path)
+            pois = reloaded.get("pois", [])
+            self.assertEqual(len(pois), 2)
+            self.assertEqual(pois[0]["id"], "AIR_Cancún")
+            self.assertEqual(pois[0]["name"], "Cancún")
+            self.assertEqual(pois[1]["id"], "UNI_Universidad del Caribe")
+            self.assertEqual(pois[1]["name"]["en"], "Caribbean University")
+        finally:
+            if os.path.exists(tmp_city):
+                os.remove(tmp_city)
+
 if __name__ == '__main__':
     unittest.main()

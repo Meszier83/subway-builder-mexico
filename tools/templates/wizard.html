@@ -739,21 +739,54 @@
           </div>
 
           <div class="space-y-1">
-            <label class="text-[10px] font-bold uppercase tracking-wider text-stone-500">Identificador (ID Único)</label>
-            <input type="text" id="editPoiId" oninput="updatePoiPreviewFromForm()" placeholder="AIR_Cancún" class="w-full text-xs font-mono font-bold bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900">
-            <p class="text-[10px] text-stone-500">Para universidades y estadios usa nombres legibles con espacios (ej. UNI_Universidad del Caribe).</p>
+            <div class="flex justify-between items-center">
+              <label class="text-[10px] font-bold uppercase tracking-wider text-stone-500">Nombre / Identificador</label>
+              <span id="poiIdFullPreview" class="font-mono text-[10px] text-stone-400 font-bold"></span>
+            </div>
+            <div class="flex rounded-lg border border-stone-300 overflow-hidden focus-within:ring-2 focus-within:ring-metro-orange/50 focus-within:border-metro-orange bg-white shadow-xs">
+              <span id="poiPrefixBadge" class="bg-stone-100 text-stone-700 px-2.5 py-1.5 text-xs font-mono font-bold border-r border-stone-300 select-none flex items-center shrink-0">
+                AIR_
+              </span>
+              <input type="text" id="editPoiBaseName" oninput="onPoiBaseNameChanged()" placeholder="Cancún" class="w-full text-xs font-medium px-2.5 py-1.5 text-stone-900 focus:outline-none">
+            </div>
+            <input type="hidden" id="editPoiId">
+
+            <!-- Previsualización en vivo en el juego -->
+            <div id="poiGameDisplayBanner" class="p-2 bg-stone-100 rounded-lg text-[11px] flex items-center justify-between border border-stone-200">
+              <div class="flex items-center space-x-1.5 truncate">
+                <span class="text-stone-500 text-[10px] uppercase font-bold tracking-wider shrink-0">En el juego:</span>
+                <strong id="poiGameDisplayName" class="text-stone-900 truncate font-sans">✈️ Cancún Terminal</strong>
+              </div>
+              <span id="poiGameBehaviorTag" class="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-white text-stone-700 border border-stone-300 shrink-0">24/7 (dampening 0.5)</span>
+            </div>
+
+            <!-- Sugerencia / Tip si escribe redundancias -->
+            <p id="poiRedundancyWarning" class="hidden text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 flex items-center space-x-1.5">
+              <i data-lucide="info" class="w-3.5 h-3.5 shrink-0 text-amber-600"></i>
+              <span>El motor añade automáticamente "Terminal". Se recomienda escribir solo el nombre de la ciudad o terminal (ej. <em>Cancún</em>).</span>
+            </p>
           </div>
 
-          <div class="grid grid-cols-2 gap-2">
-            <div class="space-y-1">
-              <label class="text-[10px] font-bold uppercase tracking-wider text-stone-500">Nombre Español</label>
-              <input type="text" id="editPoiNameEs" placeholder="Nombre en español" class="w-full text-xs bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900">
+          <!-- Opciones Avanzadas de Localización (Colapsable) -->
+          <details class="group rounded-lg border border-stone-200 bg-stone-50/60 text-xs overflow-hidden">
+            <summary class="flex items-center justify-between px-3 py-1.5 cursor-pointer font-bold text-stone-600 hover:text-stone-900 select-none text-[11px]">
+              <span class="flex items-center space-x-1.5">
+                <i data-lucide="globe" class="w-3.5 h-3.5 text-stone-500"></i>
+                <span>Nombres Traducidos (Opcional)</span>
+              </span>
+              <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-stone-400 group-open:rotate-180 transition-transform"></i>
+            </summary>
+            <div class="p-2.5 pt-1.5 space-y-2 border-t border-stone-200/80 bg-white">
+              <div class="space-y-1">
+                <label class="text-[9px] font-bold uppercase tracking-wider text-stone-400">Nombre Español (si difiere del ID)</label>
+                <input type="text" id="editPoiNameEs" oninput="updatePoiPreviewFromForm()" placeholder="Nombre en español" class="w-full text-xs bg-white border border-stone-300 rounded-lg px-2 py-1 text-stone-900">
+              </div>
+              <div class="space-y-1">
+                <label class="text-[9px] font-bold uppercase tracking-wider text-stone-400">Nombre Inglés (English Name)</label>
+                <input type="text" id="editPoiNameEn" oninput="updatePoiPreviewFromForm()" placeholder="Cancun International Airport" class="w-full text-xs bg-white border border-stone-300 rounded-lg px-2 py-1 text-stone-900">
+              </div>
             </div>
-            <div class="space-y-1">
-              <label class="text-[10px] font-bold uppercase tracking-wider text-stone-500">Nombre Inglés (Opcional)</label>
-              <input type="text" id="editPoiNameEn" placeholder="English name" class="w-full text-xs bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900">
-            </div>
-          </div>
+          </details>
 
           <div class="space-y-1">
             <div class="flex justify-between items-center">
@@ -1695,6 +1728,8 @@
       mapPoi = L.map('mapPoi', { ...mapOptions, layers: [b2.baseMapDefault] }).setView([21.16, -86.85], 11);
       L.control.layers(b2.layerControl, null, { position: 'topright' }).addTo(mapPoi);
       poiMarkersGroup = L.layerGroup().addTo(mapPoi);
+      mapPoi.on('mousemove', (e) => { lastMapMouseLatLng = e.latlng; });
+      mapPoi.on('mouseout', () => { lastMapMouseLatLng = null; });
 
       setupBoxSelectionForPoi();
 
@@ -2520,16 +2555,138 @@
     let isMouseDownForBox = false;
     let currentAreaStats = null;
     let editorPreviewLayer = null;
+    let lastMapMouseLatLng = null;
 
     const TAXONOMY_META = {
-      AIR: { prefix: 'AIR_', label: 'Aeropuerto', defaultRadius: 2500, defaultJobs: 25000, color: '#C80068', icon: 'plane' },
-      UNI: { prefix: 'UNI_', label: 'Universidad', defaultRadius: 800, defaultJobs: 12000, color: '#007A54', icon: 'graduation-cap' },
-      SPO: { prefix: 'SPO_', label: 'Estadio / Arena', defaultRadius: 800, defaultJobs: 15000, color: '#D95F18', icon: 'trophy' },
-      TOU: { prefix: 'TOU_', label: 'Atractor Turístico', defaultRadius: 600, defaultJobs: 8000, color: '#b45309', icon: 'sun' },
-      MED: { prefix: 'MED_', label: 'Hospital / Complejo', defaultRadius: 700, defaultJobs: 6000, color: '#dc2626', icon: 'cross' },
-      TRA: { prefix: 'TRA_', label: 'Terminal / Central', defaultRadius: 1000, defaultJobs: 18000, color: '#0284c7', icon: 'train' },
-      CUSTOM: { prefix: '', label: 'General / Comercial', defaultRadius: 750, defaultJobs: 5000, color: '#4f46e5', icon: 'building' }
+      AIR: { prefix: 'AIR_', label: 'Aeropuerto', defaultRadius: 2500, defaultJobs: 25000, color: '#C80068', icon: 'plane', behavior: '24/7 (dampening 0.5)' },
+      UNI: { prefix: 'UNI_', label: 'Universidad', defaultRadius: 800, defaultJobs: 12000, color: '#007A54', icon: 'graduation-cap', behavior: 'Estudiantil (dampening 0.3)' },
+      SPO: { prefix: 'SPO_', label: 'Estadio / Arena', defaultRadius: 800, defaultJobs: 15000, color: '#D95F18', icon: 'trophy', behavior: 'Eventos masivos' },
+      TOU: { prefix: 'TOU_', label: 'Atractor Turístico', defaultRadius: 600, defaultJobs: 8000, color: '#b45309', icon: 'sun', behavior: 'Flujo turístico' },
+      MED: { prefix: 'MED_', label: 'Hospital / Complejo', defaultRadius: 700, defaultJobs: 6000, color: '#dc2626', icon: 'cross', behavior: 'Servicio 24h' },
+      TRA: { prefix: 'TRA_', label: 'Terminal / Central', defaultRadius: 1000, defaultJobs: 18000, color: '#0284c7', icon: 'train', behavior: 'Conexión intermodal' },
+      CUSTOM: { prefix: '', label: 'General / Comercial', defaultRadius: 750, defaultJobs: 5000, color: '#4f46e5', icon: 'building', behavior: 'Demanda general' }
     };
+
+    let copiedPoiBuffer = null;
+
+    function decomposePoiId(fullId) {
+      if (!fullId) return { taxonomy: 'CUSTOM', baseName: '' };
+      for (let k of ['AIR', 'UNI', 'SPO', 'TOU', 'MED', 'TRA']) {
+        if (fullId.startsWith(k + '_')) {
+          return { taxonomy: k, baseName: fullId.substring((k + '_').length) };
+        }
+      }
+      return { taxonomy: 'CUSTOM', baseName: fullId };
+    }
+
+    function generateUniquePoiId(baseId) {
+      if (!cityData || !cityData.pois) return baseId + '_2';
+      const existingIds = new Set(cityData.pois.map(p => p.id));
+      let candidate = baseId + '_copia';
+      if (!existingIds.has(candidate)) return candidate;
+
+      let counter = 2;
+      while (existingIds.has(`${baseId}_${counter}`)) {
+        counter++;
+      }
+      return `${baseId}_${counter}`;
+    }
+
+    function duplicatePoiByIndex(idx) {
+      if (!cityData || !cityData.pois || !cityData.pois[idx]) return;
+      const src = cityData.pois[idx];
+      const cloned = JSON.parse(JSON.stringify(src));
+
+      cloned.id = generateUniquePoiId(src.id);
+      if (typeof cloned.name === 'string') {
+        cloned.name = `${cloned.name} (Copia)`;
+      } else if (cloned.name && typeof cloned.name === 'object') {
+        if (cloned.name.es) cloned.name.es = `${cloned.name.es} (Copia)`;
+        if (cloned.name.en) cloned.name.en = `${cloned.name.en} (Copy)`;
+      }
+
+      // Si el mapa está disponible, verificar si la posición original está dentro de la vista actual
+      if (mapPoi) {
+        const bounds = mapPoi.getBounds();
+        const srcLatLng = L.latLng(src.loc[1], src.loc[0]);
+        if (bounds.contains(srcLatLng)) {
+          // El POI original está a la vista: clonar a un lado (+250m)
+          cloned.loc = [parseFloat((src.loc[0] + 0.0025).toFixed(5)), parseFloat((src.loc[1] + 0.0025).toFixed(5))];
+        } else {
+          // El usuario se desplazó a otra zona: clonar en el centro de la pantalla actual
+          const center = mapPoi.getCenter();
+          cloned.loc = [parseFloat(center.lng.toFixed(5)), parseFloat(center.lat.toFixed(5))];
+        }
+      } else if (cloned.loc && cloned.loc.length === 2) {
+        cloned.loc[0] = parseFloat((cloned.loc[0] + 0.0025).toFixed(5));
+        cloned.loc[1] = parseFloat((cloned.loc[1] + 0.0025).toFixed(5));
+      }
+
+      cityData.pois.push(cloned);
+      const newIdx = cityData.pois.length - 1;
+      renderPoiList();
+      renderPoiMarkersOnMap();
+      openPoiEditor(newIdx);
+      // No llamar a focusPoiOnMap para evitar saltos o sacudidas de cámara
+      triggerAutoSave();
+      showToast(`📋 POI duplicado como '${cloned.id}'`, "success");
+    }
+
+    async function copyPoiByIndex(idx) {
+      if (!cityData || !cityData.pois || !cityData.pois[idx]) return;
+      const poi = cityData.pois[idx];
+      copiedPoiBuffer = JSON.parse(JSON.stringify(poi));
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(poi, null, 2));
+      } catch (err) {}
+      showToast(`📋 POI '${poi.id}' copiado al portapapeles`, "info");
+    }
+
+    async function pastePoi() {
+      let poiToPaste = copiedPoiBuffer;
+      if (!poiToPaste) {
+        try {
+          const clipText = await navigator.clipboard.readText();
+          if (clipText) {
+            const parsed = JSON.parse(clipText);
+            if (parsed && parsed.id && parsed.loc) {
+              poiToPaste = parsed;
+            }
+          }
+        } catch (err) {}
+      }
+
+      if (!poiToPaste) {
+        showToast("No hay ningún POI copiado para pegar", "warning");
+        return;
+      }
+
+      const cloned = JSON.parse(JSON.stringify(poiToPaste));
+      cloned.id = generateUniquePoiId(cloned.id);
+
+      // Posicionamiento inteligente:
+      // 1. Si el cursor del ratón está sobre el mapa, pegar exactamente bajo el ratón
+      // 2. Si no, pegar en el centro geométrico de la pantalla actual
+      if (lastMapMouseLatLng) {
+        cloned.loc = [parseFloat(lastMapMouseLatLng.lng.toFixed(5)), parseFloat(lastMapMouseLatLng.lat.toFixed(5))];
+      } else if (mapPoi) {
+        const center = mapPoi.getCenter();
+        cloned.loc = [parseFloat(center.lng.toFixed(5)), parseFloat(center.lat.toFixed(5))];
+      } else if (cloned.loc && cloned.loc.length === 2) {
+        cloned.loc[0] = parseFloat((cloned.loc[0] + 0.003).toFixed(5));
+        cloned.loc[1] = parseFloat((cloned.loc[1] + 0.003).toFixed(5));
+      }
+
+      if (!cityData.pois) cityData.pois = [];
+      cityData.pois.push(cloned);
+      const newIdx = cityData.pois.length - 1;
+      renderPoiList();
+      renderPoiMarkersOnMap();
+      openPoiEditor(newIdx);
+      // Cero sacudidas de cámara: el POI ya aparece en tu campo visual
+      triggerAutoSave();
+      showToast(`📋 POI pegado como '${cloned.id}'`, "success");
+    }
 
     function detectPoiTaxonomy(id) {
       if (!id) return 'CUSTOM';
@@ -2637,6 +2794,12 @@
             <span>Empleos: <strong class="text-metro-green">${(poi.jobs || 0).toLocaleString()}</strong></span>
           </div>
           <div class="flex justify-end space-x-1 pt-1 border-t border-metro-border/50">
+            <button onclick="copyPoiByIndex(${poi.originalIndex})" class="p-1 rounded text-metro-muted hover:text-metro-orange hover:bg-metro-card transition" title="Copiar al portapapeles (Ctrl+C)">
+              <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+            </button>
+            <button onclick="duplicatePoiByIndex(${poi.originalIndex})" class="p-1 rounded text-metro-muted hover:text-metro-green hover:bg-metro-card transition" title="Duplicar POI">
+              <i data-lucide="copy-plus" class="w-3.5 h-3.5"></i>
+            </button>
             <button onclick="focusPoiOnMap(${poi.originalIndex})" class="p-1 rounded text-metro-muted hover:text-metro-orange hover:bg-metro-card transition" title="Centrar en mapa">
               <i data-lucide="crosshair" class="w-3.5 h-3.5"></i>
             </button>
@@ -2656,13 +2819,14 @@
     function openPoiEditorForNew(coords = null) {
       activeEditingPoiIndex = -1;
       document.getElementById('editorTitleLabel').innerText = "Nuevo POI Especial";
-      document.getElementById('editPoiCategory').value = "CUSTOM";
-      document.getElementById('editPoiId').value = "POI_Nuevo";
+      document.getElementById('editPoiCategory').value = "AIR";
+      document.getElementById('editPoiBaseName').value = "Cancún";
+      document.getElementById('editPoiId').value = "AIR_Cancún";
       document.getElementById('editPoiNameEs').value = "";
       document.getElementById('editPoiNameEn').value = "";
-      document.getElementById('editPoiJobs').value = 5000;
-      document.getElementById('editPoiRadius').value = 750;
-      document.getElementById('editPoiRadiusDisplay').innerText = "750 m";
+      document.getElementById('editPoiJobs').value = 25000;
+      document.getElementById('editPoiRadius').value = 2500;
+      document.getElementById('editPoiRadiusDisplay').innerText = "2500 m";
       document.getElementById('editPoiMode').value = "MAX";
       document.getElementById('btnDeleteEditorPoi').classList.add('hidden');
 
@@ -2672,6 +2836,7 @@
       document.getElementById('editPoiLon').value = Number(lng).toFixed(5);
       document.getElementById('editPoiLat').value = Number(lat).toFixed(5);
 
+      onPoiTaxonomyChanged('AIR');
       switchPoiTab('editor');
       updatePoiPreviewFromForm();
     }
@@ -2679,12 +2844,28 @@
     function openPoiEditor(idx) {
       activeEditingPoiIndex = idx;
       const poi = cityData.pois[idx];
-      const tax = detectPoiTaxonomy(poi.id);
+      const decomposed = decomposePoiId(poi.id || '');
+      const meta = TAXONOMY_META[decomposed.taxonomy] || TAXONOMY_META.CUSTOM;
 
       document.getElementById('editorTitleLabel').innerText = `Editar: ${poi.id}`;
-      document.getElementById('editPoiCategory').value = tax;
+      document.getElementById('editPoiCategory').value = decomposed.taxonomy;
+
+      const badge = document.getElementById('poiPrefixBadge');
+      if (badge) {
+        if (meta.prefix) {
+          badge.classList.remove('hidden');
+          badge.innerText = meta.prefix;
+        } else {
+          badge.classList.add('hidden');
+        }
+      }
+
+      const behaviorTag = document.getElementById('poiGameBehaviorTag');
+      if (behaviorTag) behaviorTag.innerText = meta.behavior || '';
+
+      document.getElementById('editPoiBaseName').value = decomposed.baseName;
       document.getElementById('editPoiId').value = poi.id || "";
-      document.getElementById('editPoiNameEs').value = typeof poi.name === 'object' ? (poi.name.es || "") : (poi.name || "");
+      document.getElementById('editPoiNameEs').value = typeof poi.name === 'object' ? (poi.name.es || "") : "";
       document.getElementById('editPoiNameEn').value = typeof poi.name === 'object' ? (poi.name.en || "") : "";
       document.getElementById('editPoiJobs').value = poi.jobs || 5000;
       document.getElementById('editPoiRadius').value = poi.radius_m || 750;
@@ -2694,6 +2875,7 @@
       document.getElementById('editPoiLat').value = poi.loc ? poi.loc[1].toFixed(5) : 0;
       document.getElementById('btnDeleteEditorPoi').classList.remove('hidden');
 
+      onPoiBaseNameChanged();
       switchPoiTab('editor');
       updatePoiPreviewFromForm();
       renderPoiList();
@@ -2701,20 +2883,22 @@
 
     function onPoiTaxonomyChanged(val) {
       const meta = TAXONOMY_META[val] || TAXONOMY_META.CUSTOM;
-      const idInput = document.getElementById('editPoiId');
-      const currentId = idInput.value.trim();
-
-      let baseName = currentId;
-      for (let k of ['AIR', 'UNI', 'SPO', 'TOU', 'MED', 'TRA']) {
-        if (baseName.startsWith(k + '_')) {
-          baseName = baseName.substring((k + '_').length);
-          break;
+      const badge = document.getElementById('poiPrefixBadge');
+      if (badge) {
+        if (meta.prefix) {
+          badge.classList.remove('hidden');
+          badge.innerText = meta.prefix;
+        } else {
+          badge.classList.add('hidden');
         }
       }
-      if (meta.prefix) {
-        idInput.value = `${meta.prefix}${baseName || 'Punto'}`;
-      } else {
-        idInput.value = baseName || 'POI_Punto';
+
+      const behaviorTag = document.getElementById('poiGameBehaviorTag');
+      if (behaviorTag) behaviorTag.innerText = meta.behavior || '';
+
+      const baseInput = document.getElementById('editPoiBaseName');
+      if (baseInput) {
+        baseInput.placeholder = val === 'AIR' ? 'Cancún' : (val === 'UNI' ? 'Universidad del Caribe' : 'Nombre del lugar');
       }
 
       if (meta.defaultRadius) {
@@ -2724,6 +2908,52 @@
       if (meta.defaultJobs) {
         document.getElementById('editPoiJobs').value = meta.defaultJobs;
       }
+
+      onPoiBaseNameChanged();
+    }
+
+    function onPoiBaseNameChanged() {
+      const cat = document.getElementById('editPoiCategory').value;
+      const meta = TAXONOMY_META[cat] || TAXONOMY_META.CUSTOM;
+      const baseInput = document.getElementById('editPoiBaseName');
+      let baseVal = baseInput ? baseInput.value : '';
+
+      // Si el usuario pegó el ID completo con prefijo (ej. AIR_Cancún), extraer solo la base
+      if (meta.prefix && baseVal.startsWith(meta.prefix)) {
+        baseVal = baseVal.substring(meta.prefix.length);
+        if (baseInput) baseInput.value = baseVal;
+      }
+
+      const fullId = meta.prefix ? `${meta.prefix}${baseVal.trim()}` : baseVal.trim();
+      const idInput = document.getElementById('editPoiId');
+      if (idInput) idInput.value = fullId;
+
+      const previewEl = document.getElementById('poiIdFullPreview');
+      if (previewEl) previewEl.innerText = fullId ? `ID: ${fullId}` : '';
+
+      // Banner de nombre en el juego
+      const gameNameEl = document.getElementById('poiGameDisplayName');
+      const redundancyWarn = document.getElementById('poiRedundancyWarning');
+      const cleanDisplay = baseVal.trim() || 'Sin nombre';
+
+      if (cat === 'AIR') {
+        const hasAirportWord = /aeropuerto|airport/i.test(baseVal);
+        if (redundancyWarn) {
+          redundancyWarn.classList.toggle('hidden', !hasAirportWord);
+        }
+        if (gameNameEl) {
+          gameNameEl.innerText = `✈️ ${cleanDisplay} Terminal`;
+        }
+      } else {
+        if (redundancyWarn) redundancyWarn.classList.add('hidden');
+        const iconEmoji = {
+          UNI: '🎓 ', SPO: '🏟️ ', TOU: '🏖️ ', MED: '🏥 ', TRA: '🚆 ', CUSTOM: '🏢 '
+        }[cat] || '';
+        if (gameNameEl) {
+          gameNameEl.innerText = `${iconEmoji}${cleanDisplay}`;
+        }
+      }
+
       updatePoiPreviewFromForm();
     }
 
@@ -2901,14 +3131,21 @@
     }
 
     function savePoiFromEditor() {
-      const pId = document.getElementById('editPoiId').value.trim();
-      if (!pId) {
-        showToast("El ID del POI no puede estar vacío", "error");
+      const pCat = document.getElementById('editPoiCategory').value;
+      const meta = TAXONOMY_META[pCat] || TAXONOMY_META.CUSTOM;
+      const baseName = (document.getElementById('editPoiBaseName')?.value || '').trim();
+
+      if (!baseName) {
+        showToast("El nombre del POI no puede estar vacío", "error");
+        document.getElementById('editPoiBaseName')?.focus();
         return;
       }
+
+      const pId = meta.prefix ? `${meta.prefix}${baseName}` : baseName;
+      document.getElementById('editPoiId').value = pId;
+
       const esName = document.getElementById('editPoiNameEs').value.trim();
       const enName = document.getElementById('editPoiNameEn').value.trim();
-      const pCat = document.getElementById('editPoiCategory').value;
       const pMode = document.getElementById('editPoiMode').value;
       const pJobs = parseInt(document.getElementById('editPoiJobs').value) || 5000;
       const pRad = parseInt(document.getElementById('editPoiRadius').value) || 750;
@@ -2920,9 +3157,14 @@
         return;
       }
 
+      let nameVal = esName || baseName;
+      if (enName) {
+        nameVal = { es: esName || baseName, en: enName };
+      }
+
       const poiObj = {
         id: pId,
-        name: enName ? { es: esName || pId, en: enName } : (esName || pId),
+        name: nameVal,
         type: pCat.toLowerCase(),
         mode: pMode,
         jobs: pJobs,
@@ -2952,10 +3194,46 @@
       }
     }
 
+    let lastDeletedPoiInfo = null;
+    let activeUndoToast = null;
+
+    function undoDeletePoi() {
+      if (!lastDeletedPoiInfo || !lastDeletedPoiInfo.poi) {
+        showToast("No hay ningún POI para restaurar", "info");
+        return;
+      }
+      const item = lastDeletedPoiInfo;
+      lastDeletedPoiInfo = null;
+
+      if (!cityData.pois) cityData.pois = [];
+      const insertIdx = Math.min(item.index, cityData.pois.length);
+      cityData.pois.splice(insertIdx, 0, item.poi);
+      activeEditingPoiIndex = insertIdx;
+
+      if (activeUndoToast) {
+        activeUndoToast.remove();
+        activeUndoToast = null;
+      }
+
+      renderPoiList();
+      renderPoiMarkersOnMap();
+      openPoiEditor(insertIdx);
+      focusPoiOnMap(insertIdx);
+      triggerAutoSave();
+      showToast(`↺ POI '${item.poi.id}' restaurado`, "success");
+    }
+
     function deletePoiByIndex(idx) {
       const poi = cityData.pois[idx];
       if (!poi) return;
-      if (!confirm(`¿Eliminar el POI '${poi.id}'?`)) return;
+
+      // Guardar copia para Deshacer
+      lastDeletedPoiInfo = {
+        poi: JSON.parse(JSON.stringify(poi)),
+        index: idx,
+        timestamp: Date.now()
+      };
+
       cityData.pois.splice(idx, 1);
       activeEditingPoiIndex = -1;
       if (editorPreviewLayer) editorPreviewLayer.clearLayers();
@@ -2963,7 +3241,15 @@
       renderPoiMarkersOnMap();
       triggerAutoSave();
       switchPoiTab('list');
-      showToast("POI eliminado", "info");
+
+      if (activeUndoToast) {
+        activeUndoToast.remove();
+      }
+
+      activeUndoToast = showToast(`🗑️ POI '${poi.id}' eliminado`, "info", 7000, {
+        label: "↺ Deshacer (Ctrl+Z)",
+        callback: () => undoDeletePoi()
+      });
     }
 
     function focusPoiOnMap(idx) {
@@ -2971,6 +3257,70 @@
       if (!poi || !poi.loc || !mapPoi) return;
       mapPoi.flyTo([poi.loc[1], poi.loc[0]], 14, { duration: 0.8 });
     }
+
+    // -------------------------------------------------------------------------
+    // ATAJOS DE TECLADO PARA POIS (CTRL+C / CTRL+V / SUPR / CTRL+Z)
+    // -------------------------------------------------------------------------
+    function isEditableTextInput(el) {
+      if (!el) return false;
+      const tag = el.tagName ? el.tagName.toLowerCase() : '';
+      if (tag === 'textarea') return true;
+      if (tag === 'input') {
+        const type = (el.type || 'text').toLowerCase();
+        return ['text', 'search', 'number', 'password', 'email', 'url', 'tel'].includes(type);
+      }
+      return el.isContentEditable === true;
+    }
+
+    document.addEventListener('keydown', (e) => {
+      const isCtrlOrMeta = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+
+      // Atajos con modificador Ctrl / Cmd
+      if (isCtrlOrMeta) {
+        if (key === 'c') {
+          if (isEditableTextInput(document.activeElement)) {
+            const input = document.activeElement;
+            if (input.selectionStart !== input.selectionEnd) {
+              return; // Copia normal de texto seleccionado
+            }
+          }
+          if (activeEditingPoiIndex >= 0 && cityData && cityData.pois && cityData.pois[activeEditingPoiIndex]) {
+            copyPoiByIndex(activeEditingPoiIndex);
+          }
+        } else if (key === 'v') {
+          if (isEditableTextInput(document.activeElement)) {
+            return; // Pegado normal dentro de inputs
+          }
+          if (currentStep === 4 || activeEditingPoiIndex >= 0) {
+            e.preventDefault();
+            pastePoi();
+          }
+        } else if (key === 'z') {
+          if (isEditableTextInput(document.activeElement)) {
+            return; // Deshacer nativo en campos de texto
+          }
+          if (lastDeletedPoiInfo) {
+            e.preventDefault();
+            undoDeletePoi();
+          }
+        }
+        return;
+      }
+
+      // Teclas directas: Supr / Delete para eliminar POI seleccionado
+      if (key === 'delete' || key === 'supr') {
+        if (isEditableTextInput(document.activeElement)) {
+          return; // Borrado normal de caracteres en inputs
+        }
+        if (currentStep === 4 || activeEditingPoiIndex >= 0) {
+          if (activeEditingPoiIndex >= 0 && cityData && cityData.pois && cityData.pois[activeEditingPoiIndex]) {
+            e.preventDefault();
+            deletePoiByIndex(activeEditingPoiIndex);
+          }
+        }
+      }
+    });
 
     function startPickingPoiLocation() {
       isPickingLocation = true;
@@ -3698,17 +4048,36 @@
     // -------------------------------------------------------------------------
     // UTILIDADES GENERALES
     // -------------------------------------------------------------------------
-    function showToast(msg, type = "info") {
+    function showToast(msg, type = "info", duration = 3500, action = null) {
       const toast = document.createElement('div');
       const colors = {
         success: 'bg-emerald-600 text-white border-emerald-500',
         error: 'bg-rose-600 text-white border-rose-500',
-        info: 'bg-metro-card text-white border-metro-border'
+        warning: 'bg-amber-600 text-white border-amber-500',
+        info: 'bg-stone-900 text-white border-stone-700'
       };
-      toast.className = `fixed bottom-6 right-6 ${colors[type] || colors.info} border px-4 py-2.5 rounded-lg text-xs font-semibold shadow-2xl z-50 transition transform duration-300 flex items-center space-x-2`;
+      toast.className = `fixed bottom-6 right-6 ${colors[type] || colors.info} border px-4 py-2.5 rounded-lg text-xs font-semibold shadow-2xl z-50 transition transform duration-300 flex items-center space-x-3`;
       toast.innerHTML = `<span>${msg}</span>`;
+
+      let timer = null;
+      if (action) {
+        const btn = document.createElement('button');
+        btn.className = "ml-2 px-2.5 py-1 rounded bg-white text-stone-900 hover:bg-stone-200 font-bold text-[11px] shadow transition shrink-0 cursor-pointer flex items-center space-x-1";
+        btn.innerHTML = action.label;
+        btn.onclick = () => {
+          clearTimeout(timer);
+          toast.remove();
+          if (typeof action.callback === 'function') action.callback();
+        };
+        toast.appendChild(btn);
+      }
+
       document.body.appendChild(toast);
-      setTimeout(() => toast.remove(), 3500);
+      timer = setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+      }, duration);
+      return toast;
     }
 
     function escapeHtml(str) {
