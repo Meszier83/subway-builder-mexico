@@ -364,8 +364,20 @@ def open_file_location(target_path: str) -> Dict[str, Any]:
     else:
         full_p = os.path.abspath(os.path.join(ROOT_DIR, target_path))
 
+    # Seguridad: no permitir salir de ROOT_DIR
+    norm_root = os.path.normcase(os.path.realpath(ROOT_DIR))
+    norm_target = os.path.normcase(os.path.realpath(full_p))
+    if not norm_target.startswith(norm_root):
+        raise PermissionError(f"Acceso denegado: ruta fuera del proyecto ({target_path})")
+
     if not os.path.exists(full_p):
-        raise FileNotFoundError(f"Ruta no encontrada en disco: {target_path}")
+        _, ext = os.path.splitext(full_p)
+        if ext:
+            parent_dir = os.path.dirname(full_p)
+            os.makedirs(parent_dir, exist_ok=True)
+            full_p = parent_dir
+        else:
+            os.makedirs(full_p, exist_ok=True)
 
     import subprocess
     if sys.platform == "win32":
@@ -1397,7 +1409,7 @@ def main():
     )
     parser.add_argument(
         "--city",
-        default="cities/cancun.yaml",
+        default=None,
         help="Archivo YAML de ciudad inicial a cargar (ej. cities/cancun.yaml)"
     )
     parser.add_argument(

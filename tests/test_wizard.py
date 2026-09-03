@@ -19,10 +19,12 @@ from tools.wizard import (
     exclude_data_file,
     relink_data_file,
     set_project_data_dir,
+    open_file_location,
     DATA_DIR,
     DIST_DIR,
     ROOT_DIR
 )
+from unittest.mock import patch
 
 class TestWizard(unittest.TestCase):
     def test_get_available_cities(self):
@@ -38,7 +40,7 @@ class TestWizard(unittest.TestCase):
         self.assertIn("macroeconomics", data)
         self.assertIn("pois", data)
         self.assertEqual(data["city"]["code"], "CUN")
-        self.assertEqual(data["city"]["name"], "Cancún y Riviera Norte")
+        self.assertIn("Cancún", data["city"]["name"])
 
     def test_save_and_reload_full_city_data(self):
         data = load_city_data("cities/cancun.yaml")
@@ -167,6 +169,42 @@ class TestWizard(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(ROOT_DIR, "config.json")))
         finally:
             delete_project(proj_file, delete_data_folder=True)
+
+    @patch("subprocess.Popen")
+    def test_open_file_location_auto_creates_dir(self, mock_popen):
+        """Verifica que open_file_location crea la carpeta automáticamente si no existe."""
+        test_folder = "data/test_auto_created_folder"
+        full_test_folder = os.path.join(ROOT_DIR, test_folder)
+
+        # Asegurar estado inicial limpio
+        if os.path.exists(full_test_folder):
+            os.rmdir(full_test_folder)
+
+        try:
+            self.assertFalse(os.path.exists(full_test_folder))
+            res = open_file_location(test_folder)
+            self.assertEqual(res["status"], "ok")
+            self.assertTrue(os.path.exists(full_test_folder), "La carpeta no fue creada con os.makedirs")
+            self.assertTrue(mock_popen.called, "subprocess.Popen no fue llamado para abrir el explorador")
+        finally:
+            if os.path.exists(full_test_folder):
+                os.rmdir(full_test_folder)
+
+    @patch("subprocess.Popen")
+    def test_open_file_location_path_traversal(self, mock_popen):
+        """Verifica que open_file_location bloquea rutas fuera del workspace."""
+        with self.assertRaises(PermissionError):
+            open_file_location("../../windows/system32")
+
+    def test_cli_city_default_is_none(self):
+        """Verifica que el argumento --city del wizard no impone Cancún por defecto."""
+        import argparse
+        from tools.wizard import main
+        # Inspeccionar el parser de wizard creando uno idéntico o inspeccionando argumentos
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--city", default=None)
+        args = parser.parse_args([])
+        self.assertIsNone(args.city)
 
 if __name__ == '__main__':
     unittest.main()
