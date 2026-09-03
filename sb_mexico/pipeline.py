@@ -185,6 +185,8 @@ def execute_pipeline(
     ])
     ce_files = find_sources([
         "*SAIC*.csv",
+        "*saic*.csv",
+        "*exporta*.csv",
         "*cenu24*.csv",
         "*tr_ce*.csv",
         "*ce_*.csv",
@@ -198,6 +200,9 @@ def execute_pipeline(
         "*enoe*.csv"
     ])
     conapo_files = find_sources([
+        "*pobproy*.csv",
+        "*quinq*.csv",
+        "*pob_proy*.csv",
         "*conapo*.csv",
         "data-*.csv",
         "*proyeccion*.csv"
@@ -336,6 +341,7 @@ def execute_pipeline(
         beta=macro.get("gravity_beta", 0.12),
         max_distance_km=macro.get("max_distance_km", 55.0),
         max_pop_size=macro.get("max_pop_size", 150),
+        target_pop_size=macro.get("target_pop_size", 35),
         seed=city_info.get("seed", 42)
     )
 

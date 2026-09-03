@@ -1,4 +1,4 @@
-# Libro Blanco de Metodología y Fundamentos Matemáticos (v6.3) 📐🚇
+# Libro Blanco de Metodología y Fundamentos Matemáticos (v6.3) 
 
 ## 1. Fundamentación Teórica
 A diferencia del estándar estadounidense basado en encuestas de origen-destino (LODES/LEHD), México no cuenta con matrices O-D universales a nivel manzana. sb_mexico implementa un modelo de interacción espacial gravitatoria de **Muestreo Multinomial Puro en Dos Capas**, calibrado con microdatos del INEGI.
@@ -59,7 +59,7 @@ V(d) = 18.0 + (65.0 - 18.0) \cdot (1 - e^{-d / 8.0}) \quad (\text{Velocidad en k
 
 ---
 
-## 6. Arquitectura de POIs (Special Demand) vs Clusters de Empleo 🏢✈️
+## 6. Arquitectura de POIs (Special Demand) vs Clusters de Empleo ✈️
 
 ### 6.1. ¿Por qué existen los POIs / Generadores Especiales?
 Los censos económicos tradicionales registran el empleo formal corporativo pero presentan dos limitaciones:

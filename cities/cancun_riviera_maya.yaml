@@ -1,0 +1,151 @@
+# ==============================================================================
+# CONFIGURACIÓN: Cancún - Riviera Maya (CRI) - SUBWAY BUILDER MÉXICO v6.3
+# ==============================================================================
+
+city:
+  code: "CRI"
+  name: "Cancún - Riviera Maya"
+  description: "Zona Metropolitana de Cancún - Riviera Maya"
+  bbox: [-87.615967, 20.13847, -86.638184, 21.514407]
+  creator: "Messier83"
+  grid_size: 0.0018
+  min_residents: 10
+  min_jobs: 3
+  initial_zoom: 11.5
+  building_filter_size: 15.0
+  building_simplification: 0.2
+  include_ocean: true
+
+data_dir: "data/cancun_riviera_maya"
+
+macroeconomics:
+  tasa_pea: 0.62
+  til_1_state: 0.45
+  sample_threshold: 500
+  default_growth_factor: 1.05
+  gravity_beta: 0.12
+  max_distance_km: 50.0
+  max_pop_size: 150
+  target_pop_size: 35
+
+  growth_factors:
+    "23001": 1.06
+    "23003": 1.03
+    "23005": 1.11
+    "23007": 1.02
+    "23008": 1.19
+    "23009": 1.17
+    "23011": 1.16
+
+pois:
+  - id: "Terminal Cancún"
+    name: "Terminal Cancún"
+    type: "air"
+    loc: [-86.87397, 21.04069]
+    jobs: 32538
+    radius_m: 900
+    mode: "MAX"
+
+  - id: "Plaza las Américas"
+    name: "Plaza las Américas"
+    type: "custom"
+    loc: [-86.82274, 21.14694]
+    jobs: 7534
+    radius_m: 300
+    mode: "BOOST"
+
+  - id: "UNI_UNICARIBE"
+    name: "UNI_UNICARIBE"
+    type: "uni"
+    loc: [-86.82372, 21.20001]
+    jobs: 4816
+    radius_m: 200
+    mode: "BOOST"
+
+  - id: "Party Center"
+    name: "Party Center"
+    type: "custom"
+    loc: [-86.74705, 21.13472]
+    jobs: 14307
+    radius_m: 400
+    mode: "MAX"
+
+  - id: "UNI_Instituto Tecnológico de Cancún"
+    name: "UNI_Instituto Tecnológico de Cancún"
+    type: "uni"
+    loc: [-86.83471, 21.13858]
+    jobs: 4600
+    radius_m: 300
+    mode: "BOOST"
+
+  - id: "UNI_UT Cancún"
+    name: "UNI_UT Cancún"
+    type: "uni"
+    loc: [-86.84658, 21.04955]
+    jobs: 3400
+    radius_m: 200
+    mode: "BOOST"
+
+  - id: "Zona Hotelera Sur"
+    name: "POI_Nuevo"
+    type: "tou"
+    loc: [-86.77628, 21.07293]
+    jobs: 8000
+    radius_m: 600
+    mode: "BOOST"
+
+  - id: "Marina Town Center"
+    name: "Marina Town Center"
+    type: "custom"
+    loc: [-86.80817, 21.16091]
+    jobs: 4815
+    radius_m: 1000
+    mode: "BOOST"
+
+  - id: "ZH PM"
+    name: "ZH PM"
+    type: "tou"
+    loc: [-86.87666, 20.84784]
+    jobs: 3993
+    radius_m: 600
+    mode: "BOOST"
+
+  - id: "PLAYACAR"
+    name: "PLAYACAR"
+    type: "tou"
+    loc: [-87.08774, 20.61406]
+    jobs: 4814
+    radius_m: 750
+    mode: "BOOST"
+
+  - id: "UNI_UTRM"
+    name: "UNI_UTRM"
+    type: "uni"
+    loc: [-87.06074, 20.68153]
+    jobs: 1626
+    radius_m: 200
+    mode: "BOOST"
+
+  - id: "UNI_UQRoo PDC"
+    name: "UNI_UQRoo PDC"
+    type: "uni"
+    loc: [-87.06575, 20.68471]
+    jobs: 7628
+    radius_m: 200
+    mode: "MAX"
+
+  - id: "Hospital General CUN"
+    name: "Hospital General CUN"
+    type: "med"
+    loc: [-86.87629, 21.19607]
+    jobs: 1635
+    radius_m: 300
+    mode: "MAX"
+
+  - id: "HR 17"
+    name: "HR 17"
+    type: "med"
+    loc: [-86.85504, 21.13555]
+    jobs: 1700
+    radius_m: 200
+    mode: "BOOST"

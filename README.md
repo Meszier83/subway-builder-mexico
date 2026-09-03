@@ -1,9 +1,9 @@
-# Subway Builder México (v6.3) 🚇🇲🇽
+# Subway Builder México (v6.3) 
 **Pipeline Integral, Declarativo y Riguroso para Generación de Mapas de México**
 
 ---
 
-## 🌟 Características Principales
+## Características Principales
 
 * **Declarativo y Sencillo:** Define tu metrópoli en un archivo YAML de 30 líneas en cities/<ciudad>.yaml.
 * **Conservación Estricta de Masa:** Suma de viajeros activos = PEA del Censo (cero inflación artificial).
@@ -17,7 +17,7 @@
 
 ---
 
-## 🚀 Inicio Rápido (Quickstart)
+## Inicio Rápido (Quickstart)
 
 ### 1. Clonar e Instalar Dependencias
 
@@ -64,36 +64,37 @@ python build.py cities/cancun.yaml --skip-map
 
 ---
 
-## 📁 Estructura del Proyecto
+## Estructura del Proyecto
 
 ```text
-├── cities/                  # Archivos de configuración por ciudad (YAML)
-│   ├── _template.yaml       # Plantilla documentada
-│   └── cancun.yaml          # Configuración de Cancún
-├── sb_mexico/               # Núcleo del motor
-│   ├── inegi.py             # Ingesta, geocodificación y calibración INEGI/CONAPO
-│   ├── gravity.py           # Malla espacial, POIs, dos capas y asignación multinomial
-│   ├── special_demand.py    # Validación y exportación de demanda especial (Taxonomía v5)
-│   ├── toponymy.py          # Extracción y filtrado toponímico para OSM XML/PBF
-│   ├── cartography.py       # Wrapper de depot.maps.MapGen
-│   └── pipeline.py          # Orquestador integral y empaquetado
-├── tests/                   # Suite formal de pruebas unitarias
-├── tools/                   # Utilidades y scripts auxiliares
-│   ├── wizard.py            # Servidor web del asistente integral interactivo
-│   ├── poi_studio.py        # Editor visual de POIs y calibrador en mapa satelital
-│   ├── preview_toponymy.py  # Visor geoespacial de capas toponímicas
-│   └── demo_preview.py      # Generador rápido de vistas previas
-├── build.py                 # CLI de ejecución principal
-├── wizard.bat               # Lanzador directo de Wizard en Windows
-├── visualize.py             # Visor HTML interactivo de demanda
-├── DATA_SOURCES.md          # Dónde y cómo descargar datos oficiales
-├── METHODOLOGY.md           # Justificación matemática y científica
-└── requirements.txt         # Dependencias
+cities/                  # Archivos de configuración por ciudad (YAML)
+|-- _template.yaml       # Plantilla documentada
+\-- cancun.yaml          # Configuración de Cancún
+sb_mexico/               # Núcleo del motor
+|-- inegi.py             # Ingesta, geocodificación y calibración INEGI/CONAPO
+|-- gravity.py           # Malla espacial, POIs, dos capas y asignación multinomial
+|-- special_demand.py    # Validación y exportación de demanda especial (Taxonomía v5)
+|-- toponymy.py          # Extracción y filtrado toponímico para OSM XML/PBF
+|-- cartography.py       # Wrapper de depot.maps.MapGen y puente WSL 2
+|-- cartography_runner.py# Runner de compilación cartográfica nativa para WSL/Linux
+\-- pipeline.py          # Orquestador integral y empaquetado
+tests/                   # Suite formal de pruebas unitarias
+tools/                   # Utilidades y scripts auxiliares
+|-- wizard.py            # Servidor web del asistente integral interactivo
+|-- poi_studio.py        # Editor visual de POIs y calibrador en mapa satelital
+|-- preview_toponymy.py  # Visor geoespacial de capas toponímicas
+\-- demo_preview.py      # Generador rápido de vistas previas
+build.py                 # CLI de ejecución principal
+wizard.bat               # Lanzador directo de Wizard en Windows
+visualize.py             # Visor HTML interactivo de demanda
+DATA_SOURCES.md          # Dónde y cómo descargar datos oficiales
+METHODOLOGY.md           # Justificación matemática y científica
+requirements.txt         # Dependencias
 ```
 
 ---
 
-## 📖 Documentación
+## Documentación
 
 * [**Guía de Fuentes de Datos (DATA_SOURCES.md)**](DATA_SOURCES.md): Enlaces y pasos para descargar datos de cualquier estado en 3 minutos.
 * [**Libro Blanco y Metodología (METHODOLOGY.md)**](METHODOLOGY.md): Formulación matemática y justificación técnica.
@@ -101,5 +102,5 @@ python build.py cities/cancun.yaml --skip-map
 
 ---
 
-## 📄 Licencia
+## Licencia
 Distribuido bajo la Licencia MIT.

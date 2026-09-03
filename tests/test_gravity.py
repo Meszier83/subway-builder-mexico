@@ -33,6 +33,30 @@ class TestGravity(unittest.TestCase):
         # Check immutability
         self.assertIn("pea_15ymas", demand_points[0])
 
+    def test_simulate_gravity_demand_quantized_cohorts(self):
+        # 10 orígenes residenciales con 100 PEA cada uno (1000 total) y 50 destinos
+        rng = np.random.default_rng(123)
+        origins = [
+            {"id": f"orig_{i}", "location": [-86.85 + (i * 0.005), 21.15], "jobs": 0, "residents": 200, "pea_15ymas": 100, "popIds": []}
+            for i in range(10)
+        ]
+        dests = [
+            {"id": f"dest_{j}", "location": [-86.80, 21.10 + (j * 0.002)], "jobs": 50, "residents": 0, "pea_15ymas": 0, "popIds": []}
+            for j in range(50)
+        ]
+        pts = origins + dests
+        total_pea = 1000
+
+        # Con target_pop_size=35, cada origen de 100 PEA debe generar round(100/35) = 3 cohortes
+        # Total esperado de pops: ~30 pops (en lugar de cientos de micro-pops de tamaño 1)
+        pops = simulate_gravity_demand(pts, target_pop_size=35, max_pop_size=150, seed=42)
+        total_viajeros = sum(p["size"] for p in pops)
+        self.assertEqual(total_viajeros, total_pea)
+        self.assertLessEqual(len(pops), 35)
+        # Ningún pop de tamaño 1 artificial si el origen tiene masa suficiente
+        for p in pops:
+            self.assertGreaterEqual(p["size"], 30)
+
     def test_sanitize_demand_points(self):
         demand_points = [
             {"id": "dp_1", "location": [-86.85, 21.15], "jobs": 10, "residents": 500, "pea_15ymas": 100, "is_special": True, "popIds": ["pop_001"]}

@@ -2202,8 +2202,8 @@
         const sources = [
           { key: 'denue', label: 'DENUE (Establecimientos Económicos)', icon: 'briefcase', desc: '*denue*.csv' },
           { key: 'cpv', label: 'Censo CPV 2020 (Manzanas RESAGEBURB)', icon: 'users', desc: '*RESAGEBURB*.csv' },
-          { key: 'ce2024', label: 'Censos Económicos 2024 / H001A', icon: 'file-text', desc: '*tr_ce*.csv' },
-          { key: 'conapo', label: 'Proyecciones Demográficas CONAPO', icon: 'trending-up', desc: 'data-*.csv o *conapo*.csv' },
+          { key: 'ce2024', label: 'Censos Económicos 2024 / H001A', icon: 'file-text', desc: '*SAIC*.csv o *tr_ce*.csv' },
+          { key: 'conapo', label: 'Proyecciones Demográficas CONAPO', icon: 'trending-up', desc: '*pobproy*.csv, *conapo*.csv o data-*.csv' },
           { key: 'osm', label: 'Red Vial OpenStreetMap (PBF / GeoJSON)', icon: 'map-pin', desc: '*.osm.pbf o roads.geojson' }
         ];
 
@@ -2370,26 +2370,16 @@
             document.getElementById('conapoSubtitleLabel').innerText = `Factores de sincronización intercensal Pob_${data.projection_year || 2025} / Pob_2020 (${data.conapo_file || 'CONAPO'}).`;
           }
           if (!cityData.macroeconomics) cityData.macroeconomics = {};
-          if (!cityData.macroeconomics.growth_factors) cityData.macroeconomics.growth_factors = {};
+          cityData.macroeconomics.growth_factors = {};
 
-          let added = 0;
           data.factors.forEach(f => {
             window.conapoMetadata[f.cve_mun] = f;
-            if (f.in_bbox || Object.keys(cityData.macroeconomics.growth_factors).length === 0) {
-              cityData.macroeconomics.growth_factors[f.cve_mun] = f.factor;
-              added++;
-            }
+            cityData.macroeconomics.growth_factors[f.cve_mun] = f.factor;
           });
-
-          if (added === 0 && data.factors.length > 0) {
-            data.factors.slice(0, 4).forEach(f => {
-              cityData.macroeconomics.growth_factors[f.cve_mun] = f.factor;
-            });
-          }
 
           renderGrowthFactorsTable();
           triggerAutoSave();
-          showToast(`Sincronizados factores CONAPO (${data.factors.length} municipios, Año ${data.projection_year})`, "success");
+          showToast(`Sincronizados factores CONAPO (${data.factors.length} municipios en BBOX, Año ${data.projection_year})`, "success");
         } else {
           showToast(data.message || "No se detectó archivo CONAPO en data/", "error");
         }

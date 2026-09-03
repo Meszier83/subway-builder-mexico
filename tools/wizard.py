@@ -27,6 +27,7 @@ import argparse
 import threading
 import subprocess
 import webbrowser
+import unicodedata
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from typing import Dict, Any, List, Optional
@@ -154,10 +155,10 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
     fpath = _resolve_city_path(rel_or_abs_path)
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
 
-    city_cfg = data.get("city", {})
-    macro_cfg = data.get("macroeconomics", {})
-    pois_cfg = data.get("pois", [])
-    places_cfg = data.get("places", [])
+    city_cfg = data.get("city") or {}
+    macro_cfg = data.get("macroeconomics") or {}
+    pois_cfg = data.get("pois") or []
+    places_cfg = data.get("places") or []
     data_dir_cfg = str(data.get("data_dir", "")).strip()
     data_exclusions_cfg = data.get("data_exclusions", [])
 
@@ -269,7 +270,9 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
 
 def create_new_project(name: str, code: str, creator: str = "Creador", data_dir: str = "") -> Dict[str, Any]:
     clean_code = code.strip().upper()
-    slug = re.sub(r'[^a-zA-Z0-9_-]', '', name.strip().lower().replace(" ", "_")) or clean_code.lower()
+    s_norm = unicodedata.normalize('NFKD', name.strip().lower()).encode('ascii', 'ignore').decode('utf-8')
+    slug = re.sub(r'[^a-zA-Z0-9_-]', '', s_norm.replace(" ", "_"))
+    slug = re.sub(r'[-_]+', '_', slug).strip('-_') or clean_code.lower()
     yaml_name = f"{slug}.yaml"
     yaml_path = os.path.join(CITIES_DIR, yaml_name)
 
@@ -478,7 +481,7 @@ def inspect_data_files(city_name: str = "", city_code: str = "", city_file: str 
                             rel_p = abs_p.replace("\\", "/")
                         found.append({
                             "path": rel_p,
-                            "abs_path": abs_p,
+                        "abs_path": abs_p,
                             "filename": fname,
                             "size_mb": round(size_mb, 2),
                             "modified": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime(abs_p)))
@@ -487,8 +490,8 @@ def inspect_data_files(city_name: str = "", city_code: str = "", city_file: str 
 
     denue = find_files(["*denue*.csv", "*DENUE*.csv", "*denue*.zip"])
     cpv = find_files(["*RESAGEBURB*.csv", "*resageburb*.csv", "*censo*.csv", "*cpv*.csv"])
-    ce2024 = find_files(["*tr_ce*.csv", "*ce2024*.csv", "*ce_2024*.csv", "*ce*.csv"])
-    conapo = find_files(["*conapo*.csv", "data-*.csv", "*proyeccion*.csv"])
+    ce2024 = find_files(["*SAIC*.csv", "*saic*.csv", "*exporta*.csv", "*tr_ce*.csv", "*ce2024*.csv", "*ce_2024*.csv", "*ce*.csv"])
+    conapo = find_files(["*pobproy*.csv", "*quinq*.csv", "*pob_proy*.csv", "*conapo*.csv", "data-*.csv", "*proyeccion*.csv"])
 
     # Para OSM: buscar en la carpeta del proyecto, y solo si falta, verificar extracto nacional en data/
     osm = find_files(["*.osm.pbf", "*.osm", "roads.geojson"])
@@ -520,6 +523,49 @@ def inspect_data_files(city_name: str = "", city_code: str = "", city_file: str 
     }
 
 
+def exclude_data_file(city_file: str, filename: str) -> Dict[str, Any]:
+    """
+    Desvincula un archivo de datos añadiéndolo a 'data_exclusions' en el YAML de la ciudad.
+    NO BORRA el archivo físico del disco.
+    """
+    fpath = _resolve_city_path(city_file)
+    if not os.path.exists(fpath):
+        raise FileNotFoundError(f"Proyecto no encontrado: {city_file}")
+
+    with open(fpath, "r", encoding="utf-8") as f:
+        cdata = yaml.safe_load(f) or {}
+
+    exclusions = cdata.get("data_exclusions", [])
+    clean_fn = os.path.basename(filename).strip()
+    if clean_fn and clean_fn not in exclusions:
+        exclusions.append(clean_fn)
+        cdata["data_exclusions"] = exclusions
+        save_full_city_data(fpath, cdata)
+
+    return {"status": "ok", "excluded": clean_fn, "exclusions": exclusions}
+
+
+def relink_data_file(city_file: str, filename: str) -> Dict[str, Any]:
+    """
+    Vuelve a vincular un archivo previamente excluido eliminándolo de 'data_exclusions'.
+    """
+    fpath = _resolve_city_path(city_file)
+    if not os.path.exists(fpath):
+        raise FileNotFoundError(f"Proyecto no encontrado: {city_file}")
+
+    with open(fpath, "r", encoding="utf-8") as f:
+        cdata = yaml.safe_load(f) or {}
+
+    exclusions = cdata.get("data_exclusions", [])
+    clean_fn = os.path.basename(filename).strip()
+    if clean_fn in exclusions:
+        exclusions.remove(clean_fn)
+        cdata["data_exclusions"] = exclusions
+        save_full_city_data(fpath, cdata)
+
+    return {"status": "ok", "relinked": clean_fn, "exclusions": exclusions}
+
+
 def delete_data_file(rel_or_abs_path: str) -> str:
     """
     Función de compatibilidad: desvincula sin eliminar físicamente.
@@ -530,7 +576,7 @@ def delete_data_file(rel_or_abs_path: str) -> str:
 def calculate_conapo_factors(city_file: str) -> Dict[str, Any]:
     """
     Calcula automáticamente los factores de sincronización intercensal CONAPO
-    cruzando las proyecciones (data-*.csv o *conapo*.csv) con el Censo CPV 2020.
+    cruzando las proyecciones (data-*.csv, *conapo*.csv, *pobproy*.csv) con el Censo CPV 2020.
     Retorna nombres legibles, poblaciones 2020, poblaciones proyectadas,
     año de proyección y si el municipio intersecta el BBOX.
     """
@@ -561,37 +607,56 @@ def calculate_conapo_factors(city_file: str) -> Dict[str, Any]:
 
     conapo_path = os.path.join(ROOT_DIR, conapo_files[0]["path"])
 
-    # 1. Parsear CONAPO
+    # 1. Parsear CONAPO de forma vectorizada de alto rendimiento
     conapo_dict = {}
-    proj_year = 2025
+    proj_year = 2024
     for enc in ['utf-8-sig', 'latin1', 'utf-8', 'cp1252']:
         try:
-            df_con = pd.read_csv(conapo_path, encoding=enc, dtype=str)
-            cols = [c.strip().upper() for c in df_con.columns]
+            df_con = pd.read_csv(conapo_path, encoding=enc, low_memory=False)
+            cols = [str(c).strip().upper() for c in df_con.columns]
             df_con.columns = cols
+
             if 'CLAVE' in cols and any('POB' in c for c in cols):
-                col_pob = [c for c in cols if 'POB_MIT_MUN' in c or 'POB_TOTAL' in c or 'POBTOT' in c or c.startswith('POB')][0]
+                pob_candidates = [c for c in cols if 'POB_TOTAL' in c or 'POB_MIT_MUN' in c or 'POBTOT' in c or c.startswith('POB')]
+                col_pob = pob_candidates[0]
                 has_nom = 'NOM_MUN' in cols
                 has_ano = 'ANO' in cols
-                for _, row in df_con.iterrows():
-                    cve = str(row['CLAVE']).strip()
-                    if cve.isdigit():
-                        cve_5 = f"{int(cve):05d}"
-                        try:
-                            pob_val = float(str(row[col_pob]).replace(',', '').strip())
-                            nom_mun = str(row['NOM_MUN']).strip() if has_nom else f"Municipio {cve_5}"
-                            if has_ano:
-                                try:
-                                    proj_year = int(str(row['ANO']).strip())
-                                except Exception:
-                                    pass
-                            if pob_val > 0:
-                                conapo_dict[cve_5] = {
-                                    "pob_conapo": pob_val,
-                                    "name": nom_mun
-                                }
-                        except ValueError:
-                            continue
+
+                if has_ano:
+                    df_con['ANO_num'] = pd.to_numeric(df_con['ANO'], errors='coerce')
+                    available_years = df_con['ANO_num'].dropna().unique()
+                    if len(available_years) > 0:
+                        chosen_year = 2024 if 2024 in available_years else (
+                            available_years[np.argmin(np.abs(available_years - 2024))]
+                        )
+                        proj_year = int(chosen_year)
+                        df_con = df_con[df_con['ANO_num'] == chosen_year]
+
+                df_con['cve_clean'] = pd.to_numeric(df_con['CLAVE'], errors='coerce').fillna(0).astype(int)
+                df_con = df_con[df_con['cve_clean'] > 0]
+                df_con['pob_clean'] = pd.to_numeric(df_con[col_pob].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+
+                if has_nom:
+                    grouped = df_con.groupby(['cve_clean', 'NOM_MUN'])['pob_clean'].sum().reset_index()
+                    for _, r in grouped.iterrows():
+                        cve_5 = f"{int(r['cve_clean']):05d}"
+                        pob_val = float(r['pob_clean'])
+                        nom_mun = str(r['NOM_MUN']).strip()
+                        if pob_val > 0:
+                            conapo_dict[cve_5] = {
+                                "pob_conapo": pob_val,
+                                "name": nom_mun
+                            }
+                else:
+                    grouped = df_con.groupby('cve_clean')['pob_clean'].sum()
+                    for cve_num, pob_val in grouped.items():
+                        cve_5 = f"{int(cve_num):05d}"
+                        if pob_val > 0:
+                            conapo_dict[cve_5] = {
+                                "pob_conapo": float(pob_val),
+                                "name": f"Municipio {cve_5}"
+                            }
+
                 if conapo_dict:
                     break
         except Exception:
@@ -604,7 +669,7 @@ def calculate_conapo_factors(city_file: str) -> Dict[str, Any]:
             "factors": []
         }
 
-    # 2. Parsear Censo CPV 2020 por municipio (suma de manzanas habitadas)
+    # 2. Parsear Censo CPV 2020 por municipio
     cpv_totals = {}
     if cpv_files:
         for finfo in cpv_files:
@@ -614,68 +679,93 @@ def calculate_conapo_factors(city_file: str) -> Dict[str, Any]:
                     df_cen = pd.read_csv(cpv_path, encoding=enc, low_memory=False, dtype=str)
                     df_cen.columns = [c.strip().upper() for c in df_cen.columns]
                     if 'ENTIDAD' in df_cen.columns and 'MUN' in df_cen.columns and 'POBTOT' in df_cen.columns:
-                        mza_col = pd.to_numeric(df_cen['MZA'].replace('*', '1') if 'MZA' in df_cen.columns else '1', errors='coerce').fillna(0)
-                        pob_col = pd.to_numeric(df_cen['POBTOT'].replace('*', '1.5'), errors='coerce').fillna(0)
-                        df_sub = df_cen[(mza_col > 0) & (pob_col > 0)]
-                        for ent, mun, p in zip(df_sub['ENTIDAD'], df_sub['MUN'], pob_col[df_sub.index]):
-                            try:
-                                cve_mun = f"{int(str(ent).strip()):02d}{int(str(mun).strip()):03d}"
-                                cpv_totals[cve_mun] = cpv_totals.get(cve_mun, 0.0) + float(p)
-                            except Exception:
-                                continue
-                        break
+                        # Prioridad 1: Registros de totales municipales oficiales de INEGI (LOC == 0000, AGEB == 0000)
+                        tot_mun = df_cen[(df_cen.get('LOC', '') == '0000') & (df_cen['MUN'] != '000') & (df_cen.get('AGEB', '') == '0000')]
+                        if not tot_mun.empty:
+                            for _, r in tot_mun.iterrows():
+                                try:
+                                    cve_mun = f"{int(str(r['ENTIDAD']).strip()):02d}{int(str(r['MUN']).strip()):03d}"
+                                    p_val = float(str(r['POBTOT']).replace(',', '').strip())
+                                    if p_val > 0:
+                                        cpv_totals[cve_mun] = p_val
+                                except Exception:
+                                    continue
+                        else:
+                            # Prioridad 2: Suma de manzanas urbanas habitadas
+                            mza_col = pd.to_numeric(df_cen.get('MZA', '1'), errors='coerce').fillna(0)
+                            pob_col = pd.to_numeric(df_cen['POBTOT'].replace('*', '1.5'), errors='coerce').fillna(0)
+                            df_sub = df_cen[(mza_col > 0) & (pob_col > 0)]
+                            for ent, mun, p in zip(df_sub['ENTIDAD'], df_sub['MUN'], pob_col[df_sub.index]):
+                                try:
+                                    cve_mun = f"{int(str(ent).strip()):02d}{int(str(mun).strip()):03d}"
+                                    cpv_totals[cve_mun] = cpv_totals.get(cve_mun, 0.0) + float(p)
+                                except Exception:
+                                    continue
+                        if cpv_totals:
+                            break
                 except Exception:
                     continue
 
-    # 3. Detectar municipios dentro del BBOX vía DENUE si está disponible
+    # 3. Detectar municipios que intersectan estrictamente el BBOX vía DENUE
     bbox_muns = set()
     if denue_files and bbox and len(bbox) == 4:
         min_lon, min_lat, max_lon, max_lat = bbox
-        denue_path = os.path.join(ROOT_DIR, denue_files[0]["path"])
-        for enc in ['utf-8-sig', 'latin1', 'utf-8']:
-            try:
-                df_den = pd.read_csv(denue_path, encoding=enc, low_memory=False, dtype=str)
-                df_den.columns = [c.strip().lower() for c in df_den.columns]
-                if 'longitud' in df_den.columns and 'latitud' in df_den.columns and 'cve_mun' in df_den.columns:
-                    lons = pd.to_numeric(df_den['longitud'], errors='coerce')
-                    lats = pd.to_numeric(df_den['latitud'], errors='coerce')
-                    mask = (lons >= min_lon) & (lons <= max_lon) & (lats >= min_lat) & (lats <= max_lat)
-                    muns_in = df_den.loc[mask, 'cve_mun'].dropna().unique()
-                    for m in muns_in:
-                        try:
-                            m_str = str(m).strip()
-                            if len(m_str) <= 3:
-                                ent_prefix = list(conapo_dict.keys())[0][:2] if conapo_dict else "23"
-                                bbox_muns.add(f"{ent_prefix}{int(m_str):03d}")
-                            else:
-                                bbox_muns.add(f"{int(m_str):05d}")
-                        except Exception:
-                            pass
-                    break
-            except Exception:
-                continue
+        for finfo in denue_files:
+            denue_path = os.path.join(ROOT_DIR, finfo["path"])
+            for enc in ['utf-8-sig', 'latin1', 'utf-8']:
+                try:
+                    df_den = pd.read_csv(denue_path, encoding=enc, low_memory=False, dtype=str)
+                    df_den.columns = [c.strip().lower() for c in df_den.columns]
+                    if 'longitud' in df_den.columns and 'latitud' in df_den.columns:
+                        lons = pd.to_numeric(df_den['longitud'], errors='coerce')
+                        lats = pd.to_numeric(df_den['latitud'], errors='coerce')
+                        mask = (lons >= min_lon) & (lons <= max_lon) & (lats >= min_lat) & (lats <= max_lat)
+                        df_in_bbox = df_den[mask]
+                        if 'cve_ent' in df_den.columns and 'cve_mun' in df_den.columns:
+                            for ent, mun in zip(df_in_bbox['cve_ent'].dropna(), df_in_bbox['cve_mun'].dropna()):
+                                try:
+                                    bbox_muns.add(f"{int(str(ent).strip()):02d}{int(str(mun).strip()):03d}")
+                                except Exception:
+                                    pass
+                        elif 'cve_mun' in df_den.columns:
+                            for m in df_in_bbox['cve_mun'].dropna().unique():
+                                try:
+                                    m_str = str(m).strip()
+                                    if len(m_str) >= 5:
+                                        bbox_muns.add(f"{int(m_str):05d}")
+                                    elif cpv_totals:
+                                        ent_cand = list(cpv_totals.keys())[0][:2]
+                                        bbox_muns.add(f"{ent_cand}{int(m_str):03d}")
+                                except Exception:
+                                    pass
+                        if bbox_muns:
+                            break
+                except Exception:
+                    continue
 
-    # 4. Formar lista de resultados
+    # 4. Formar lista de resultados (filtrando estrictamente por municipios dentro del BBOX)
     factors_list = []
-    for cve_5, c_info in sorted(conapo_dict.items()):
-        if cpv_totals and cve_5 not in cpv_totals:
-            continue
+    target_muns = sorted(bbox_muns) if bbox_muns else sorted(cpv_totals.keys() if cpv_totals else conapo_dict.keys())
+
+    for cve_5 in target_muns:
+        c_info = conapo_dict.get(cve_5)
         pob_2020 = cpv_totals.get(cve_5, 0.0)
-        pob_proj = c_info["pob_conapo"]
-        if pob_2020 > 0:
+        pob_proj = c_info["pob_conapo"] if c_info else pob_2020
+        nom_mun = c_info["name"] if c_info else f"Municipio {cve_5}"
+
+        if pob_2020 > 0 and pob_proj > 0:
             ratio = float(np.clip(pob_proj / pob_2020, 0.90, 1.60))
             calc_factor = round(ratio, 2)
         else:
             calc_factor = 1.05
 
-        in_bbox = (cve_5 in bbox_muns) if bbox_muns else True
         factors_list.append({
             "cve_mun": cve_5,
-            "name": c_info["name"],
+            "name": nom_mun,
             "pob_2020": int(pob_2020) if pob_2020 > 0 else None,
-            "pob_conapo": int(pob_proj),
+            "pob_conapo": int(pob_proj) if pob_proj > 0 else None,
             "factor": calc_factor,
-            "in_bbox": in_bbox
+            "in_bbox": True
         })
 
     return {

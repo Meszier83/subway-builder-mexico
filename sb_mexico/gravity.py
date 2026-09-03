@@ -255,13 +255,16 @@ def simulate_gravity_demand(
     beta: float = 0.12,
     max_distance_km: float = 55.0,
     max_pop_size: int = 150,
+    target_pop_size: int = 35,
     seed: int = 42
 ) -> List[Dict]:
     """
     Ejecuta el Modelo de Demanda en Dos Capas:
     - Capa 1: Asignación de Cuotas Exactas a POIs Especiales (Aeropuertos, Universidades).
-    - Capa 2: Modelo Gravitatorio Multinomial para Empleo Regular (DENUE).
-    Garantiza la conservación matemática estricta de la PEA y la cuota exacta de los POIs.
+    - Capa 2: Modelo Gravitatorio Multinomial Cuantizado para Empleo Regular (DENUE).
+    Garantiza la conservación matemática estricta de la PEA y agrupa viajeros en cohortes
+    (target_pop_size) para evitar la proliferación de micro-cohortes de tamaño 1 que
+    congelan el motor del juego en ticks de 15 minutos.
     """
     rng = np.random.default_rng(seed)
 
@@ -282,8 +285,10 @@ def simulate_gravity_demand(
     pop_id = 1
 
     # =========================================================================
-    # CAPA 1: ASIGNACIÓN DE DEMANDA ESPECIAL (CUOTAS EXACTAS)
+    # CAPA 1: ASIGNACIÓN DE DEMANDA ESPECIAL (CUOTAS EXACTAS EN COHORTES)
     # =========================================================================
+    effective_target = max(1, target_pop_size) if target_pop_size > 0 else max_pop_size
+
     for sp_dest in special_dests:
         target_quota = int(sp_dest["jobs"])
         if target_quota <= 0:
@@ -292,11 +297,13 @@ def simulate_gravity_demand(
         sp_id = sp_dest["id"]
         # Determinar tamaño de cohorte por tipo de infraestructura
         if sp_id.startswith("UNI_"):
-            cohort_limit = 75   # Flujo escalonado universitario
+            cohort_limit = min(75, max_pop_size)   # Flujo escalonado universitario
         elif sp_id.startswith("AIR_"):
-            cohort_limit = 120  # Flujo continuo 24/7 de aeropuerto
+            cohort_limit = min(120, max_pop_size)  # Flujo continuo 24/7 de aeropuerto
         else:
             cohort_limit = max_pop_size
+
+        sp_target = min(effective_target, cohort_limit)
 
         sp_coord = np.radians(sp_dest["location"])
         # Distancia Haversine desde todos los orígenes
@@ -305,8 +312,13 @@ def simulate_gravity_demand(
         a = np.sin(dlat / 2.0)**2 + np.cos(orig_coords[:, 1]) * np.cos(sp_coord[1]) * np.sin(dlon / 2.0)**2
         dist_km = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
 
-        # Asignación multinomial acotada por capacidad remanente (Bounded Multinomial Allocation)
-        remaining_quota = target_quota
+        # Determinar cohortes discretas para la cuota especial
+        k_sp = max(1, int(round(target_quota / sp_target)))
+        b_sp = target_quota // k_sp
+        r_sp = target_quota % k_sp
+        sp_cohort_sizes = [b_sp + 1 if j < r_sp else b_sp for j in range(k_sp)]
+
+        # Asignación de cohortes acotada por capacidad remanente (Bounded Cohort Allocation)
         sp_assigned = np.zeros(len(origins), dtype=np.int64)
 
         # Identificar si el destino especial es también un origen (evitar auto-viajes)
@@ -316,7 +328,10 @@ def simulate_gravity_demand(
                 self_orig_idx = idx
                 break
 
-        while remaining_quota > 0 and np.any(orig_pea > 0):
+        remaining_cohorts = k_sp
+        cohort_cursor = 0
+
+        while remaining_cohorts > 0 and np.any(orig_pea > 0):
             active_mask = orig_pea > 0
             if self_orig_idx is not None:
                 active_mask[self_orig_idx] = False
@@ -328,12 +343,28 @@ def simulate_gravity_demand(
             if total_w <= 0:
                 break
             sp_probs = sp_weights / total_w
-            draw = rng.multinomial(remaining_quota, sp_probs)
-            actual_alloc = np.minimum(draw, orig_pea)
-            sp_assigned += actual_alloc
-            orig_pea -= actual_alloc
-            remaining_quota = target_quota - int(sp_assigned.sum())
-            if np.all(draw == actual_alloc) or remaining_quota <= 0:
+            draw = rng.multinomial(remaining_cohorts, sp_probs)
+            allocated_this_round = 0
+
+            for i in np.where(draw > 0)[0]:
+                num_c = int(draw[i])
+                pax_wanted = sum(sp_cohort_sizes[cohort_cursor : cohort_cursor + num_c])
+                actual_pax = min(pax_wanted, int(orig_pea[i]))
+
+                sp_assigned[i] += actual_pax
+                orig_pea[i] -= actual_pax
+                if actual_pax == pax_wanted:
+                    cohort_cursor += num_c
+                    allocated_this_round += num_c
+                else:
+                    sp_cohort_sizes[cohort_cursor] = actual_pax
+                    cohort_cursor += 1
+                    allocated_this_round += 1
+                    sp_cohort_sizes.append(pax_wanted - actual_pax)
+                    remaining_cohorts += 1
+
+            remaining_cohorts -= allocated_this_round
+            if allocated_this_round == 0:
                 break
 
         # Generar cohortes a partir de los viajeros efectivamente asignados
@@ -364,7 +395,7 @@ def simulate_gravity_demand(
                 pax_left -= chunk
 
     # =========================================================================
-    # CAPA 2: ASIGNACIÓN GRAVITATORIA DE EMPLEO REGULAR (DENUE)
+    # CAPA 2: ASIGNACIÓN GRAVITATORIA DE EMPLEO REGULAR (DENUE) CON COHORTES
     # =========================================================================
     if regular_dests and np.any(orig_pea > 0):
         dest_coords = np.radians([d["location"] for d in regular_dests])
@@ -399,17 +430,30 @@ def simulate_gravity_demand(
 
         prob_matrix = weights / row_sums
 
-        # Asignar la PEA restante de cada origen
+        effective_target = max(1, target_pop_size) if target_pop_size > 0 else max_pop_size
+
+        # Asignar la PEA restante de cada origen en cohortes discretas
         for i, orig in enumerate(origins):
             rem_pea = int(orig_pea[i])
             if rem_pea <= 0:
                 continue
 
-            assignments = rng.multinomial(rem_pea, prob_matrix[i])
+            # Determinar cantidad de cohortes y sus tamaños exactos (conservación estricta de PEA)
+            k = max(1, int(round(rem_pea / effective_target)))
+            b = rem_pea // k
+            r = rem_pea % k
+            cohort_sizes = [b + 1 if j < r else b for j in range(k)]
+
+            # Sorteo multinomial de las k cohortes
+            assignments = rng.multinomial(k, prob_matrix[i])
             active_dest_indices = np.where(assignments > 0)[0]
 
+            c_idx = 0
             for d_idx in active_dest_indices:
-                pax_count = int(assignments[d_idx])
+                c_count = int(assignments[d_idx])
+                pax_count = sum(cohort_sizes[c_idx : c_idx + c_count])
+                c_idx += c_count
+
                 dest = regular_dests[d_idx]
                 d_km = float(dist_km_mat[i, d_idx])
                 dist_m, driving_seconds = calculate_commute_impedance(d_km)

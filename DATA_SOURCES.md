@@ -1,4 +1,4 @@
-# Guía de Fuentes de Datos Oficiales (México) 🇲🇽
+# Guía de Fuentes de Datos Oficiales (México) 
 
 Para generar cualquier ciudad o zona metropolitana de México, el motor requiere 5 fuentes de datos abiertas y gratuitas del INEGI y OpenStreetMap.
 

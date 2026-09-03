@@ -23,24 +23,25 @@ La versión 6.3 amplía la arquitectura declarativa y automatizada con la suite 
 
 ```text
 MANUAL SB/
-├── cities/                          # Archivos de configuración de cada ciudad (.yaml)
-│   ├── _template.yaml               # Plantilla maestra documentada
-│   ├── cancun.yaml                  # Configuración de Cancún / Q. Roo
-│   └── ...                          # Tus próximas ciudades
-├── sb_mexico/                       # Motor de procesamiento en Python
-│   ├── inegi.py                     # Ingesta y conciliación de CPV, DENUE, CE 2024, ENOE y CONAPO
-│   ├── gravity.py                   # Modelo de fricción β=0.12 y asignación multinomial con argmin
-│   ├── special_demand.py            # Generación y validación de demanda especial (Taxonomía v5)
-│   ├── toponymy.py                  # Extractor y conversor de toponimia urbana a OSM XML/PBF
-│   ├── cartography.py               # Generador cartográfico con depot.maps.MapGen
-│   └── pipeline.py                  # Orquestador del flujo completo y autovalidaciones
-├── tools/                           # Herramientas de visualización y diseño
-│   ├── wizard.py                    # Servidor web del asistente integral interactivo
-│   ├── poi_studio.py                # Visualizador y editor interactivo de POIs (Leaflet)
-│   └── preview_toponymy.py          # Visor geoespacial de capas toponímicas
-├── build.py                         # CLI ejecutable
-├── wizard.bat                       # Lanzador directo para Windows
-└── *.csv / *.osm.pbf                # Datos fuente del INEGI y OpenStreetMap
+|-- cities/                          # Archivos de configuración de cada ciudad (.yaml)
+|   |-- _template.yaml               # Plantilla maestra documentada
+|   |-- cancun.yaml                  # Configuración de Cancún / Q. Roo
+|   \-- ...                          # Tus próximas ciudades
+|-- sb_mexico/                       # Motor de procesamiento en Python
+|   |-- inegi.py                     # Ingesta y conciliación de CPV, DENUE, CE 2024, ENOE y CONAPO
+|   |-- gravity.py                   # Modelo de fricción β=0.12 y asignación multinomial con argmin
+|   |-- special_demand.py            # Generación y validación de demanda especial (Taxonomía v5)
+|   |-- toponymy.py                  # Extractor y conversor de toponimia urbana a OSM XML/PBF
+|   |-- cartography.py               # Generador cartográfico con depot.maps.MapGen
+|   |-- cartography_runner.py        # Compilación cartográfica en Linux / WSL 2
+|   \-- pipeline.py                  # Orquestador del flujo completo y autovalidaciones
+|-- tools/                           # Herramientas de visualización y diseño
+|   |-- wizard.py                    # Servidor web del asistente integral interactivo
+|   |-- poi_studio.py                # Visualizador y editor interactivo de POIs (Leaflet)
+|   \-- preview_toponymy.py          # Visor geoespacial de capas toponímicas
+|-- build.py                         # CLI ejecutable
+|-- wizard.bat                       # Lanzador directo para Windows
+\-- *.csv / *.osm.pbf                # Datos fuente del INEGI y OpenStreetMap
 ```
 
 ---

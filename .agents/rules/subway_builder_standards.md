@@ -33,10 +33,14 @@ Al trabajar en este repositorio, siempre debes seguir estos principios técnicos
 - **Proveedores de Mapas y Cero Marcas de Agua:** Usar capas sin marcas de agua ni requerimiento de API key. La capa base predeterminada en tema oscuro debe ser **Esri Dark Canvas** (`World_Dark_Gray_Base`) o CartoDB Dark sin parámetros inválidos de clave. Proveer capas complementarias (Esri World Imagery, OpenStreetMap). Configurar siempre `maxNativeZoom` y `maxZoom: 20`.
 - **Diferenciación de Capas:** Mantener separados los nodos residenciales (azul) y de empleo (rojo).
 
-### 6. Resiliencia de Scripts, Codificación y Seguridad
+### 6. Resiliencia de Scripts, Codificación Universal y Prevención de Mojibake
 - **Codificación Universal UTF-8:** Todos los archivos de documentación, scripts y datos deben ser UTF-8 estricto sin BOM con terminaciones LF y `.gitattributes` en la raíz para prevenir corrupción de caracteres (mojibake).
-- **Resolución de Rutas:** Los scripts en `tools/` y `sb_mexico/` deben resolver rutas a `cities/` y `data/` de forma flexible, verificando candidatos relativos a `ROOT_DIR`, `CWD`, `data_dir` y `output_dir`.
-- **Sanitización de Archivos:** Las APIs locales deben restringir el acceso exclusivamente a archivos dentro del directorio del proyecto para prevenir Path Traversal.
+- **Inmunidad contra Falsos Positivos de Chino (GB2312/GBK) en Editores de Windows:** 
+  - Nunca colocar emojis SMP de 4 bytes (> U+FFFF como `🚇`, `🇲🇽`, `🌟`, `🚀`) en las primeras líneas o encabezados de archivos Markdown sin BOM, ya que engañan a los algoritmos heurísticos de detección (`uchardet` en Notepad++, `jschardet` en VS Code) provocando que interpreten el archivo como GB2312 y corrompan los acentos (ej. `ó` interpretado como ideograma chino).
+  - Usar exclusivamente caracteres ASCII estándar en árboles de carpetas (`|--`, `\--`) en lugar de caracteres de dibujo de cajas (`├──`, `└──`).
+  - Mantener obligatorios `.vscode/settings.json` con `"files.autoGuessEncoding": false` y `.editorconfig` con `charset = utf-8`.
+  - La suite de pruebas debe incluir siempre el test de integridad `tests/test_encoding.py` para bloquear cualquier carácter de mojibake o BOM antes de un commit.
+- **Resolución de Rutas y Sanitización:** Los scripts en `tools/` y `sb_mexico/` deben resolver rutas a `cities/` y `data/` de forma flexible, verificando candidatos relativos a `ROOT_DIR`, `CWD`, `data_dir` y `output_dir`. Las APIs locales deben restringir el acceso exclusivamente a archivos dentro del directorio del proyecto para prevenir Path Traversal.
 
 ### 7. Zonas Metropolitanas Interestatales y Fuentes de Datos Multi-Archivo
 - **Concatenación y Deduplicación Espacial:** Para conurbaciones multi-estado (ej. ZMVM, La Laguna, Puebla-Tlaxcala, Puerto Vallarta), el motor debe aceptar múltiples archivos `RESAGEBURB` y `denue_inegi`, concatenándolos en memoria y aplicando un recorte estricto por BBOX para eliminar manzanas y establecimientos fuera del área funcional sin duplicar masa ni demanda.
@@ -47,9 +51,17 @@ Al trabajar en este repositorio, siempre debes seguir estos principios técnicos
 - **Cinemática del Zoom (Scrollwheel):** Configurar el zoom de rueda con `wheelPxPerZoomLevel: 50–60`, `wheelDebounceTime: 10ms` y `zoomSnap: 0.5` para garantizar una respuesta ágil, rápida y precisa.
 - **Calibración Interactiva de BBOX:** Las herramientas de delimitación deben contar con 4 tiradores visibles en las esquinas (`NW, NE, SE, SW`) con eventos de arrastre sincronizados en tiempo real con los campos de entrada de coordenadas.
 
-### 9. Jerarquía de Ingesta y Gestión de Archivos en Wizard
-- **Estructura Canónica de Directorios (`data/`):** Los microdatos de cada ciudad deben almacenarse de forma aislada en `data/<city_code>/` o `data/<city_name>/` (ej. `data/cancun/`, `data/gdl/`) para evitar colisiones entre entidades en conurbaciones distintas. La raíz de `data/` se reserva exclusivamente para datasets nacionales (ej. extracto OSM nacional PBF).
+### 9. Jerarquía de Ingesta y Aislamiento Hermético por Proyecto (Project Bubble Isolation)
+- **Estructura Canónica de Directorios (`data/` y `dist/`):** Los microdatos de cada ciudad deben almacenarse de forma aislada en `data/<city_code>/` o `data/<city_name>/` (ej. `data/cancun/`, `data/gdl/`) para evitar colisiones entre entidades en conurbaciones distintas. Las salidas y archivos compilados pertenecen exclusivamente a `dist/<city_slug>/`. La raíz de `data/` se reserva únicamente para datasets nacionales (ej. extracto OSM nacional PBF y proyecciones CONAPO).
+- **Cero Fugas o Fallbacks Cruzados:** Ningún endpoint del Wizard ni herramienta auxiliar (`/api/density`, `/api/demand-preview`, `/api/download`) debe caer en fallbacks a otras ciudades (como Cancún) ni a la raíz del repositorio. Si un proyecto carece de datos propios, debe retornar vacío o advertencia explícita.
+- **Purga de Memoria en Frontend:** Al crear, abrir o cambiar de proyecto en el Wizard web, se deben reiniciar y purgar a cero todas las capas Leaflet, muestras de densidad y datos en caché (`resetProjectSession()`).
 - **Ruta Activa y Controles en UI (Paso 2):** El Wizard debe mostrar explícitamente la ruta de la carpeta activa de la ciudad seleccionada y dirigir las cargas manuales a dicho subdirectorio.
-- **Detección Automática y Ciclo de Vida:** Debe existir un botón de refresco/detección automática para re-escanear `data/` tras modificaciones externas en el explorador de archivos. Cada archivo listado debe permitir su desvinculación temporal de la sesión de compilación o su eliminación física previa confirmación.
+
+### 10. Requisito Formal de WSL 2 y Puente Cartográfico Transparente (WSL Bridge)
+- **WSL 2 como Requisito Oficial:** En entornos Windows, la compilación cartográfica 3D (Planetiler, Tippecanoe, MapGen) se ejecuta obligatoriamente dentro de WSL 2 (distribución Ubuntu).
+- **Compilación Rápida con Recorte BBOX:** Si el archivo OSM PBF es nacional o grande (> 50 MB), el sistema debe recortarlo automáticamente al BBOX de la ciudad con `osmium extract` antes de pasarlo a `planetiler.jar` para recortar el tiempo de compilación de ~15 minutos a solo ~1 a 2 minutos.
+- **Compilación en Disco Nativo ext4:** La compilación de teselas debe ocurrir en la partición nativa de Linux (`~/build_<city>`) y los archivos finales transferirse a `dist/<city>/`, evitando cuellos de botella de I/O en NTFS.
+- **Auto-recuperación y Streaming:** Las llamadas a `wsl.exe` deben manejar auto-recuperación ante errores transitorios (`E_UNEXPECTED` con `wsl --shutdown`) y transmitir la telemetría en vivo línea por línea al Wizard.
+
 
 

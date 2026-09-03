@@ -226,33 +226,44 @@ def parse_ce2024_municipal(ce_path: str) -> Dict[str, Dict]:
     return benchmarks
 
 
-def parse_conapo_projections(conapo_path: str) -> Dict[str, float]:
+def parse_conapo_projections(conapo_path: str, target_year: int = 2024) -> Dict[str, float]:
     """
-    Parsea las proyecciones oficiales de población municipal de CONAPO (data-*.csv o *conapo*.csv).
-    Retorna un diccionario {cve_mun: poblacion_proyectada} (ej. {"23005": 1026725.0}).
+    Parsea las proyecciones oficiales de población municipal de CONAPO:
+    - Archivos anuales simples (data-*.csv o *conapo*.csv)
+    - Archivos quinquenales completos multianuales (pobproy_quinq1.csv, *pobproy*.csv)
+    Retorna un diccionario {cve_mun: poblacion_proyectada} (ej. {"23005": 1008615.0}).
     """
     if not os.path.exists(conapo_path):
         return {}
 
-    for enc in ['utf-8-sig', 'utf-8', 'latin1', 'cp1252']:
+    for enc in ['utf-8-sig', 'latin1', 'utf-8', 'cp1252']:
         try:
-            df = pd.read_csv(conapo_path, encoding=enc, dtype=str)
-            cols = [c.strip().upper() for c in df.columns]
+            df = pd.read_csv(conapo_path, encoding=enc, low_memory=False)
+            cols = [str(c).strip().upper() for c in df.columns]
             df.columns = cols
+
             if 'CLAVE' in cols and any('POB' in c for c in cols):
-                col_pob = [c for c in cols if 'POB_MIT_MUN' in c or 'POB_TOTAL' in c or 'POBTOT' in c or c.startswith('POB')][0]
-                projections = {}
-                for _, row in df.iterrows():
-                    cve = str(row['CLAVE']).strip()
-                    if cve.isdigit():
-                        cve_5 = f"{int(cve):05d}"
-                        try:
-                            pob_val = float(str(row[col_pob]).replace(',', '').strip())
-                            if pob_val > 0:
-                                projections[cve_5] = pob_val
-                        except ValueError:
-                            continue
-                return projections
+                pob_candidates = [c for c in cols if 'POB_TOTAL' in c or 'POB_MIT_MUN' in c or 'POBTOT' in c or c.startswith('POB')]
+                col_pob = pob_candidates[0]
+
+                # Filtrar año si el archivo contiene desglose temporal multianual
+                if 'ANO' in cols:
+                    df['ANO_num'] = pd.to_numeric(df['ANO'], errors='coerce')
+                    available_years = df['ANO_num'].dropna().unique()
+                    if len(available_years) > 0:
+                        chosen_year = target_year if target_year in available_years else (
+                            available_years[np.argmin(np.abs(available_years - target_year))]
+                        )
+                        df = df[df['ANO_num'] == chosen_year]
+
+                df['cve_clean'] = pd.to_numeric(df['CLAVE'], errors='coerce').fillna(0).astype(int)
+                df = df[df['cve_clean'] > 0]
+                df['pob_clean'] = pd.to_numeric(df[col_pob].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+
+                grouped = df.groupby('cve_clean')['pob_clean'].sum()
+                projections = {f"{cve:05d}": float(val) for cve, val in grouped.items() if val > 0}
+                if projections:
+                    return projections
         except Exception:
             continue
     return {}
