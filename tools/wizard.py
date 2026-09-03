@@ -156,6 +156,22 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
 
     city_cfg = data.get("city") or {}
+    raw_bbox = city_cfg.get("bbox")
+    if isinstance(raw_bbox, (list, tuple)) and len(raw_bbox) == 4:
+        try:
+            b0 = float(raw_bbox[0])
+            b1 = float(raw_bbox[1])
+            b2 = float(raw_bbox[2])
+            b3 = float(raw_bbox[3])
+            city_cfg["bbox"] = [
+                round(min(b0, b2), 4),
+                round(min(b1, b3), 4),
+                round(max(b0, b2), 4),
+                round(max(b1, b3), 4)
+            ]
+        except (ValueError, TypeError):
+            pass
+
     macro_cfg = data.get("macroeconomics") or {}
     pois_cfg = data.get("pois") or []
     places_cfg = data.get("places") or []
@@ -721,7 +737,10 @@ def calculate_conapo_factors(city_file: str) -> Dict[str, Any]:
     # 3. Detectar municipios que intersectan estrictamente el BBOX vía DENUE
     bbox_muns = set()
     if denue_files and bbox and len(bbox) == 4:
-        min_lon, min_lat, max_lon, max_lat = bbox
+        min_lon = min(float(bbox[0]), float(bbox[2]))
+        max_lon = max(float(bbox[0]), float(bbox[2]))
+        min_lat = min(float(bbox[1]), float(bbox[3]))
+        max_lat = max(float(bbox[1]), float(bbox[3]))
         for finfo in denue_files:
             denue_path = os.path.join(ROOT_DIR, finfo["path"])
             for enc in ['utf-8-sig', 'latin1', 'utf-8']:

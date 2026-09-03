@@ -1739,10 +1739,13 @@
       if (bboxRectangle) mapBbox.removeLayer(bboxRectangle);
       if (bboxHandlesGroup) bboxHandlesGroup.clearLayers();
 
-      const minLon = parseFloat(bbox[0]);
-      const minLat = parseFloat(bbox[1]);
-      const maxLon = parseFloat(bbox[2]);
-      const maxLat = parseFloat(bbox[3]);
+      let minLon = Math.min(parseFloat(bbox[0]), parseFloat(bbox[2]));
+      let minLat = Math.min(parseFloat(bbox[1]), parseFloat(bbox[3]));
+      let maxLon = Math.max(parseFloat(bbox[0]), parseFloat(bbox[2]));
+      let maxLat = Math.max(parseFloat(bbox[1]), parseFloat(bbox[3]));
+      const MIN_SPAN = 0.01;
+      if (maxLon - minLon < MIN_SPAN) maxLon = minLon + MIN_SPAN;
+      if (maxLat - minLat < MIN_SPAN) maxLat = minLat + MIN_SPAN;
       const bounds = [[minLat, minLon], [maxLat, maxLon]];
 
       bboxRectangle = L.rectangle(bounds, {
@@ -1856,15 +1859,34 @@
 
         marker.on('drag', (e) => {
           const latLng = e.target.getLatLng();
-          let b0 = parseFloat(document.getElementById('cfg_bbox_0').value) || minLon;
-          let b1 = parseFloat(document.getElementById('cfg_bbox_1').value) || minLat;
-          let b2 = parseFloat(document.getElementById('cfg_bbox_2').value) || maxLon;
-          let b3 = parseFloat(document.getElementById('cfg_bbox_3').value) || maxLat;
+          let b0 = parseFloat(document.getElementById('cfg_bbox_0').value);
+          let b1 = parseFloat(document.getElementById('cfg_bbox_1').value);
+          let b2 = parseFloat(document.getElementById('cfg_bbox_2').value);
+          let b3 = parseFloat(document.getElementById('cfg_bbox_3').value);
+          if (isNaN(b0)) b0 = minLon;
+          if (isNaN(b1)) b1 = minLat;
+          if (isNaN(b2)) b2 = maxLon;
+          if (isNaN(b3)) b3 = maxLat;
 
-          if (key === 'NW') { b0 = latLng.lng; b3 = latLng.lat; }
-          if (key === 'NE') { b2 = latLng.lng; b3 = latLng.lat; }
-          if (key === 'SE') { b2 = latLng.lng; b1 = latLng.lat; }
-          if (key === 'SW') { b0 = latLng.lng; b1 = latLng.lat; }
+          // Clamping para garantizar que las esquinas nunca se crucen ni inviertan coordenadas
+          const MIN_SPAN = 0.01; // ~1km mínimo de seguridad
+          if (key === 'NW') {
+            b0 = Math.min(latLng.lng, b2 - MIN_SPAN);
+            b3 = Math.max(latLng.lat, b1 + MIN_SPAN);
+            marker.setLatLng([b3, b0]);
+          } else if (key === 'NE') {
+            b2 = Math.max(latLng.lng, b0 + MIN_SPAN);
+            b3 = Math.max(latLng.lat, b1 + MIN_SPAN);
+            marker.setLatLng([b3, b2]);
+          } else if (key === 'SE') {
+            b2 = Math.max(latLng.lng, b0 + MIN_SPAN);
+            b1 = Math.min(latLng.lat, b3 - MIN_SPAN);
+            marker.setLatLng([b1, b2]);
+          } else if (key === 'SW') {
+            b0 = Math.min(latLng.lng, b2 - MIN_SPAN);
+            b1 = Math.min(latLng.lat, b3 - MIN_SPAN);
+            marker.setLatLng([b1, b0]);
+          }
 
           document.getElementById('cfg_bbox_0').value = b0.toFixed(4);
           document.getElementById('cfg_bbox_1').value = b1.toFixed(4);
@@ -1872,13 +1894,15 @@
           document.getElementById('cfg_bbox_3').value = b3.toFixed(4);
 
           cityData.city.bbox = [b0, b1, b2, b3];
-          bboxRectangle.setBounds([[Math.min(b1, b3), Math.min(b0, b2)], [Math.max(b1, b3), Math.max(b0, b2)]]);
+          bboxRectangle.setBounds([[b1, b0], [b3, b2]]);
 
           if (bboxCornerMarkers.NW && key !== 'NW') bboxCornerMarkers.NW.setLatLng([b3, b0]);
           if (bboxCornerMarkers.NE && key !== 'NE') bboxCornerMarkers.NE.setLatLng([b3, b2]);
           if (bboxCornerMarkers.SE && key !== 'SE') bboxCornerMarkers.SE.setLatLng([b1, b2]);
           if (bboxCornerMarkers.SW && key !== 'SW') bboxCornerMarkers.SW.setLatLng([b1, b0]);
+        });
 
+        marker.on('dragend', () => {
           triggerAutoSave();
         });
 
@@ -1893,11 +1917,26 @@
     }
 
     function updateBboxFromInputs() {
-      const b0 = parseFloat(document.getElementById('cfg_bbox_0').value) || 0;
-      const b1 = parseFloat(document.getElementById('cfg_bbox_1').value) || 0;
-      const b2 = parseFloat(document.getElementById('cfg_bbox_2').value) || 0;
-      const b3 = parseFloat(document.getElementById('cfg_bbox_3').value) || 0;
-      cityData.city.bbox = [b0, b1, b2, b3];
+      let b0 = parseFloat(document.getElementById('cfg_bbox_0').value);
+      let b1 = parseFloat(document.getElementById('cfg_bbox_1').value);
+      let b2 = parseFloat(document.getElementById('cfg_bbox_2').value);
+      let b3 = parseFloat(document.getElementById('cfg_bbox_3').value);
+      if (isNaN(b0) || isNaN(b1) || isNaN(b2) || isNaN(b3)) return;
+
+      const MIN_SPAN = 0.01;
+      let minLon = Math.min(b0, b2);
+      let maxLon = Math.max(b0, b2);
+      let minLat = Math.min(b1, b3);
+      let maxLat = Math.max(b1, b3);
+      if (maxLon - minLon < MIN_SPAN) maxLon = parseFloat((minLon + MIN_SPAN).toFixed(4));
+      if (maxLat - minLat < MIN_SPAN) maxLat = parseFloat((minLat + MIN_SPAN).toFixed(4));
+
+      document.getElementById('cfg_bbox_0').value = minLon.toFixed(4);
+      document.getElementById('cfg_bbox_1').value = minLat.toFixed(4);
+      document.getElementById('cfg_bbox_2').value = maxLon.toFixed(4);
+      document.getElementById('cfg_bbox_3').value = maxLat.toFixed(4);
+
+      cityData.city.bbox = [minLon, minLat, maxLon, maxLat];
       updateBboxLayer(cityData.city.bbox, false);
       triggerAutoSave();
     }
@@ -2029,7 +2068,12 @@
       const b1 = parseFloat(document.getElementById('cfg_bbox_1').value) || 0;
       const b2 = parseFloat(document.getElementById('cfg_bbox_2').value) || 0;
       const b3 = parseFloat(document.getElementById('cfg_bbox_3').value) || 0;
-      cityData.city.bbox = [b0, b1, b2, b3];
+      cityData.city.bbox = [
+        parseFloat(Math.min(b0, b2).toFixed(4)),
+        parseFloat(Math.min(b1, b3).toFixed(4)),
+        parseFloat(Math.max(b0, b2).toFixed(4)),
+        parseFloat(Math.max(b1, b3).toFixed(4))
+      ];
 
       const peaEl = document.getElementById('cfg_tasa_pea');
       if (peaEl) cityData.macroeconomics.tasa_pea = parseFloat(peaEl.value);
@@ -2084,12 +2128,19 @@
       document.getElementById('cfg_initial_zoom').value = c.initial_zoom || 11.5;
       document.getElementById('cfg_include_ocean').checked = Boolean(c.include_ocean);
 
-      const bbox = c.bbox || [-87.05, 21.0, -86.72, 21.31];
-      document.getElementById('cfg_bbox_0').value = bbox[0];
-      document.getElementById('cfg_bbox_1').value = bbox[1];
-      document.getElementById('cfg_bbox_2').value = bbox[2];
-      document.getElementById('cfg_bbox_3').value = bbox[3];
-      updateBboxLayer(bbox);
+      const rawBbox = c.bbox || [-87.05, 21.0, -86.72, 21.31];
+      const normBbox = [
+        parseFloat(Math.min(rawBbox[0], rawBbox[2]).toFixed(4)),
+        parseFloat(Math.min(rawBbox[1], rawBbox[3]).toFixed(4)),
+        parseFloat(Math.max(rawBbox[0], rawBbox[2]).toFixed(4)),
+        parseFloat(Math.max(rawBbox[1], rawBbox[3]).toFixed(4))
+      ];
+      cityData.city.bbox = normBbox;
+      document.getElementById('cfg_bbox_0').value = normBbox[0];
+      document.getElementById('cfg_bbox_1').value = normBbox[1];
+      document.getElementById('cfg_bbox_2').value = normBbox[2];
+      document.getElementById('cfg_bbox_3').value = normBbox[3];
+      updateBboxLayer(normBbox);
 
       // Paso 3
       const pea = m.tasa_pea || 0.62;

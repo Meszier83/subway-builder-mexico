@@ -206,5 +206,30 @@ class TestWizard(unittest.TestCase):
         args = parser.parse_args([])
         self.assertIsNone(args.city)
 
+    def test_bbox_inversion_auto_normalization(self):
+        """Verifica que si se proporcionan coordenadas de BBOX invertidas, se normalizan automáticamente."""
+        tmp_city = os.path.join(os.path.dirname(__file__), "tmp_inverted_bbox.yaml")
+        data = {
+            "city": {
+                "name": "Test Inverted",
+                "code": "TIN",
+                "bbox": [-86.0, 22.0, -87.0, 20.0]  # Invertido: minLon > maxLon y minLat > maxLat
+            },
+            "macroeconomics": {"tasa_pea": 0.6}
+        }
+        try:
+            saved_path = save_full_city_data(tmp_city, data)
+            reloaded = load_city_data(saved_path)
+            normalized = reloaded["city"]["bbox"]
+            self.assertEqual(normalized, [-87.0, 20.0, -86.0, 22.0])
+
+            # También verificar en sb_mexico.pipeline.load_city_config
+            from sb_mexico.pipeline import load_city_config
+            cfg = load_city_config(saved_path)
+            self.assertEqual(cfg["city"]["bbox"], [-87.0, 20.0, -86.0, 22.0])
+        finally:
+            if os.path.exists(tmp_city):
+                os.remove(tmp_city)
+
 if __name__ == '__main__':
     unittest.main()

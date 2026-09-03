@@ -78,6 +78,20 @@ def load_city_config(config_path: str) -> Dict[str, Any]:
         if k not in config:
             raise KeyError(f"El archivo de configuración carece de la sección obligatoria '{k}'.")
 
+    # Normalizar BBOX para prevenir coordenadas invertidas
+    if "city" in config and "bbox" in config["city"]:
+        raw_b = config["city"]["bbox"]
+        if isinstance(raw_b, (list, tuple)) and len(raw_b) == 4:
+            try:
+                config["city"]["bbox"] = [
+                    round(min(float(raw_b[0]), float(raw_b[2])), 4),
+                    round(min(float(raw_b[1]), float(raw_b[3])), 4),
+                    round(max(float(raw_b[0]), float(raw_b[2])), 4),
+                    round(max(float(raw_b[1]), float(raw_b[3])), 4)
+                ]
+            except (ValueError, TypeError):
+                pass
+
     return config
 
 
