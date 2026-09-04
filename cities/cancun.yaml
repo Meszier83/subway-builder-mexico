@@ -27,6 +27,12 @@ macroeconomics:
 
   growth_factors:
     "23005": 1.07
+    "23003": 1.05
+
+isolated_zones:
+  - id: "isla_mujeres"
+    name: "Isla Mujeres"
+    bbox: [-86.76, 21.20, -86.68, 21.27]
 
 pois:
   - id: "AIR_Cancún"

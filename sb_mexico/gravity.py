@@ -13,10 +13,13 @@ import math
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Union
 from shapely.geometry import Point
 from shapely.strtree import STRtree
 from shapely.ops import nearest_points
+from scipy.spatial import cKDTree
+from scipy.sparse.csgraph import shortest_path
+import networkx as nx
 
 
 DEFAULT_RADIUS_METERS = {
@@ -56,10 +59,13 @@ def build_demand_grid(
                 radius_m = DEFAULT_RADIUS_METERS["DEFAULT"]
 
         cos_lat = math.cos(math.radians(poi["loc"][1]))
+        r_m = float(radius_m)
         pois_resolved.append({
             **poi,
-            "radius_m": radius_m,
+            "radius_m": r_m,
             "cos_lat": cos_lat,
+            "d_lat_max": r_m / 110574.0,
+            "d_lon_max": r_m / (111320.0 * max(0.1, cos_lat)),
             "mode": poi.get("mode", "MAX").upper(),
             "denue_jobs_absorbidos": 0.0,
             "jobs_declarados": int(poi.get("jobs", 0))
@@ -80,10 +86,14 @@ def build_demand_grid(
         r_lat = float(rec['lat'])
         r_jobs = float(rec['calibrated_jobs'])
         
-        # Verificar si cae dentro de algún POI especial (distancia métrica precisa)
+        # Verificar si cae dentro de algún POI especial (con prefiltro rápido de bounding box)
         matched_poi = None
         best_dist = float('inf')
         for poi in pois_resolved:
+            if abs(r_lat - poi["loc"][1]) > poi["d_lat_max"]:
+                continue
+            if abs(r_lon - poi["loc"][0]) > poi["d_lon_max"]:
+                continue
             d_lon_m = (r_lon - poi["loc"][0]) * 111_320.0 * poi["cos_lat"]
             d_lat_m = (r_lat - poi["loc"][1]) * 110_574.0
             dist_m = math.hypot(d_lon_m, d_lat_m)
@@ -315,6 +325,212 @@ def calculate_commute_impedance(d_km: float) -> Tuple[int, int]:
     return dist_m, driving_seconds
 
 
+class ArterialRoadIndex:
+    """
+    Índice de distancias y tiempos de viaje sobre la red vial arterial real (OSM).
+    Permite calcular impedancias de viaje considerando obstáculos geográficos (lagunas,
+    ríos, bahías, penínsulas) de forma 100% automática a partir de roads.geojson.
+    """
+    def __init__(
+        self,
+        dist_matrix: np.ndarray,
+        all_nodes_coords: np.ndarray,
+        all_node_to_junction: Dict[int, Tuple[int, float]]
+    ):
+        self.dist_matrix = dist_matrix
+        self.all_nodes_coords = all_nodes_coords
+        self.all_node_to_junction = all_node_to_junction
+        self.kdtree = cKDTree(all_nodes_coords) if len(all_nodes_coords) > 0 else None
+
+    def get_driving_impedance(
+        self,
+        orig_loc: Union[List[float], Tuple[float, float], np.ndarray],
+        dest_loc: Union[List[float], Tuple[float, float], np.ndarray],
+        euclid_d_km: float
+    ) -> Tuple[int, int]:
+        """
+        Calcula distancia (m) y drivingSeconds aplicando las 3 salvaguardas:
+        1. Piso Físico: dist_road >= dist_euclid
+        2. Techo de Desvío Acotado: dist_road <= 3.5 * dist_euclid
+        3. Fallback Seguro: Si no hay conexión en red vial, usa calculate_commute_impedance.
+        """
+        euclid_m = max(150.0, float(euclid_d_km) * 1000.0)
+        if self.kdtree is None or self.dist_matrix.size == 0:
+            return calculate_commute_impedance(euclid_d_km)
+
+        # 1. Proyectar origen y destino al nodo vial más cercano
+        orig_arr = np.array([orig_loc[0], orig_loc[1]], dtype=np.float64)
+        dest_arr = np.array([dest_loc[0], dest_loc[1]], dtype=np.float64)
+
+        _, orig_node_idx = self.kdtree.query(orig_arr)
+        _, dest_node_idx = self.kdtree.query(dest_arr)
+
+        cos_lat = math.cos(math.radians((orig_arr[1] + dest_arr[1]) / 2.0))
+        d_orig_road = math.hypot(
+            (orig_arr[0] - self.all_nodes_coords[orig_node_idx][0]) * 111_320.0 * cos_lat,
+            (orig_arr[1] - self.all_nodes_coords[orig_node_idx][1]) * 110_574.0
+        )
+        d_dest_road = math.hypot(
+            (dest_arr[0] - self.all_nodes_coords[dest_node_idx][0]) * 111_320.0 * cos_lat,
+            (dest_arr[1] - self.all_nodes_coords[dest_node_idx][1]) * 110_574.0
+        )
+
+        j_orig, d_chain_orig = self.all_node_to_junction[orig_node_idx]
+        j_dest, d_chain_dest = self.all_node_to_junction[dest_node_idx]
+
+        if j_orig == j_dest:
+            network_m = abs(d_chain_orig - d_chain_dest)
+        else:
+            network_m = float(self.dist_matrix[j_orig, j_dest])
+
+        # Salvaguarda 3: Fallback si no hay ruta conectada
+        if math.isinf(network_m) or math.isnan(network_m):
+            return calculate_commute_impedance(euclid_d_km)
+
+        road_m = network_m + d_chain_orig + d_chain_dest + d_orig_road + d_dest_road
+
+        # Salvaguarda 1: Piso Físico (dist_road >= dist_euclid)
+        road_m = max(road_m, euclid_m)
+
+        # Salvaguarda 2: Techo de Desvío Acotado (dist_road <= 3.5 * dist_euclid)
+        road_m = min(road_m, 3.5 * euclid_m)
+
+        # Velocidad de congestión urbana con factor de desvío
+        d_km = road_m / 1000.0
+        detour_ratio = road_m / max(1.0, euclid_m)
+        base_speed = 15.0 + 55.0 * (1.0 - math.exp(-d_km / 6.0))
+        speed_factor = 1.0 / math.sqrt(max(1.0, detour_ratio))
+        effective_speed_kmh = max(15.0, base_speed * speed_factor)
+        speed_ms = effective_speed_kmh / 3.6
+
+        driving_seconds = max(45, int(45 + road_m / speed_ms))
+        return int(round(road_m)), driving_seconds
+
+
+def build_arterial_road_network(roads_gdf: gpd.GeoDataFrame) -> Optional[ArterialRoadIndex]:
+    """
+    Construye un índice topológico de la red arterial vial a partir de un GeoDataFrame de carreteras.
+    Contrae cadenas de grado 2 a intersecciones principales para resolver caminos mínimos en milisegundos.
+    Retorna None si roads_gdf está vacío o carece de geometrías transitables.
+    """
+    if roads_gdf is None or len(roads_gdf) == 0:
+        return None
+
+    # Filtrar arterias principales
+    if "roadClass" in roads_gdf.columns:
+        major_gdf = roads_gdf[roads_gdf["roadClass"].isin(["major", "highway"])]
+        if len(major_gdf) == 0:
+            major_gdf = roads_gdf
+    elif "highway" in roads_gdf.columns:
+        accessible_highways = {
+            "motorway", "trunk", "primary", "secondary", "tertiary",
+            "motorway_link", "trunk_link", "primary_link", "secondary_link"
+        }
+        major_gdf = roads_gdf[roads_gdf["highway"].isin(accessible_highways)]
+        if len(major_gdf) == 0:
+            major_gdf = roads_gdf
+    else:
+        major_gdf = roads_gdf
+
+    # Extraer segmentos de líneas
+    lines = []
+    for geom in major_gdf.geometry:
+        if geom is None or geom.is_empty:
+            continue
+        if geom.geom_type == "MultiLineString":
+            lines.extend(geom.geoms)
+        elif geom.geom_type == "LineString":
+            lines.append(geom)
+
+    if not lines:
+        return None
+
+    # Construir grafo topológico base
+    G = nx.Graph()
+    for geom in lines:
+        coords = list(geom.coords)
+        for u, v in zip(coords[:-1], coords[1:]):
+            dx = (v[0] - u[0]) * 111_320.0 * math.cos(math.radians((u[1] + v[1]) / 2.0))
+            dy = (v[1] - u[1]) * 110_574.0
+            d = math.hypot(dx, dy)
+            u_r = (round(u[0], 5), round(u[1], 5))
+            v_r = (round(v[0], 5), round(v[1], 5))
+            if u_r != v_r:
+                prev_w = G.get_edge_data(u_r, v_r, {}).get("weight", float("inf"))
+                G.add_edge(u_r, v_r, weight=min(d, prev_w))
+
+    if G.number_of_nodes() < 2 or G.number_of_edges() == 0:
+        return None
+
+    # Identificar nodos de unión/intersección (grado != 2)
+    junctions = set(n for n, d in G.degree() if d != 2)
+    if not junctions:
+        junctions = set(G.nodes())
+
+    node_to_junction = {j: (j, 0.0) for j in junctions}
+    contracted_G = nx.Graph()
+    for j in junctions:
+        contracted_G.add_node(j)
+
+    visited_edges = set()
+    for j in junctions:
+        for neighbor in G.neighbors(j):
+            edge_key = tuple(sorted([j, neighbor]))
+            if edge_key in visited_edges:
+                continue
+            visited_edges.add(edge_key)
+
+            curr = neighbor
+            prev = j
+            chain = [j, curr]
+            cum_dist = [0.0, G[prev][curr]["weight"]]
+
+            while curr not in junctions and G.degree(curr) == 2:
+                next_nodes = [n for n in G.neighbors(curr) if n != prev]
+                if not next_nodes:
+                    break
+                nxt = next_nodes[0]
+                visited_edges.add(tuple(sorted([curr, nxt])))
+                w = G[curr][nxt]["weight"]
+                prev = curr
+                curr = nxt
+                chain.append(curr)
+                cum_dist.append(cum_dist[-1] + w)
+
+            total_len = cum_dist[-1]
+            target_j = curr
+            if target_j in junctions:
+                prev_w = contracted_G.get_edge_data(j, target_j, {}).get("weight", float("inf"))
+                contracted_G.add_edge(j, target_j, weight=min(total_len, prev_w))
+
+            for idx_c, node in enumerate(chain):
+                d_from_start = cum_dist[idx_c]
+                d_from_end = total_len - d_from_start
+                if d_from_start <= d_from_end or target_j not in junctions:
+                    node_to_junction[node] = (j, d_from_start)
+                else:
+                    node_to_junction[node] = (target_j, d_from_end)
+
+    j_list = list(contracted_G.nodes())
+    j_to_idx = {j: i for i, j in enumerate(j_list)}
+    adj = nx.to_scipy_sparse_array(contracted_G, nodelist=j_list, weight="weight", format="csr")
+    dist_matrix = shortest_path(csgraph=adj, directed=False)
+
+    all_nodes = list(G.nodes())
+    all_nodes_coords = np.array(all_nodes, dtype=np.float64)
+
+    all_node_to_junction_idx = {}
+    for idx_n, node in enumerate(all_nodes):
+        j_node, d_chain = node_to_junction[node]
+        all_node_to_junction_idx[idx_n] = (j_to_idx[j_node], d_chain)
+
+    return ArterialRoadIndex(
+        dist_matrix=dist_matrix,
+        all_nodes_coords=all_nodes_coords,
+        all_node_to_junction=all_node_to_junction_idx
+    )
+
+
 def assign_zones(coords: np.ndarray, isolated_zones: Optional[List[Dict]] = None) -> np.ndarray:
     """
     Asigna un ID de zona topológica a cada coordenada [lon, lat] (en grados).
@@ -450,7 +666,8 @@ def simulate_gravity_demand(
     seed: int = 42,
     isolated_zones: Optional[List[Dict]] = None,
     furness_iterations: int = 15,
-    furness_tol: float = 0.02
+    furness_tol: float = 0.02,
+    road_index: Optional["ArterialRoadIndex"] = None
 ) -> List[Dict]:
     """
     Ejecuta el Modelo de Demanda en Dos Capas:
@@ -574,7 +791,12 @@ def simulate_gravity_demand(
 
             orig = origins[i]
             d_km = float(dist_km[i])
-            dist_m, driving_seconds = calculate_commute_impedance(d_km)
+            if road_index is not None:
+                dist_m, driving_seconds = road_index.get_driving_impedance(
+                    orig["location"], sp_dest["location"], d_km
+                )
+            else:
+                dist_m, driving_seconds = calculate_commute_impedance(d_km)
 
             pax_left = int(count)
             while pax_left > 0:
@@ -691,7 +913,12 @@ def simulate_gravity_demand(
 
                 dest = regular_dests[d_idx]
                 d_km = float(dist_km_mat[i, d_idx])
-                dist_m, driving_seconds = calculate_commute_impedance(d_km)
+                if road_index is not None:
+                    dist_m, driving_seconds = road_index.get_driving_impedance(
+                        orig["location"], dest["location"], d_km
+                    )
+                else:
+                    dist_m, driving_seconds = calculate_commute_impedance(d_km)
 
                 while pax_count > 0:
                     chunk = min(pax_count, max_pop_size)

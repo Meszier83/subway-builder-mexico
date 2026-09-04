@@ -31,7 +31,9 @@ from sb_mexico.gravity import (
     build_demand_grid,
     simulate_gravity_demand,
     sanitize_demand_points,
-    assign_zones
+    assign_zones,
+    build_arterial_road_network,
+    ArterialRoadIndex
 )
 from sb_mexico.cartography import build_city_map
 from sb_mexico.special_demand import (
@@ -327,9 +329,17 @@ def execute_pipeline(
     if not os.path.exists(roads_path) and os.path.exists(os.path.join(src_dir, "roads.geojson")):
         roads_path = os.path.join(src_dir, "roads.geojson")
 
+    road_index = None
     if os.path.exists(roads_path):
         roads_gdf = gpd.read_file(roads_path)
         console.print(f"-> Snapping vial activado: [cyan]{len(roads_gdf):,}[/cyan] segmentos de vía ({os.path.basename(roads_path)}).")
+        try:
+            road_index = build_arterial_road_network(roads_gdf)
+            if road_index is not None:
+                console.print(f"-> Grafo arterial topológico construido: [green]{len(road_index.all_nodes_coords):,}[/green] nodos viales activos.")
+        except Exception as e:
+            console.print(f"[yellow]-> Advertencia construyendo grafo arterial ({e}). Se aplicará modelo continuo base.[/yellow]")
+            road_index = None
     else:
         roads_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
         console.print("[yellow]-> roads.geojson no encontrado. La malla de demanda se posicionará en los centroides urbanos sin snapping vial.[/yellow]")
@@ -372,16 +382,22 @@ def execute_pipeline(
 
     total_pea = sum(p.get("pea_15ymas", 0) for p in demand_points)
 
+    target_pop_size = macro.get("target_pop_size")
+    if target_pop_size is None:
+        target_pop_size = max(35, int(round(total_pea / 18000.0)))
+        console.print(f"-> Calibración adaptativa de cohortes: [cyan]target_pop_size = {target_pop_size}[/cyan] (PEA: {total_pea:,})")
+
     pops = simulate_gravity_demand(
         demand_points=demand_points,
         beta=macro.get("gravity_beta", 0.12),
         max_distance_km=macro.get("max_distance_km", 55.0),
         max_pop_size=macro.get("max_pop_size", 150),
-        target_pop_size=macro.get("target_pop_size", 35),
+        target_pop_size=target_pop_size,
         seed=city_info.get("seed", 42),
         isolated_zones=isolated_zones,
         furness_iterations=macro.get("furness_iterations", 15),
-        furness_tol=macro.get("furness_tol", 0.02)
+        furness_tol=macro.get("furness_tol", 0.02),
+        road_index=road_index
     )
 
     total_viajeros = sum(p["size"] for p in pops)
