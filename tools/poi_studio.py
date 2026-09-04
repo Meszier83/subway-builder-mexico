@@ -473,8 +473,8 @@ def main():
     )
     parser.add_argument(
         "--city",
-        default="cities/cancun.yaml",
-        help="Archivo YAML de ciudad inicial a cargar (ej. cities/cancun.yaml)"
+        default=None,
+        help="Archivo YAML de ciudad inicial a cargar (ej. cities/<ciudad>.yaml)"
     )
     parser.add_argument(
         "--port",

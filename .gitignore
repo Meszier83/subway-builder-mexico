@@ -24,3 +24,7 @@ dist/
 data/
 *.html
 !tools/templates/*.html
+
+# Proyectos de ciudades locales (el repositorio publico solo incluye _template.yaml)
+cities/*.yaml
+!cities/_template.yaml
