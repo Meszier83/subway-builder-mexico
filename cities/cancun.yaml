@@ -1,14 +1,14 @@
 # ==============================================================================
-# CONFIGURACIÓN: CANCÚN (CUN) - SUBWAY BUILDER MÉXICO v6.3
+# CONFIGURACIÓN: Cancún  (CUN) - SUBWAY BUILDER MÉXICO v6.3
 # ==============================================================================
 
 city:
   code: "CUN"
-  name: "Cancún y Riviera Norte"
-  description: "Zona Metropolitana de Cancún, Isla Mujeres y Corredor Turístico"
-  bbox: [-87.050, 21.000, -86.720, 21.310] # [min_lon, min_lat, max_lon, max_lat]
-  creator: "Keppler"
-  grid_size: 0.0025
+  name: "Cancún "
+  description: "Zona Metropolitana de Cancún"
+  bbox: [-87.2739, 20.8256, -86.6643, 21.3636]
+  creator: "Messier83"
+  grid_size: 0.0018
   min_residents: 10
   min_jobs: 3
   initial_zoom: 11.5
@@ -17,16 +17,17 @@ city:
   include_ocean: true
 
 macroeconomics:
-  tasa_pea: 0.6644                     # ENOE Q. Roo Q2-2026
-  til_1_state: 0.4497                  # TIL1 ENOE Q. Roo Q2-2026
+  tasa_pea: 0.665
+  til_1_state: 0.45
   sample_threshold: 500
-  default_growth_factor: 1.05          # 5% de crecimiento intercensal
-  gravity_beta: 0.12                   # Fricción calibrada
+  default_growth_factor: 1.05
+  gravity_beta: 0.12
   max_distance_km: 50.0
   max_pop_size: 150
 
   growth_factors:
-    "23005": 1.07                      # Benito Juárez (Cancún)
+    "23005": 1.07
+
 pois:
   - id: "AIR_Cancún"
     name:
@@ -90,4 +91,3 @@ pois:
     jobs: 14000
     radius_m: 800
     mode: "MAX"
-

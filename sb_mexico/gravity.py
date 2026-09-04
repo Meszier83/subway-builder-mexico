@@ -70,7 +70,11 @@ def build_demand_grid(
     def get_grid_key(lon: float, lat: float) -> str:
         return f"{int(math.floor(lon / grid_size))}_{int(math.floor(lat / grid_size))}"
 
-    denue_records = df_denue[['lon', 'lat', 'calibrated_jobs']].to_dict('records')
+    denue_records = (
+        df_denue[['lon', 'lat', 'calibrated_jobs']].to_dict('records')
+        if not df_denue.empty and all(c in df_denue.columns for c in ['lon', 'lat', 'calibrated_jobs'])
+        else []
+    )
     for rec in denue_records:
         r_lon = float(rec['lon'])
         r_lat = float(rec['lat'])
@@ -91,28 +95,40 @@ def build_demand_grid(
             matched_poi["denue_jobs_absorbidos"] += r_jobs
             continue  # Se absorbe por el POI más cercano para evitar doble conteo
 
-        # Sumar a la malla regular con acumulación O(1) de memoria
+        # Sumar a la malla regular con acumulación de masa humana activa
         k = get_grid_key(r_lon, r_lat)
         if k not in grid:
-            grid[k] = {"sum_lon": 0.0, "sum_lat": 0.0, "count": 0, "jobs": 0.0, "residents": 0.0, "pea": 0.0}
+            grid[k] = {
+                "sum_lon_w": 0.0, "sum_lat_w": 0.0, "weight": 0.0,
+                "jobs": 0.0, "residents": 0.0, "pea": 0.0
+            }
         cell = grid[k]
-        cell["sum_lon"] += r_lon
-        cell["sum_lat"] += r_lat
-        cell["count"] += 1
+        w = max(0.1, r_jobs)
+        cell["sum_lon_w"] += r_lon * w
+        cell["sum_lat_w"] += r_lat * w
+        cell["weight"] += w
         cell["jobs"] += r_jobs
 
     # 3. Sumar Población del Censo a la Malla
-    cpv_records = df_cpv[['lon', 'lat', 'pobtot_adj', 'pea_real']].to_dict('records')
+    cpv_records = (
+        df_cpv[['lon', 'lat', 'pobtot_adj', 'pea_real']].to_dict('records')
+        if not df_cpv.empty and all(c in df_cpv.columns for c in ['lon', 'lat', 'pobtot_adj', 'pea_real'])
+        else []
+    )
     for rec in cpv_records:
         r_lon = float(rec['lon'])
         r_lat = float(rec['lat'])
         k = get_grid_key(r_lon, r_lat)
         if k not in grid:
-            grid[k] = {"sum_lon": 0.0, "sum_lat": 0.0, "count": 0, "jobs": 0.0, "residents": 0.0, "pea": 0.0}
+            grid[k] = {
+                "sum_lon_w": 0.0, "sum_lat_w": 0.0, "weight": 0.0,
+                "jobs": 0.0, "residents": 0.0, "pea": 0.0
+            }
         cell = grid[k]
-        cell["sum_lon"] += r_lon
-        cell["sum_lat"] += r_lat
-        cell["count"] += 1
+        w = max(0.1, float(rec['pobtot_adj']))
+        cell["sum_lon_w"] += r_lon * w
+        cell["sum_lat_w"] += r_lat * w
+        cell["weight"] += w
         cell["residents"] += float(rec['pobtot_adj'])
         cell["pea"] += float(rec['pea_real'])
 
@@ -139,19 +155,52 @@ def build_demand_grid(
 
     tree = STRtree(road_geoms) if len(road_geoms) > 0 else None
 
-    # 5. Construir lista de demand_points regulares
-    demand_points = []
-    valid_cells = [
-        (k, cell) for k, cell in grid.items()
-        if not (cell["jobs"] < min_jobs and cell["residents"] < min_residents)
-    ]
+    # 5. Consolidación de Celdas Sub-Umbral (Conservación Estricta de Masa y PEA)
+    valid_cells = []
+    subthreshold_cells = []
+    for k, cell in grid.items():
+        if cell["jobs"] >= min_jobs or cell["residents"] >= min_residents:
+            valid_cells.append((k, cell))
+        elif cell["jobs"] > 0 or cell["residents"] > 0 or cell["pea"] > 0:
+            subthreshold_cells.append((k, cell))
 
+    if valid_cells and subthreshold_cells:
+        valid_pts_for_consolidation = [
+            Point(
+                c["sum_lon_w"] / c["weight"] if c["weight"] > 0 else (float(k.split("_")[0]) + 0.5) * grid_size,
+                c["sum_lat_w"] / c["weight"] if c["weight"] > 0 else (float(k.split("_")[1]) + 0.5) * grid_size
+            )
+            for k, c in valid_cells
+        ]
+        cell_tree = STRtree(valid_pts_for_consolidation)
+        sub_pts = [
+            Point(
+                c["sum_lon_w"] / c["weight"] if c["weight"] > 0 else (float(k.split("_")[0]) + 0.5) * grid_size,
+                c["sum_lat_w"] / c["weight"] if c["weight"] > 0 else (float(k.split("_")[1]) + 0.5) * grid_size
+            )
+            for k, c in subthreshold_cells
+        ]
+        nearest_valid_indices = cell_tree.query_nearest(sub_pts, all_matches=False)[1]
+        for sub_idx, v_idx in enumerate(nearest_valid_indices):
+            target_cell = valid_cells[int(v_idx)][1]
+            sub_cell = subthreshold_cells[sub_idx][1]
+            target_cell["jobs"] += sub_cell["jobs"]
+            target_cell["residents"] += sub_cell["residents"]
+            target_cell["pea"] += sub_cell["pea"]
+            target_cell["sum_lon_w"] += sub_cell["sum_lon_w"]
+            target_cell["sum_lat_w"] += sub_cell["sum_lat_w"]
+            target_cell["weight"] += sub_cell["weight"]
+    elif not valid_cells and subthreshold_cells:
+        valid_cells = subthreshold_cells
+
+    # 6. Construir lista de demand_points regulares con Centroides Ponderados por Masa
+    demand_points = []
     points_to_snap = [
         Point(
-            float(cell["sum_lon"] / max(1, cell["count"])),
-            float(cell["sum_lat"] / max(1, cell["count"]))
+            float(cell["sum_lon_w"] / cell["weight"]) if cell["weight"] > 0 else (float(k.split("_")[0]) + 0.5) * grid_size,
+            float(cell["sum_lat_w"] / cell["weight"]) if cell["weight"] > 0 else (float(k.split("_")[1]) + 0.5) * grid_size
         )
-        for _, cell in valid_cells
+        for k, cell in valid_cells
     ]
 
     if tree is not None and len(points_to_snap) > 0:
@@ -159,13 +208,22 @@ def build_demand_grid(
     else:
         nearest_indices = [None] * len(points_to_snap)
 
+    MIN_SNAP_METERS = 5.0
+    MAX_SNAP_METERS = 300.0
+
     for idx, ((k, cell), pt, near_idx) in enumerate(zip(valid_cells, points_to_snap, nearest_indices)):
         lon, lat = pt.x, pt.y
         if near_idx is not None and tree is not None:
             nearest_road = road_geoms[int(near_idx)]
-            if pt.distance(nearest_road) > 0.0004:  # > ~44m
-                proj_pt = nearest_points(pt, nearest_road)[1]
-                lon, lat = proj_pt.x, proj_pt.y
+            proj_candidate = nearest_points(pt, nearest_road)[1]
+            cos_lat = math.cos(math.radians(lat))
+            dx_m = (proj_candidate.x - pt.x) * 111_320.0 * cos_lat
+            dy_m = (proj_candidate.y - pt.y) * 110_574.0
+            dist_m = math.hypot(dx_m, dy_m)
+
+            # Snapping vial acotado en rango 5m a 300m
+            if MIN_SNAP_METERS <= dist_m <= MAX_SNAP_METERS:
+                lon, lat = proj_candidate.x, proj_candidate.y
 
         demand_points.append({
             "id": f"dp_{idx+1:04d}",
@@ -176,7 +234,7 @@ def build_demand_grid(
             "popIds": []
         })
 
-    # 6. Resolver y agregar POIs Especiales
+    # 7. Resolver y agregar POIs Especiales
     poi_audit = []
     if len(pois_resolved) > 0:
         poi_pts = [Point(p["loc"][0], p["loc"][1]) for p in pois_resolved]
@@ -206,9 +264,14 @@ def build_demand_grid(
             lon, lat = poi["loc"][0], poi["loc"][1]
             if near_idx is not None and tree is not None:
                 nearest_road = road_geoms[int(near_idx)]
-                if pt.distance(nearest_road) > 0.0004:
-                    proj_pt = nearest_points(pt, nearest_road)[1]
-                    lon, lat = proj_pt.x, proj_pt.y
+                proj_candidate = nearest_points(pt, nearest_road)[1]
+                cos_lat = math.cos(math.radians(lat))
+                dx_m = (proj_candidate.x - pt.x) * 111_320.0 * cos_lat
+                dy_m = (proj_candidate.y - pt.y) * 110_574.0
+                dist_m = math.hypot(dx_m, dy_m)
+
+                if MIN_SNAP_METERS <= dist_m <= MAX_SNAP_METERS:
+                    lon, lat = proj_candidate.x, proj_candidate.y
 
             demand_points.append({
                 "id": poi["id"],
@@ -234,20 +297,148 @@ def build_demand_grid(
 
 def calculate_commute_impedance(d_km: float) -> Tuple[int, int]:
     """
-    Calcula distancia y tiempo de manejo con modelo de congestión urbana no lineal.
-    - Curva asintótica de velocidad: 18 km/h (centro denso) a 65 km/h (vías rápidas).
-    - Tortuosidad de red vial: 1.40 (cuadrícula urbana corta) a 1.25 (autopistas largas).
+    Calcula distancia y tiempo de manejo con modelo de congestión urbana continuo no lineal.
+    - Tortuosidad continua: tau(d) = 1.20 + 0.20 * exp(-d / 6.0) (de 1.40 urbano a 1.20 autopista).
+    - Distancia real estimada: max(150, int(d * 1000.0 * tau(d))).
+    - Curva de velocidad suave: V(d) = 15.0 + 55.0 * (1 - exp(-d / 6.0)) km/h.
+    - Tiempo de manejo: max(45, int(45 + dist_m / (V(d) / 3.6))).
+    Elimina pisos rígidos artificiales (antes 800m y 180s) preservando viajes peatonales/cortos.
     """
-    # Tortuosidad según longitud del viaje
-    tau = 1.25 + 0.15 * np.exp(-d_km / 10.0)
-    dist_m = max(800, int(d_km * 1000.0 * tau))
+    d = max(0.0, float(d_km))
+    tau = 1.20 + 0.20 * np.exp(-d / 6.0)
+    dist_m = max(150, int(d * 1000.0 * tau))
 
-    # Curva de velocidad suave
-    speed_kmh = 18.0 + (65.0 - 18.0) * (1.0 - np.exp(-d_km / 8.0))
+    speed_kmh = 15.0 + 55.0 * (1.0 - np.exp(-d / 6.0))
     speed_ms = speed_kmh / 3.6
-    driving_seconds = max(180, int(dist_m / speed_ms))
+    driving_seconds = max(45, int(45 + dist_m / speed_ms))
 
     return dist_m, driving_seconds
+
+
+def assign_zones(coords: np.ndarray, isolated_zones: Optional[List[Dict]] = None) -> np.ndarray:
+    """
+    Asigna un ID de zona topológica a cada coordenada [lon, lat] (en grados).
+    - 0: Territorio base / continental.
+    - 1..K: Zonas aisladas (islas o cuencas sin conexión vial directa).
+    """
+    n = len(coords)
+    zones = np.zeros(n, dtype=np.int32)
+    if not isolated_zones:
+        return zones
+
+    lons = coords[:, 0]
+    lats = coords[:, 1]
+    for idx, z in enumerate(isolated_zones, start=1):
+        if "bbox" in z:
+            b = z["bbox"]  # [min_lon, min_lat, max_lon, max_lat]
+            mask = (lons >= b[0]) & (lons <= b[2]) & (lats >= b[1]) & (lats <= b[3])
+            zones[mask] = idx
+        elif "polygon" in z:
+            from shapely.geometry import Point
+            poly = z["polygon"]
+            for i in range(n):
+                if poly.contains(Point(lons[i], lats[i])):
+                    zones[i] = idx
+    return zones
+
+
+def furness_ipfp_balance(
+    orig_pea: np.ndarray,
+    dest_jobs: np.ndarray,
+    dist_km_mat: np.ndarray,
+    beta: float = 0.12,
+    max_distance_km: float = 55.0,
+    max_iter: int = 15,
+    tol: float = 0.02
+) -> np.ndarray:
+    """
+    Ejecuta el Algoritmo de Furness / IPFP (Iterative Proportional Fitting Procedure)
+    para un Modelo Gravitatorio Doblemente Acotado (Doubly-Constrained).
+
+    Garantiza que la matriz de flujos converja simultáneamente hacia:
+    1. Totales por fila: Sum_j T_ij = O_i (PEA residencial por origen).
+    2. Totales por columna: Sum_i T_ij proporcional a D_j (Capacidad de puestos de trabajo).
+    3. Fricción espacial: f(d_ij) = exp(-beta * d_ij) para d_ij <= max_distance_km.
+
+    Retorna la matriz de probabilidades condicionales P_ij = T_ij / O_i de dimensión (N, M),
+    donde cada fila suma exactamente 1.0.
+    """
+    n_orig = len(orig_pea)
+    n_dest = len(dest_jobs)
+    if n_orig == 0 or n_dest == 0:
+        return np.zeros((n_orig, n_dest), dtype=np.float64)
+
+    total_o = float(orig_pea.sum())
+    total_d = float(dest_jobs.sum())
+
+    if total_o <= 0 or total_d <= 0:
+        return np.full((n_orig, n_dest), 1.0 / n_dest, dtype=np.float64)
+
+    # 1. Normalizar capacidad de destinos a la masa total de PEA (Sum_j D*_j == Sum_i O_i)
+    d_target = (dest_jobs.astype(np.float64) / total_d) * total_o
+    o_target = orig_pea.astype(np.float64)
+
+    # 2. Matriz de Fricción Espacial Base
+    friction = np.exp(-beta * dist_km_mat)
+    friction[dist_km_mat > max_distance_km] = 0.0
+
+    # 3. Inicializar Matriz de Flujos T_ij^(0)
+    t_mat = (o_target[:, np.newaxis] * d_target[np.newaxis, :]) * friction
+
+    # Conectividad de respaldo: asegurar que ninguna fila o columna quede en 0
+    row_sums = t_mat.sum(axis=1)
+    zero_rows = np.where(row_sums == 0)[0]
+    for i in zero_rows:
+        closest = np.argsort(dist_km_mat[i])[:min(5, n_dest)]
+        t_mat[i, closest] = o_target[i] * d_target[closest] * np.exp(-beta * dist_km_mat[i, closest])
+        if t_mat[i].sum() == 0:
+            t_mat[i, closest] = 1.0
+
+    col_sums = t_mat.sum(axis=0)
+    zero_cols = np.where(col_sums == 0)[0]
+    for j in zero_cols:
+        closest = np.argsort(dist_km_mat[:, j])[:min(5, n_orig)]
+        t_mat[closest, j] = o_target[closest] * d_target[j] * np.exp(-beta * dist_km_mat[closest, j])
+        if t_mat[:, j].sum() == 0:
+            t_mat[closest, j] = 1.0
+
+    # 4. Iteraciones de Furness / IPFP
+    eps = 1e-12
+    for _ in range(max_iter):
+        # Paso A: Ajuste a Filas (Orígenes / PEA)
+        r_sum = t_mat.sum(axis=1)
+        r_scale = np.where(r_sum > eps, o_target / (r_sum + eps), 1.0)
+        t_mat *= r_scale[:, np.newaxis]
+
+        # Paso B: Ajuste a Columnas (Destinos / Empleo)
+        c_sum = t_mat.sum(axis=0)
+        c_scale = np.where(c_sum > eps, d_target / (c_sum + eps), 1.0)
+        t_mat *= c_scale[np.newaxis, :]
+
+        # Verificación de convergencia marginal en destinos
+        c_current = t_mat.sum(axis=0)
+        active_cols = d_target > eps
+        if np.any(active_cols):
+            max_rel_err = np.max(np.abs(c_current[active_cols] - d_target[active_cols]) / d_target[active_cols])
+            if max_rel_err < tol:
+                break
+
+    # 5. Ajuste final a las filas de orígenes para preservar exactamente O_i
+    r_sum = t_mat.sum(axis=1)
+    r_scale = np.where(r_sum > eps, o_target / (r_sum + eps), 1.0)
+    t_mat *= r_scale[:, np.newaxis]
+
+    # 6. Matriz Estocástica de Probabilidades (P_ij = T_ij / O_i)
+    row_t_sum = t_mat.sum(axis=1, keepdims=True)
+    row_t_sum[row_t_sum == 0] = 1.0
+    p_mat = t_mat / row_t_sum
+
+    # Normalización estricta por fila para compensar precisión flotante
+    p_sums = p_mat.sum(axis=1, keepdims=True)
+    p_sums[p_sums == 0] = 1.0
+    p_mat /= p_sums
+
+    return p_mat
 
 
 def simulate_gravity_demand(
@@ -256,15 +447,18 @@ def simulate_gravity_demand(
     max_distance_km: float = 55.0,
     max_pop_size: int = 150,
     target_pop_size: int = 35,
-    seed: int = 42
+    seed: int = 42,
+    isolated_zones: Optional[List[Dict]] = None,
+    furness_iterations: int = 15,
+    furness_tol: float = 0.02
 ) -> List[Dict]:
     """
     Ejecuta el Modelo de Demanda en Dos Capas:
     - Capa 1: Asignación de Cuotas Exactas a POIs Especiales (Aeropuertos, Universidades).
-    - Capa 2: Modelo Gravitatorio Multinomial Cuantizado para Empleo Regular (DENUE).
-    Garantiza la conservación matemática estricta de la PEA y agrupa viajeros en cohortes
-    (target_pop_size) para evitar la proliferación de micro-cohortes de tamaño 1 que
-    congelan el motor del juego en ticks de 15 minutos.
+    - Capa 2: Modelo Gravitatorio Doblemente Acotado (Furness / IPFP) para Empleo Regular (DENUE).
+    Garantiza la conservación matemática estricta de la PEA, agrupa viajeros en cohortes
+    (target_pop_size), balancea la atracción hacia los puestos de trabajo reales de destino
+    y respeta las barreras topológicas insulares (isolated_zones).
     """
     rng = np.random.default_rng(seed)
 
@@ -273,9 +467,11 @@ def simulate_gravity_demand(
     if not origins:
         raise ValueError("No se encontraron orígenes residenciales con PEA > 0.")
 
-    # Vectorizar coordenadas de orígenes
-    orig_coords = np.radians([o["location"] for o in origins])
+    # Vectorizar coordenadas de orígenes y zonas de aislamiento
+    orig_coords_deg = np.array([o["location"] for o in origins], dtype=np.float64)
+    orig_coords = np.radians(orig_coords_deg)
     orig_pea = np.array([o["pea_15ymas"] for o in origins], dtype=np.int64)
+    orig_zones = assign_zones(orig_coords_deg, isolated_zones)
 
     # Identificar Destinos Especiales (con cuota fija) vs Regulares
     special_dests = [p for p in demand_points if p.get("is_special", False) and p.get("jobs", 0) > 0]
@@ -305,7 +501,10 @@ def simulate_gravity_demand(
 
         sp_target = min(effective_target, cohort_limit)
 
+        sp_loc_deg = np.array([sp_dest["location"]], dtype=np.float64)
+        sp_zone = assign_zones(sp_loc_deg, isolated_zones)[0]
         sp_coord = np.radians(sp_dest["location"])
+
         # Distancia Haversine desde todos los orígenes
         dlat = sp_coord[1] - orig_coords[:, 1]
         dlon = sp_coord[0] - orig_coords[:, 0]
@@ -332,7 +531,8 @@ def simulate_gravity_demand(
         cohort_cursor = 0
 
         while remaining_cohorts > 0 and np.any(orig_pea > 0):
-            active_mask = orig_pea > 0
+            # Solo orígenes con PEA disponible, en la misma zona topológica y dentro del límite de viaje
+            active_mask = (orig_pea > 0) & (orig_zones == sp_zone) & (dist_km <= max_distance_km)
             if self_orig_idx is not None:
                 active_mask[self_orig_idx] = False
             if not np.any(active_mask):
@@ -395,40 +595,74 @@ def simulate_gravity_demand(
                 pax_left -= chunk
 
     # =========================================================================
-    # CAPA 2: ASIGNACIÓN GRAVITATORIA DE EMPLEO REGULAR (DENUE) CON COHORTES
+    # CAPA 2: ASIGNACIÓN GRAVITATORIA DE EMPLEO REGULAR (FURNESS / IPFP)
     # =========================================================================
     if regular_dests and np.any(orig_pea > 0):
-        dest_coords = np.radians([d["location"] for d in regular_dests])
+        dest_coords_deg = np.array([d["location"] for d in regular_dests], dtype=np.float64)
+        dest_coords = np.radians(dest_coords_deg)
         dest_jobs = np.array([d["jobs"] for d in regular_dests], dtype=np.float64)
         dest_id_to_idx = {d["id"]: idx for idx, d in enumerate(regular_dests)}
+        dest_zones = assign_zones(dest_coords_deg, isolated_zones)
 
-        # Matriz NxM de distancias
+        # Matriz NxM de distancias Haversine
         dlat = dest_coords[:, 1][np.newaxis, :] - orig_coords[:, 1][:, np.newaxis]
         dlon = dest_coords[:, 0][np.newaxis, :] - orig_coords[:, 0][:, np.newaxis]
         a = np.sin(dlat / 2.0)**2 + np.cos(orig_coords[:, 1][:, np.newaxis]) * np.cos(dest_coords[:, 1][np.newaxis, :]) * np.sin(dlon / 2.0)**2
         dist_km_mat = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
 
-        # Atracción y Fricción
-        attraction = dest_jobs[np.newaxis, :] ** 0.85
-        friction = np.exp(-beta * dist_km_mat)
-        friction[dist_km_mat > max_distance_km] = 0.0
-        weights = attraction * friction
+        prob_matrix = np.zeros((len(origins), len(regular_dests)), dtype=np.float64)
 
-        # Anular auto-viajes (búsqueda O(1))
-        for i, orig in enumerate(origins):
-            if orig["id"] in dest_id_to_idx:
-                weights[i, dest_id_to_idx[orig["id"]]] = 0.0
+        # Balanceo de Furness / IPFP ejecutado de forma estanca por cada zona topológica
+        unique_orig_zones = np.unique(orig_zones)
 
-        # Normalizar probabilidades
-        row_sums = weights.sum(axis=1, keepdims=True)
-        zero_rows = (row_sums.reshape(-1) == 0)
-        if np.any(zero_rows):
-            for i in np.where(zero_rows)[0]:
-                nearest_dests = np.argsort(dist_km_mat[i])[:5]
-                weights[i, nearest_dests] = 1.0
-            row_sums = weights.sum(axis=1, keepdims=True)
+        for z in unique_orig_zones:
+            orig_indices = np.where((orig_zones == z) & (orig_pea > 0))[0]
+            if len(orig_indices) == 0:
+                continue
 
-        prob_matrix = weights / row_sums
+            dest_indices = np.where((dest_zones == z) & (dest_jobs > 0))[0]
+
+            if len(dest_indices) > 0:
+                # Sub-matriz de la zona z
+                sub_dist = dist_km_mat[np.ix_(orig_indices, dest_indices)].copy()
+                sub_pea = orig_pea[orig_indices].copy()
+                sub_jobs = dest_jobs[dest_indices].copy()
+
+                # Anular auto-viajes si hay múltiples destinos disponibles en la zona
+                if len(dest_indices) > 1:
+                    for si, o_idx in enumerate(orig_indices):
+                        orig_id = origins[o_idx]["id"]
+                        if orig_id in dest_id_to_idx:
+                            g_didx = dest_id_to_idx[orig_id]
+                            match = np.where(dest_indices == g_didx)[0]
+                            if len(match) > 0:
+                                sub_dist[si, match[0]] = 1e6
+
+                sub_prob = furness_ipfp_balance(
+                    orig_pea=sub_pea,
+                    dest_jobs=sub_jobs,
+                    dist_km_mat=sub_dist,
+                    beta=beta,
+                    max_distance_km=max_distance_km,
+                    max_iter=furness_iterations,
+                    tol=furness_tol
+                )
+                prob_matrix[np.ix_(orig_indices, dest_indices)] = sub_prob
+            else:
+                # Zona huérfana (residentes en zona sin empleos locales)
+                for o_idx in orig_indices:
+                    closest = np.argsort(dist_km_mat[o_idx])[:min(5, len(regular_dests))]
+                    prob_matrix[o_idx, closest] = 1.0 / len(closest)
+
+        # Normalizar probabilidades y asegurar consistencia
+        for i in range(len(origins)):
+            if orig_pea[i] > 0:
+                row_sum = prob_matrix[i].sum()
+                if row_sum > 0:
+                    prob_matrix[i] /= row_sum
+                else:
+                    closest = np.argsort(dist_km_mat[i])[:min(5, len(regular_dests))]
+                    prob_matrix[i, closest] = 1.0 / len(closest)
 
         effective_target = max(1, target_pop_size) if target_pop_size > 0 else max_pop_size
 
@@ -445,7 +679,8 @@ def simulate_gravity_demand(
             cohort_sizes = [b + 1 if j < r else b for j in range(k)]
 
             # Sorteo multinomial de las k cohortes
-            assignments = rng.multinomial(k, prob_matrix[i])
+            pvals = prob_matrix[i] / prob_matrix[i].sum()
+            assignments = rng.multinomial(k, pvals)
             active_dest_indices = np.where(assignments > 0)[0]
 
             c_idx = 0

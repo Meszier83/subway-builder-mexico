@@ -222,13 +222,9 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
                     data = json.load(f)
                 points = data.get("points", [])
                 if bbox and len(bbox) == 4:
-                    margin_lon = (bbox[2] - bbox[0]) * 0.35
-                    margin_lat = (bbox[3] - bbox[1]) * 0.35
-                    min_lon, max_lon = bbox[0] - margin_lon, bbox[2] + margin_lon
-                    min_lat, max_lat = bbox[1] - margin_lat, bbox[3] + margin_lat
                     points = [
                         p for p in points
-                        if min_lon <= p["location"][0] <= max_lon and min_lat <= p["location"][1] <= max_lat
+                        if bbox[0] <= p["location"][0] <= bbox[2] and bbox[1] <= p["location"][1] <= bbox[3]
                     ]
                 if points:
                     return points
@@ -253,14 +249,9 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
                     df['lat'] = pd.to_numeric(df[lat_col], errors='coerce')
                     df['lon'] = pd.to_numeric(df[lon_col], errors='coerce')
 
-                    margin_lon = (bbox[2] - bbox[0]) * 0.35
-                    margin_lat = (bbox[3] - bbox[1]) * 0.35
-                    min_lon, max_lon = bbox[0] - margin_lon, bbox[2] + margin_lon
-                    min_lat, max_lat = bbox[1] - margin_lat, bbox[3] + margin_lat
-
                     df = df[
-                        (df['lon'] >= min_lon) & (df['lon'] <= max_lon) &
-                        (df['lat'] >= min_lat) & (df['lat'] <= max_lat)
+                        (df['lon'] >= bbox[0]) & (df['lon'] <= bbox[2]) &
+                        (df['lat'] >= bbox[1]) & (df['lat'] <= bbox[3])
                     ].dropna(subset=['lat', 'lon'])
 
                     # Bins de agregación espacial rápida (~250m)

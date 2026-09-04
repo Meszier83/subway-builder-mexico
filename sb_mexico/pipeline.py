@@ -27,7 +27,12 @@ from sb_mexico.inegi import (
     parse_ce2024_municipal,
     parse_conapo_projections
 )
-from sb_mexico.gravity import build_demand_grid, simulate_gravity_demand, sanitize_demand_points
+from sb_mexico.gravity import (
+    build_demand_grid,
+    simulate_gravity_demand,
+    sanitize_demand_points,
+    assign_zones
+)
 from sb_mexico.cartography import build_city_map
 from sb_mexico.special_demand import (
     generate_special_demand_points_doc,
@@ -221,6 +226,13 @@ def execute_pipeline(
         "data-*.csv",
         "*proyeccion*.csv"
     ])
+    marco_files = find_sources([
+        "*mza*.shp", "*mza*.geojson", "*mza*.gpkg",
+        "*ageb*.shp", "*ageb*.geojson", "*ageb*.gpkg",
+        "*manzana*.shp", "*manzana*.geojson"
+    ])
+    if marco_files:
+        console.print(f"-> Capas de Marco Geoestadístico detectadas: [green]{len(marco_files)}[/green] archivos.")
 
     # A. Macroeconomía (ENOE)
     tasa_pea = macro.get("tasa_pea")
@@ -257,21 +269,25 @@ def execute_pipeline(
         min_sample_threshold=macro.get("sample_threshold", 500)
     )
 
-    # Imprimir tabla de calibración
+    # Imprimir tabla de calibración con desglose territorial BBOX
     tabla_calib = Table(title=f"Calibración de Empleo Municipal ({city_code})")
     tabla_calib.add_column("Cve", style="cyan")
     tabla_calib.add_column("Municipio", style="white")
     tabla_calib.add_column("DENUE Base", justify="right", style="yellow")
-    tabla_calib.add_column("H001A (CE24)", justify="right", style="green")
+    tabla_calib.add_column("BBOX %", justify="right", style="blue")
+    tabla_calib.add_column("H001A (BBOX)", justify="right", style="green")
     tabla_calib.add_column("Factor Micro", justify="right", style="bold")
     tabla_calib.add_column("Estado", style="magenta")
 
     for cve, data in audit_calib.items():
+        share_str = f"{data.get('share_bbox', 1.0):.1%}"
+        h001a_val = data.get('h001a')
         tabla_calib.add_row(
             cve,
             data.get("nombre", "-"),
             f"{int(data['jobs_formal']):,}",
-            f"{int(data['h001a']):,}" if data.get('h001a') else "-",
+            share_str,
+            f"{int(h001a_val):,}" if h001a_val else "-",
             f"{data['factor']:.3f}",
             data["status"]
         )
@@ -284,7 +300,7 @@ def execute_pipeline(
     growth_factors = macro.get("growth_factors", {}).copy()
     conapo_projs = None
     if conapo_files:
-        conapo_projs = parse_conapo_projections(conapo_files[0])
+        conapo_projs = parse_conapo_projections(conapo_files[0], as_growth_factors=True)
         if conapo_projs:
             console.print(f"-> Proyecciones CONAPO cargadas automáticamente: [green]{len(conapo_projs)}[/green] municipios ({os.path.basename(conapo_files[0])}).")
 
@@ -295,7 +311,8 @@ def execute_pipeline(
         tasa_pea=tasa_pea,
         growth_factors=growth_factors,
         conapo_projections=conapo_projs,
-        default_growth=macro.get("default_growth_factor", 1.0)
+        default_growth=macro.get("default_growth_factor", 1.0),
+        marco_paths=marco_files if marco_files else None
     )
     total_cpv_pop = float(df_cpv['pobtot_adj'].sum()) if len(df_cpv) > 0 else 0.0
     total_cpv_pea = float(df_cpv['pea_real'].sum()) if len(df_cpv) > 0 else 0.0
@@ -348,6 +365,11 @@ def execute_pipeline(
     # =========================================================================
     console.print(f"\n[bold yellow]4. Modelo Gravitatorio y Generación de Cohortes (Multinomial)[/bold yellow]")
 
+    isolated_zones = cfg.get("isolated_zones", cfg.get("city", {}).get("isolated_zones", []))
+    if isolated_zones:
+        console.print(f"-> Zonas topológicas aisladas detectadas: [cyan]{len(isolated_zones)}[/cyan] zonas.")
+    console.print("-> Motor Gravitatorio Doblemente Acotado (Furness / IPFP): [green]Habilitado[/green]")
+
     total_pea = sum(p.get("pea_15ymas", 0) for p in demand_points)
 
     pops = simulate_gravity_demand(
@@ -356,7 +378,10 @@ def execute_pipeline(
         max_distance_km=macro.get("max_distance_km", 55.0),
         max_pop_size=macro.get("max_pop_size", 150),
         target_pop_size=macro.get("target_pop_size", 35),
-        seed=city_info.get("seed", 42)
+        seed=city_info.get("seed", 42),
+        isolated_zones=isolated_zones,
+        furness_iterations=macro.get("furness_iterations", 15),
+        furness_tol=macro.get("furness_tol", 0.02)
     )
 
     total_viajeros = sum(p["size"] for p in pops)
@@ -366,6 +391,49 @@ def execute_pipeline(
 
     # Aserción de conservación estricta de masa
     assert total_viajeros == total_pea, f"Inconsistencia de masa: {total_viajeros} viajeros vs {total_pea} PEA"
+
+    # Desglose Tabular por Masa Territorial y Zonas Aisladas
+    if isolated_zones:
+        coords_arr = np.array([p["location"] for p in demand_points], dtype=np.float64)
+        dp_zones = assign_zones(coords_arr, isolated_zones)
+        zone_names = {0: "Continente / Base"}
+        for idx, z in enumerate(isolated_zones, start=1):
+            zone_names[idx] = z.get("name", z.get("id", f"Zona {idx}"))
+
+        tabla_zonas = Table(title="Auditoría de Demanda por Masa Territorial / Aislamiento", header_style="bold magenta")
+        tabla_zonas.add_column("Masa / Zona", style="cyan")
+        tabla_zonas.add_column("Puntos", justify="right", style="white")
+        tabla_zonas.add_column("Residentes", justify="right", style="blue")
+        tabla_zonas.add_column("PEA Activa", justify="right", style="yellow")
+        tabla_zonas.add_column("Empleos", justify="right", style="green")
+        tabla_zonas.add_column("Viajeros", justify="right", style="bold green")
+        tabla_zonas.add_column("Cohortes", justify="right", style="dim white")
+        tabla_zonas.add_column("Balance Masa", justify="center", style="bold")
+
+        dp_id_to_zone = {p["id"]: dp_zones[idx] for idx, p in enumerate(demand_points)}
+
+        for z_idx in sorted(zone_names.keys()):
+            pts_in_zone = [p for idx, p in enumerate(demand_points) if dp_zones[idx] == z_idx]
+            if not pts_in_zone:
+                continue
+            z_res = sum(p.get("residents", 0) for p in pts_in_zone)
+            z_pea = sum(p.get("pea_15ymas", 0) for p in pts_in_zone)
+            z_jobs = sum(p.get("jobs", 0) for p in pts_in_zone)
+            z_viajeros = sum(p["size"] for p in pops if dp_id_to_zone.get(p["residenceId"]) == z_idx)
+            z_cohortes = sum(1 for p in pops if dp_id_to_zone.get(p["residenceId"]) == z_idx)
+            bal_str = "[green]Δ = 0[/green]" if z_viajeros == z_pea else f"[red]Δ = {z_viajeros - z_pea}[/red]"
+
+            tabla_zonas.add_row(
+                zone_names[z_idx],
+                f"{len(pts_in_zone):,}",
+                f"{z_res:,}",
+                f"{z_pea:,}",
+                f"{z_jobs:,}",
+                f"{z_viajeros:,}",
+                f"{z_cohortes:,}",
+                bal_str
+            )
+        console.print(tabla_zonas)
 
     # =========================================================================
     # 5. SANITIZACIÓN NATIVA CON DEPOT Y EXPORTACIÓN

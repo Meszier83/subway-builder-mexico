@@ -69,6 +69,37 @@ class TestPoiStudio(unittest.TestCase):
         with self.assertRaises(PermissionError):
             load_city_data("cities/../../../windows/system32/cmd.exe")
 
+    def test_load_demand_sample_strict_bbox(self):
+        """Verifica que load_demand_sample recorte estrictamente al BBOX sin márgenes externos."""
+        from tools.poi_studio import load_demand_sample
+        import json
+
+        # Simular demand_data.json con puntos dentro y fuera del BBOX
+        test_dist_dir = os.path.join(os.path.dirname(__file__), "..", "dist", "test_bbox_city")
+        os.makedirs(test_dist_dir, exist_ok=True)
+        demand_json_path = os.path.join(test_dist_dir, "demand_data.json")
+
+        sample_data = {
+            "points": [
+                {"id": "inside", "location": [-86.85, 21.15], "jobs": 100, "residents": 50},
+                {"id": "outside_north", "location": [-86.85, 21.60], "jobs": 200, "residents": 0},
+                {"id": "outside_south", "location": [-86.85, 20.60], "jobs": 300, "residents": 0},
+            ]
+        }
+        with open(demand_json_path, "w", encoding="utf-8") as f:
+            json.dump(sample_data, f)
+
+        try:
+            bbox = [-87.0, 21.0, -86.7, 21.4]
+            pts = load_demand_sample(bbox, city_file="cities/test_bbox_city.yaml")
+            self.assertEqual(len(pts), 1)
+            self.assertEqual(pts[0]["id"], "inside")
+        finally:
+            if os.path.exists(demand_json_path):
+                os.remove(demand_json_path)
+            if os.path.exists(test_dist_dir):
+                os.rmdir(test_dist_dir)
+
 if __name__ == "__main__":
     unittest.main()
 

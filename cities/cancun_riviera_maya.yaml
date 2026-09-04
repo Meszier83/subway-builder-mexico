@@ -37,6 +37,14 @@ macroeconomics:
     "23009": 1.17
     "23011": 1.16
 
+isolated_zones:
+  - id: "cozumel"
+    name: "Isla Cozumel"
+    bbox: [-87.05, 20.25, -86.85, 20.60]
+  - id: "isla_mujeres"
+    name: "Isla Mujeres"
+    bbox: [-86.76, 21.20, -86.68, 21.27]
+
 pois:
   - id: "Terminal Cancún"
     name: "Terminal Cancún"

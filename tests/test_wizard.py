@@ -20,6 +20,7 @@ from tools.wizard import (
     relink_data_file,
     set_project_data_dir,
     open_file_location,
+    validate_city_configuration,
     DATA_DIR,
     DIST_DIR,
     ROOT_DIR
@@ -274,5 +275,107 @@ class TestWizard(unittest.TestCase):
             if os.path.exists(tmp_city):
                 os.remove(tmp_city)
 
+    def test_save_and_reload_isolated_zones_and_furness(self):
+        tmp_city = os.path.join(os.path.dirname(__file__), "tmp_test_isolated_zones.yaml")
+        data = {
+            "city": {
+                "code": "ISL",
+                "name": "Ciudad Insular",
+                "bbox": [-87.1, 20.2, -86.8, 20.6]
+            },
+            "macroeconomics": {
+                "tasa_pea": 0.65,
+                "til_1_state": 0.40,
+                "gravity_beta": 0.10,
+                "max_distance_km": 45.0,
+                "target_pop_size": 40,
+                "furness_iterations": 20,
+                "furness_tol": 0.015
+            },
+            "isolated_zones": [
+                {
+                    "id": "coz",
+                    "name": "Isla de Cozumel",
+                    "bbox": [-87.05, 20.25, -86.85, 20.60]
+                }
+            ],
+            "pois": []
+        }
+        try:
+            saved_path = save_full_city_data(tmp_city, data)
+            reloaded = load_city_data(saved_path)
+
+            # Verificar preservación de macroeconomics
+            macro = reloaded.get("macroeconomics", {})
+            self.assertEqual(macro.get("target_pop_size"), 40)
+            self.assertEqual(macro.get("furness_iterations"), 20)
+            self.assertEqual(macro.get("furness_tol"), 0.015)
+
+            # Verificar preservación de isolated_zones
+            iso = reloaded.get("isolated_zones", [])
+            self.assertEqual(len(iso), 1)
+            self.assertEqual(iso[0]["id"], "coz")
+            self.assertEqual(iso[0]["name"], "Isla de Cozumel")
+            self.assertEqual(iso[0]["bbox"], [-87.05, 20.25, -86.85, 20.60])
+        finally:
+            if os.path.exists(tmp_city):
+                os.remove(tmp_city)
+
+    def test_validate_city_configuration_valid(self):
+        res = validate_city_configuration("cities/cancun_riviera_maya.yaml")
+        self.assertTrue(res["valid"])
+        self.assertEqual(len(res["errors"]), 0)
+        self.assertIn("summary", res)
+        self.assertEqual(res["summary"].get("isolated_zones_count"), 2)
+
+    def test_validate_city_configuration_anomalies(self):
+        tmp_city = os.path.join(os.path.dirname(__file__), "tmp_test_anomalies.yaml")
+        data = {
+            "city": {
+                "code": "BAD",
+                "name": "Ciudad Anómala",
+                "bbox": [-86.0, 21.0, -86.0, 21.5]  # min_lon == max_lon (ERROR)
+            },
+            "macroeconomics": {
+                "tasa_pea": 0.62
+            },
+            "pois": [
+                {
+                    "id": "AIR_Aeropuerto_CUN",  # Guiones bajos en aeropuerto (WARNING)
+                    "name": "Aeropuerto",
+                    "type": "air",
+                    "jobs": 10000,
+                    "radius_m": 1500,
+                    "mode": "MAX",
+                    "loc": [-86.5, 21.2]
+                },
+                {
+                    "id": "Campus Central",
+                    "type": "uni",  # Sin prefijo UNI_ (WARNING)
+                    "jobs": 5000,
+                    "radius_m": 800,
+                    "mode": "MAX",
+                    "loc": [-86.5, 21.3]
+                }
+            ]
+        }
+        try:
+            save_full_city_data(tmp_city, data)
+            res = validate_city_configuration(tmp_city)
+
+            # Invalido por BBOX corrupto
+            self.assertFalse(res["valid"])
+            self.assertGreater(len(res["errors"]), 0)
+            self.assertTrue(any("BBOX" in e for e in res["errors"]))
+
+            # Advertencias por nomenclatura de POIs
+            self.assertGreater(len(res["warnings"]), 0)
+            self.assertTrue(any("AIR_Aeropuerto_CUN" in w for w in res["warnings"]))
+            self.assertTrue(any("UNI_" in w for w in res["warnings"]))
+        finally:
+            if os.path.exists(tmp_city):
+                os.remove(tmp_city)
+
 if __name__ == '__main__':
     unittest.main()
+

@@ -226,12 +226,18 @@ def parse_ce2024_municipal(ce_path: str) -> Dict[str, Dict]:
     return benchmarks
 
 
-def parse_conapo_projections(conapo_path: str, target_year: int = 2024) -> Dict[str, float]:
+def parse_conapo_projections(
+    conapo_path: str,
+    target_year: int = 2024,
+    as_growth_factors: bool = False
+) -> Dict[str, float]:
     """
     Parsea las proyecciones oficiales de población municipal de CONAPO:
     - Archivos anuales simples (data-*.csv o *conapo*.csv)
     - Archivos quinquenales completos multianuales (pobproy_quinq1.csv, *pobproy*.csv)
-    Retorna un diccionario {cve_mun: poblacion_proyectada} (ej. {"23005": 1008615.0}).
+    Si as_growth_factors=True y el archivo contiene el año 2020, calcula directamente
+    el ratio homogéneo: POB_CONAPO(target_year) / POB_CONAPO(2020).
+    Retorna un diccionario {cve_mun: poblacion_proyectada_o_ratio}.
     """
     if not os.path.exists(conapo_path):
         return {}
@@ -246,19 +252,34 @@ def parse_conapo_projections(conapo_path: str, target_year: int = 2024) -> Dict[
                 pob_candidates = [c for c in cols if 'POB_TOTAL' in c or 'POB_MIT_MUN' in c or 'POBTOT' in c or c.startswith('POB')]
                 col_pob = pob_candidates[0]
 
+                df['cve_clean'] = pd.to_numeric(df['CLAVE'], errors='coerce').fillna(0).astype(int)
+                df = df[df['cve_clean'] > 0]
+                df['pob_clean'] = pd.to_numeric(df[col_pob].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+
                 # Filtrar año si el archivo contiene desglose temporal multianual
                 if 'ANO' in cols:
                     df['ANO_num'] = pd.to_numeric(df['ANO'], errors='coerce')
                     available_years = df['ANO_num'].dropna().unique()
+                    
+                    if as_growth_factors and 2020 in available_years:
+                        chosen_year = target_year if target_year in available_years else (
+                            available_years[np.argmin(np.abs(available_years - target_year))]
+                        )
+                        df_target = df[df['ANO_num'] == chosen_year].groupby('cve_clean')['pob_clean'].sum()
+                        df_2020 = df[df['ANO_num'] == 2020].groupby('cve_clean')['pob_clean'].sum()
+                        ratios = {}
+                        for cve, val_target in df_target.items():
+                            val_base = df_2020.get(cve, 0)
+                            if val_base > 0 and val_target > 0:
+                                ratios[f"{cve:05d}"] = round(float(val_target / val_base), 4)
+                        if ratios:
+                            return ratios
+
                     if len(available_years) > 0:
                         chosen_year = target_year if target_year in available_years else (
                             available_years[np.argmin(np.abs(available_years - target_year))]
                         )
                         df = df[df['ANO_num'] == chosen_year]
-
-                df['cve_clean'] = pd.to_numeric(df['CLAVE'], errors='coerce').fillna(0).astype(int)
-                df = df[df['cve_clean'] > 0]
-                df['pob_clean'] = pd.to_numeric(df[col_pob].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
 
                 grouped = df.groupby('cve_clean')['pob_clean'].sum()
                 projections = {f"{cve:05d}": float(val) for cve, val in grouped.items() if val > 0}
@@ -269,10 +290,17 @@ def parse_conapo_projections(conapo_path: str, target_year: int = 2024) -> Dict[
     return {}
 
 
+def parse_conapo_growth_factors(conapo_path: str, target_year: int = 2024) -> Dict[str, float]:
+    """Helper de conveniencia para derivar factores de crecimiento intercensal CONAPO (base 2020)."""
+    return parse_conapo_projections(conapo_path, target_year=target_year, as_growth_factors=True)
+
+
 def load_denue(denue_paths: Union[str, List[str]], bbox: Dict[str, float]) -> pd.DataFrame:
     """
     Carga e inicializa los registros del DENUE dentro del BBOX (soporta múltiples archivos para zonas multi-estado).
     Calcula empleos formales base por estrato y normaliza las claves espaciales.
+    Almacena en df_denue.attrs['mun_totals_global'] la suma global de empleos por municipio
+    antes del recorte BBOX para permitir calibración proporcional exacta.
     """
     if isinstance(denue_paths, str):
         paths = [denue_paths]
@@ -300,14 +328,8 @@ def load_denue(denue_paths: Union[str, List[str]], bbox: Dict[str, float]) -> pd
 
     df_denue['lat'] = pd.to_numeric(df_denue['latitud'], errors='coerce')
     df_denue['lon'] = pd.to_numeric(df_denue['longitud'], errors='coerce')
-    
-    # Filtro espacial estricto
-    df_denue = df_denue[
-        (df_denue['lon'] >= bbox["min_lon"]) & (df_denue['lon'] <= bbox["max_lon"]) &
-        (df_denue['lat'] >= bbox["min_lat"]) & (df_denue['lat'] <= bbox["max_lat"])
-    ].dropna(subset=['lat', 'lon']).copy()
 
-    # Normalización de claves
+    # Normalización de claves antes del recorte BBOX
     df_denue['cve_mun_clean'] = [
         format_cve_mun(m, e) for m, e in zip(df_denue['cve_mun'], df_denue['cve_ent'])
     ]
@@ -315,9 +337,18 @@ def load_denue(denue_paths: Union[str, List[str]], bbox: Dict[str, float]) -> pd
     col_per = 'per_ocu' if 'per_ocu' in df_denue.columns else 'personal_ocupado'
     df_denue[col_per] = df_denue[col_per].astype(str).str.strip()
     df_denue['jobs_formal'] = df_denue[col_per].map(DENUE_ESTRATOS).fillna(2.24)
-    
-    # Clasificación de tamaño de empresa (Micro/Pequeño vs Grande)
     df_denue['is_micro_small'] = df_denue[col_per].isin(["0 a 5 personas", "6 a 10 personas", "11 a 30 personas", "31 a 50 personas"])
+
+    # Totales globales de empleo formal por municipio (antes del recorte BBOX)
+    mun_totals_global = df_denue[df_denue['cve_mun_clean'] != "-1"].groupby('cve_mun_clean')['jobs_formal'].sum().to_dict()
+
+    # Filtro espacial estricto dentro del BBOX
+    df_denue = df_denue[
+        (df_denue['lon'] >= bbox["min_lon"]) & (df_denue['lon'] <= bbox["max_lon"]) &
+        (df_denue['lat'] >= bbox["min_lat"]) & (df_denue['lat'] <= bbox["max_lat"])
+    ].dropna(subset=['lat', 'lon']).copy()
+
+    df_denue.attrs['mun_totals_global'] = mun_totals_global
 
     # Normalizar AGEB y Manzana
     df_denue['ageb_clean'] = df_denue['ageb'].astype(str).str.strip().str.upper().str.replace('-', '').str.zfill(4)
@@ -330,17 +361,20 @@ def calibrate_denue_employment(
     df_denue: pd.DataFrame,
     ce_benchmarks: Dict[str, Dict],
     til_1: float,
-    min_sample_threshold: int = 500
+    min_sample_threshold: int = 500,
+    mun_totals_global: Optional[Dict[str, float]] = None
 ) -> Tuple[pd.DataFrame, Dict[str, Dict]]:
     """
-    Calibración asimétrica de empleo:
+    Calibración asimétrica de empleo con proporción territorial BBOX:
     Ajusta el empleo de micro/pequeños negocios para igualar el control municipal CE 2024 H001A,
-    respetando el empleo de grandes empresas y acotando el factor según la tasa de informalidad ENOE.
+    escalando proporcionalmente por la cuota del municipio que cae dentro del BBOX (share_bbox).
+    Evita sobreinflar áreas urbanas con el empleo total de municipios con amplia extensión rural.
     """
     audit_report = {}
     df_denue = df_denue.copy()
     df_denue['calibrated_jobs'] = df_denue['jobs_formal']
 
+    global_totals = mun_totals_global or getattr(df_denue, "attrs", {}).get("mun_totals_global", {})
     municipalities = [m for m in df_denue['cve_mun_clean'].unique() if m != "-1"]
 
     for cve_mun in municipalities:
@@ -355,14 +389,25 @@ def calibrate_denue_employment(
                 "nombre": ce_benchmarks.get(cve_mun, {}).get("nombre", "Desconocido"),
                 "jobs_formal": jobs_formal_total,
                 "h001a": ce_benchmarks.get(cve_mun, {}).get("empleos_ce", 0),
+                "share_bbox": 1.0,
                 "factor": default_factor,
                 "status": "FALLBACK_ESTATAL",
                 "notes": f"Muestra baja (< {min_sample_threshold}) o sin benchmark CE2024"
             }
             continue
 
-        h001a = ce_benchmarks[cve_mun]["empleos_ce"]
-        
+        h001a_raw = ce_benchmarks[cve_mun]["empleos_ce"]
+
+        # Calcular proporción de empleo formal municipal que cae dentro del BBOX
+        mun_total_global = global_totals.get(cve_mun)
+        if mun_total_global and mun_total_global > 0:
+            share_bbox = float(np.clip(jobs_formal_total / mun_total_global, 0.0, 1.0))
+        else:
+            share_bbox = 1.0
+
+        # Escalar el objetivo H001A al recorte del BBOX
+        h001a = h001a_raw * share_bbox
+
         # Separar empleo grande y micro
         mask_micro = mask_mun & (df_denue['is_micro_small'])
         mask_large = mask_mun & (~df_denue['is_micro_small'])
@@ -377,7 +422,7 @@ def calibrate_denue_employment(
             factor_clamped = float(np.clip(factor_micro, 1.0, techo_teorico))
             status = "CALIBRADO" if 1.0 <= factor_micro <= techo_teorico else ("CLAMPED_TECHO" if factor_micro > techo_teorico else "CLAMPED_PISO")
         elif jobs_large >= h001a and h001a > 0:
-            # Si el empleo en grandes empresas ya iguala o excede el total censal, no inflar microempresas
+            # Si el empleo en grandes empresas ya iguala o excede el total censal proporcional, no inflar microempresas
             factor_clamped = 1.0
             status = "EXCESO_FORMAL_BASE"
         else:
@@ -390,13 +435,82 @@ def calibrate_denue_employment(
         audit_report[cve_mun] = {
             "nombre": ce_benchmarks[cve_mun]["nombre"],
             "jobs_formal": jobs_formal_total,
+            "h001a_mun_total": h001a_raw,
+            "share_bbox": share_bbox,
             "h001a": h001a,
             "factor": factor_clamped,
             "status": status,
-            "notes": f"Calibrado asimétrico (Micro factor: {factor_clamped:.3f})"
+            "notes": f"Calibrado territorial ({share_bbox:.1%} en BBOX, Micro factor: {factor_clamped:.3f})"
         }
 
     return df_denue, audit_report
+
+
+def load_marco_geoestadistico_coords(
+    marco_paths: Union[str, List[str]]
+) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+    """
+    Carga capas vectoriales del Marco Geoestadístico de INEGI (Shapefile, GeoJSON, GeoPackage)
+    y extrae centroides oficiales exactos para Manzanas y AGEBs.
+    """
+    if isinstance(marco_paths, str):
+        paths = [marco_paths]
+    else:
+        paths = marco_paths
+
+    mza_df = None
+    ageb_df = None
+
+    for p in paths:
+        if not os.path.exists(p):
+            continue
+        try:
+            import geopandas as gpd
+            gdf = gpd.read_file(p)
+            if gdf.empty:
+                continue
+
+            if gdf.crs is None:
+                gdf = gdf.set_crs(epsg=4326)
+            elif gdf.crs.to_epsg() != 4326:
+                gdf = gdf.to_crs(epsg=4326)
+
+            cols_upper = {c: str(c).upper().strip() for c in gdf.columns}
+            gdf = gdf.rename(columns=cols_upper)
+
+            centroids = gdf.geometry.centroid
+            gdf['lon_geo'] = centroids.x
+            gdf['lat_geo'] = centroids.y
+
+            has_ent = any(c in gdf.columns for c in ['CVE_ENT', 'ENTIDAD'])
+            has_mun = any(c in gdf.columns for c in ['CVE_MUN', 'MUN'])
+            has_ageb = any(c in gdf.columns for c in ['CVE_AGEB', 'AGEB'])
+            has_mza = any(c in gdf.columns for c in ['CVE_MZA', 'MZA', 'MANZANA'])
+
+            if has_ent and has_mun and has_ageb:
+                col_ent = [c for c in ['CVE_ENT', 'ENTIDAD'] if c in gdf.columns][0]
+                col_mun = [c for c in ['CVE_MUN', 'MUN'] if c in gdf.columns][0]
+                col_ageb = [c for c in ['CVE_AGEB', 'AGEB'] if c in gdf.columns][0]
+
+                gdf['cve_mun_clean'] = [format_cve_mun(m, e) for m, e in zip(gdf[col_mun], gdf[col_ent])]
+                gdf['ageb_clean'] = gdf[col_ageb].astype(str).str.strip().str.upper().str.replace('-', '').str.zfill(4)
+
+                if has_mza:
+                    col_mza = [c for c in ['CVE_MZA', 'MZA', 'MANZANA'] if c in gdf.columns][0]
+                    gdf['mza_clean'] = pd.to_numeric(gdf[col_mza], errors='coerce').fillna(0).astype(int).astype(str)
+                    mza_sub = gdf[['cve_mun_clean', 'ageb_clean', 'mza_clean', 'lon_geo', 'lat_geo']].drop_duplicates(
+                        subset=['cve_mun_clean', 'ageb_clean', 'mza_clean']
+                    )
+                    mza_df = mza_sub if mza_df is None else pd.concat([mza_df, mza_sub], ignore_index=True)
+                else:
+                    ageb_sub = gdf[['cve_mun_clean', 'ageb_clean', 'lon_geo', 'lat_geo']].drop_duplicates(
+                        subset=['cve_mun_clean', 'ageb_clean']
+                    )
+                    ageb_df = ageb_sub if ageb_df is None else pd.concat([ageb_df, ageb_sub], ignore_index=True)
+        except Exception:
+            continue
+
+    return mza_df, ageb_df
 
 
 def load_cpv_demography(
@@ -406,14 +520,17 @@ def load_cpv_demography(
     tasa_pea: float,
     growth_factors: Optional[Dict[str, float]] = None,
     conapo_projections: Optional[Dict[str, float]] = None,
-    default_growth: float = 1.0
+    default_growth: float = 1.0,
+    marco_paths: Optional[Union[str, List[str]]] = None
 ) -> pd.DataFrame:
     """
     Carga e imputa georreferenciación de población (CPV 2020) por manzana.
-    Aplica tasa PEA y resuelve coordenadas mediante cruce jerárquico resiliente con el DENUE.
-    Deriva automáticamente los factores de crecimiento municipal a partir de proyecciones oficiales de CONAPO:
-    growth_factor_m = POB_CONAPO_m / POB_CPV2020_m.
-    Soporta múltiples archivos para zonas metropolitanas multi-estado.
+    Aplica tasa PEA y resuelve coordenadas mediante jerarquía resiliente:
+    1. Marco Geoestadístico de INEGI (centroides vectoriales oficiales de manzana o AGEB).
+    2. Cruce con comercios DENUE a nivel Manzana.
+    3. Cruce con comercios DENUE a nivel AGEB dentro del BBOX.
+    Deriva factores de proyección poblacional (CONAPO) soportando tanto ratios directos
+    como proyecciones poblacionales absolutas.
     """
     if isinstance(cpv_paths, str):
         paths = [cpv_paths]
@@ -466,10 +583,14 @@ def load_cpv_demography(
     growth_dict = dict(growth_factors or {})
     if conapo_projections:
         cpv_mun_totals = df_censo.groupby('cve_mun_clean')['pobtot_num'].sum().to_dict()
-        for cve_mun, proj_pob in conapo_projections.items():
-            if cve_mun not in growth_dict and cve_mun in cpv_mun_totals and cpv_mun_totals[cve_mun] > 0:
-                ratio = proj_pob / cpv_mun_totals[cve_mun]
-                growth_dict[cve_mun] = round(float(np.clip(ratio, 0.90, 1.60)), 4)
+        for cve_mun, proj_val in conapo_projections.items():
+            if cve_mun not in growth_dict:
+                # Si proj_val ya es un ratio de crecimiento directo (ej. de parse_conapo_growth_factors)
+                if 0.70 <= proj_val <= 2.50:
+                    growth_dict[cve_mun] = round(float(np.clip(proj_val, 0.90, 1.60)), 4)
+                elif cve_mun in cpv_mun_totals and cpv_mun_totals[cve_mun] > 0:
+                    ratio = proj_val / cpv_mun_totals[cve_mun]
+                    growth_dict[cve_mun] = round(float(np.clip(ratio, 0.90, 1.60)), 4)
 
     df_censo['growth'] = df_censo['cve_mun_clean'].map(growth_dict).fillna(default_growth)
     df_censo['pobtot_adj'] = df_censo['pobtot_num'] * df_censo['growth']
@@ -477,26 +598,51 @@ def load_cpv_demography(
     df_censo['pea_real'] = df_censo['pob15_adj'] * tasa_pea
 
     # =========================================================================
-    # Georreferenciación Jerárquica Vía DENUE
+    # Georreferenciación Jerárquica Vía Marco Geoestadístico / DENUE
     # =========================================================================
-    # Nivel 1: Centroide de Manzana (si hay comercios en esa manzana)
-    mza_coords = df_denue.groupby(['cve_mun_clean', 'ageb_clean', 'mza_clean'])[['lon', 'lat']].mean().reset_index()
-    # Nivel 2: Centroide de AGEB (si hay comercios en ese AGEB dentro del BBOX)
+    df_geo = df_censo.copy()
+
+    # Nivel 0 (Oficial): Marco Geoestadístico
+    if marco_paths:
+        mza_geo, ageb_geo = load_marco_geoestadistico_coords(marco_paths)
+        if mza_geo is not None and not mza_geo.empty:
+            mza_geo = mza_geo.rename(columns={'lon_geo': 'lon_mza_geo', 'lat_geo': 'lat_mza_geo'})
+            df_geo = pd.merge(df_geo, mza_geo, on=['cve_mun_clean', 'ageb_clean', 'mza_clean'], how='left')
+        if ageb_geo is not None and not ageb_geo.empty:
+            ageb_geo = ageb_geo.rename(columns={'lon_geo': 'lon_ageb_geo', 'lat_geo': 'lat_ageb_geo'})
+            df_geo = pd.merge(df_geo, ageb_geo, on=['cve_mun_clean', 'ageb_clean'], how='left')
+
+    # Nivel 1: Centroide de Manzana (comercios DENUE)
+    mza_coords = df_denue.groupby(['cve_mun_clean', 'ageb_clean', 'mza_clean'])[['lon', 'lat']].mean().reset_index().rename(
+        columns={'lon': 'lon_mza_denue', 'lat': 'lat_mza_denue'}
+    )
+    # Nivel 2: Centroide de AGEB (comercios DENUE dentro del BBOX)
     ageb_coords = df_denue.groupby(['cve_mun_clean', 'ageb_clean'])[['lon', 'lat']].mean().reset_index().rename(
-        columns={'lon': 'lon_ageb', 'lat': 'lat_ageb'}
+        columns={'lon': 'lon_ageb_denue', 'lat': 'lat_ageb_denue'}
     )
 
-    df_geo = pd.merge(df_censo, mza_coords, on=['cve_mun_clean', 'ageb_clean', 'mza_clean'], how='left')
+    df_geo = pd.merge(df_geo, mza_coords, on=['cve_mun_clean', 'ageb_clean', 'mza_clean'], how='left')
     df_geo = pd.merge(df_geo, ageb_coords, on=['cve_mun_clean', 'ageb_clean'], how='left')
-    
-    # Imputar Nivel 1 (Manzana) -> Nivel 2 (AGEB)
-    # NOTA CRÍTICA: NO imputar a nivel estatal o centro de BBOX. Las manzanas que no caen
-    # en un AGEB del DENUE dentro del BBOX pertenecen a otros municipios del estado
-    # (ej. Chetumal, Cozumel, Playa del Carmen) y deben ser excluidas de la zona metropolitana.
-    df_geo['lon'] = df_geo['lon'].fillna(df_geo['lon_ageb'])
-    df_geo['lat'] = df_geo['lat'].fillna(df_geo['lat_ageb'])
 
-    # Filtro espacial estricto dentro de BBOX y descarte de manzanas fuera del área
+    # Imputación jerárquica:
+    # 1. Marco MZA -> 2. DENUE MZA -> 3. Marco AGEB -> 4. DENUE AGEB
+    lon_s = df_geo['lon_mza_geo'] if 'lon_mza_geo' in df_geo.columns else pd.Series(np.nan, index=df_geo.index)
+    lat_s = df_geo['lat_mza_geo'] if 'lat_mza_geo' in df_geo.columns else pd.Series(np.nan, index=df_geo.index)
+
+    lon_s = lon_s.fillna(df_geo['lon_mza_denue'])
+    lat_s = lat_s.fillna(df_geo['lat_mza_denue'])
+
+    if 'lon_ageb_geo' in df_geo.columns:
+        lon_s = lon_s.fillna(df_geo['lon_ageb_geo'])
+        lat_s = lat_s.fillna(df_geo['lat_ageb_geo'])
+
+    lon_s = lon_s.fillna(df_geo['lon_ageb_denue'])
+    lat_s = lat_s.fillna(df_geo['lat_ageb_denue'])
+
+    df_geo['lon'] = lon_s
+    df_geo['lat'] = lat_s
+
+    # Filtro espacial estricto dentro de BBOX y descarte de registros fuera del área
     df_geo = df_geo.dropna(subset=['lon', 'lat']).copy()
     df_geo = df_geo[
         (df_geo['lon'] >= bbox["min_lon"]) & (df_geo['lon'] <= bbox["max_lon"]) &

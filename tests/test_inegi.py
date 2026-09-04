@@ -93,5 +93,42 @@ class TestInegi(unittest.TestCase):
         finally:
             os.remove(tmp_name)
 
+    def test_calibrate_denue_employment_bbox_share(self):
+        # 300 empleos formales en BBOX (100 micro, 200 grandes)
+        df_denue = pd.DataFrame([
+            {"cve_mun_clean": "23005", "is_micro_small": True, "jobs_formal": 100.0},
+            {"cve_mun_clean": "23005", "is_micro_small": False, "jobs_formal": 200.0},
+        ])
+        # Total municipal estatal = 600 empleos -> Cuota en BBOX = 50%
+        mun_totals_global = {"23005": 600.0}
+        # H001A municipal total = 500 -> H001A en BBOX = 500 * 50% = 250
+        ce_benchmarks = {"23005": {"nombre": "Benito Juárez", "empleos_ce": 500.0}}
+
+        df_calib, report = calibrate_denue_employment(
+            df_denue, ce_benchmarks, til_1=0.45, min_sample_threshold=50, mun_totals_global=mun_totals_global
+        )
+        self.assertEqual(report["23005"]["share_bbox"], 0.5)
+        self.assertEqual(report["23005"]["h001a"], 250.0)
+        # Factor micro: (250 - 200) / 100 = 0.50 -> clamped a piso 1.0
+        self.assertEqual(report["23005"]["factor"], 1.0)
+
+    def test_parse_conapo_projections_growth_factors(self):
+        from sb_mexico.inegi import parse_conapo_projections
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as f:
+            f.write('CLAVE,ANO,POB_TOTAL\n')
+            f.write('23005,2020,100000\n')
+            f.write('23005,2024,115000\n')
+            f.write('23001,2020,50000\n')
+            f.write('23001,2024,55000\n')
+            tmp_name = f.name
+        try:
+            factors = parse_conapo_projections(tmp_name, target_year=2024, as_growth_factors=True)
+            self.assertIn("23005", factors)
+            self.assertAlmostEqual(factors["23005"], 1.15, places=3)
+            self.assertIn("23001", factors)
+            self.assertAlmostEqual(factors["23001"], 1.10, places=3)
+        finally:
+            os.remove(tmp_name)
+
 if __name__ == "__main__":
     unittest.main()

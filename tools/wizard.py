@@ -175,6 +175,7 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
     macro_cfg = data.get("macroeconomics") or {}
     pois_cfg = data.get("pois") or []
     places_cfg = data.get("places") or []
+    isolated_zones_cfg = data.get("isolated_zones") or city_cfg.get("isolated_zones") or []
     data_dir_cfg = str(data.get("data_dir", "")).strip()
     data_exclusions_cfg = data.get("data_exclusions", [])
 
@@ -218,6 +219,9 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         f'  gravity_beta: {float(macro_cfg.get("gravity_beta", 0.12))}',
         f'  max_distance_km: {float(macro_cfg.get("max_distance_km", 50.0))}',
         f'  max_pop_size: {int(macro_cfg.get("max_pop_size", 150))}',
+        f'  target_pop_size: {int(macro_cfg.get("target_pop_size", 35))}',
+        f'  furness_iterations: {int(macro_cfg.get("furness_iterations", 15))}',
+        f'  furness_tol: {float(macro_cfg.get("furness_tol", 0.02))}',
         ""
     ])
 
@@ -226,6 +230,18 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         lines.append("  growth_factors:")
         for k, v in growth_factors.items():
             lines.append(f'    "{k}": {float(v)}')
+        lines.append("")
+
+    # Bloque de Zonas Aisladas
+    if isolated_zones_cfg and isinstance(isolated_zones_cfg, list):
+        lines.append("isolated_zones:")
+        for z in isolated_zones_cfg:
+            z_id = z.get("id", "zona")
+            z_name = z.get("name", z_id)
+            z_bbox = z.get("bbox", [])
+            lines.append(f'  - id: "{z_id}"')
+            lines.append(f'    name: "{z_name}"')
+            lines.append(f'    bbox: {z_bbox}')
         lines.append("")
 
     # Bloque de POIs
@@ -323,8 +339,12 @@ def create_new_project(name: str, code: str, creator: str = "Creador", data_dir:
             "gravity_beta": 0.12,
             "max_distance_km": 50.0,
             "max_pop_size": 150,
+            "target_pop_size": 35,
+            "furness_iterations": 15,
+            "furness_tol": 0.02,
             "growth_factors": {}
         },
+        "isolated_zones": [],
         "pois": [],
         "places": []
     }
@@ -807,6 +827,180 @@ def calculate_conapo_factors(city_file: str) -> Dict[str, Any]:
     }
 
 
+def validate_city_configuration(city_file: str) -> Dict[str, Any]:
+    """
+    Audita exhaustivamente la configuración de una ciudad contra los Estándares
+    de Modelación de Subway Builder México y las restricciones del motor geoespacial.
+    Retorna un informe con estado ('ok', 'warning', 'error'), lista de errores y advertencias.
+    """
+    errors = []
+    warnings = []
+    summary = {}
+
+    try:
+        fpath = _resolve_city_path(city_file)
+    except Exception as e:
+        return {
+            "valid": False,
+            "status": "error",
+            "errors": [f"Ruta de archivo inválida o fuera del proyecto: {e}"],
+            "warnings": [],
+            "summary": {}
+        }
+
+    if not os.path.exists(fpath):
+        return {
+            "valid": False,
+            "status": "error",
+            "errors": [f"El archivo no existe: {city_file}"],
+            "warnings": [],
+            "summary": {}
+        }
+
+    try:
+        with open(fpath, "r", encoding="utf-8") as f:
+            cdata = yaml.safe_load(f) or {}
+    except Exception as e:
+        return {
+            "valid": False,
+            "status": "error",
+            "errors": [f"Error de sintaxis YAML: {e}"],
+            "warnings": [],
+            "summary": {}
+        }
+
+    # 1. Validación de Bloque City
+    city_cfg = cdata.get("city", {})
+    code = str(city_cfg.get("code", "")).strip()
+    name = str(city_cfg.get("name", "")).strip()
+    bbox = city_cfg.get("bbox", [])
+
+    if not code:
+        errors.append("El código de ciudad ('city.code') es obligatorio.")
+    elif len(code) > 6 or not code.isalnum():
+        warnings.append(f"El código de ciudad '{code}' debería ser un identificador alfanumérico corto (ej. CUN, GDL, MTY).")
+
+    if not name:
+        errors.append("El nombre de la ciudad ('city.name') es obligatorio.")
+
+    if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+        errors.append("El BBOX debe ser una lista de 4 coordenadas [min_lon, min_lat, max_lon, max_lat].")
+    else:
+        try:
+            min_lon, min_lat, max_lon, max_lat = float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])
+            if min_lon >= max_lon:
+                errors.append(f"BBOX inválido: min_lon ({min_lon}) debe ser menor que max_lon ({max_lon}).")
+            if min_lat >= max_lat:
+                errors.append(f"BBOX inválido: min_lat ({min_lat}) debe ser menor que max_lat ({max_lat}).")
+            summary["bbox_dims"] = {
+                "lon_span": round(max_lon - min_lon, 4),
+                "lat_span": round(max_lat - min_lat, 4)
+            }
+        except (ValueError, TypeError):
+            errors.append("Las 4 coordenadas del BBOX deben ser números flotantes válidos.")
+
+    # 2. Validación de Macroeconomía
+    macro_cfg = cdata.get("macroeconomics", {})
+    tasa_pea = macro_cfg.get("tasa_pea", 0.62)
+    try:
+        t_val = float(tasa_pea)
+        if not (0.2 <= t_val <= 0.95):
+            warnings.append(f"Tasa PEA inusual: {t_val}. El valor típico en México oscila entre 0.55 y 0.70.")
+    except Exception:
+        errors.append("Tasa PEA debe ser un valor numérico.")
+
+    try:
+        beta = float(macro_cfg.get("gravity_beta", 0.12))
+        if beta <= 0.01 or beta > 0.5:
+            warnings.append(f"Parámetro gravity_beta inusual: {beta}. Valores recomendados: 0.08 a 0.20.")
+    except Exception:
+        errors.append("gravity_beta debe ser un valor numérico.")
+
+    try:
+        max_dist = float(macro_cfg.get("max_distance_km", 50.0))
+        if max_dist < 10.0 or max_dist > 150.0:
+            warnings.append(f"max_distance_km inusual: {max_dist} km. El estándar metropolitano es 40 a 70 km.")
+    except Exception:
+        errors.append("max_distance_km debe ser un valor numérico.")
+
+    # 3. Validación de Zonas Aisladas (isolated_zones)
+    isolated_zones = cdata.get("isolated_zones", city_cfg.get("isolated_zones", []))
+    summary["isolated_zones_count"] = len(isolated_zones)
+    for idx, z in enumerate(isolated_zones):
+        z_id = z.get("id", "")
+        z_bbox = z.get("bbox", [])
+        if not z_id:
+            errors.append(f"Zona aislada #{idx+1} carece de identificador 'id'.")
+        if not isinstance(z_bbox, (list, tuple)) or len(z_bbox) != 4:
+            errors.append(f"Zona aislada '{z_id or idx+1}' debe tener un 'bbox' de 4 valores [min_lon, min_lat, max_lon, max_lat].")
+        else:
+            try:
+                z_b = [float(x) for x in z_bbox]
+                if z_b[0] >= z_b[2] or z_b[1] >= z_b[3]:
+                    errors.append(f"BBOX de zona aislada '{z_id}' inválido: min >= max.")
+            except Exception:
+                errors.append(f"Coordenadas de BBOX de zona aislada '{z_id}' no numéricas.")
+
+    # 4. Auditoría de POIs (Estándares de Nomenclatura)
+    pois = cdata.get("pois", [])
+    summary["pois_count"] = len(pois)
+    for idx, poi in enumerate(pois):
+        p_id = str(poi.get("id", "")).strip()
+        p_type = str(poi.get("type", "")).lower()
+        p_mode = str(poi.get("mode", "MAX")).upper()
+        p_jobs = poi.get("jobs")
+
+        if not p_id:
+            errors.append(f"POI #{idx+1} carece de 'id'.")
+
+        # Regla 1: Aeropuertos
+        if p_id.startswith("AIR_"):
+            clean_name = p_id[4:]
+            if "_" in clean_name:
+                warnings.append(
+                    f"POI '{p_id}': El motor de Subway Builder anexa automáticamente ' Terminal'. "
+                    f"Evita guiones bajos como '{clean_name}'. Usa un formato legible (ej. 'AIR_{clean_name.replace('_', ' ')}')."
+                )
+
+        # Regla 1: Universidades
+        if p_type == "uni" and not p_id.startswith("UNI_"):
+            warnings.append(
+                f"POI '{p_id}': Es de tipo 'uni' pero no tiene prefijo 'UNI_'. "
+                f"El prefijo 'UNI_' es necesario para activar el algoritmo de flujo estudiantil escalonado."
+            )
+
+        if p_mode not in ["MAX", "BOOST", "ADDITIVE", "REPLACE"]:
+            warnings.append(f"POI '{p_id}': Modo '{p_mode}' no estándar. Usar 'MAX', 'BOOST', 'ADDITIVE' o 'REPLACE'.")
+
+        if p_jobs is None or int(p_jobs) <= 0:
+            warnings.append(f"POI '{p_id}': Número de empleos ('jobs') nulo o menor a 1.")
+
+    # 5. Estado de Archivos de Datos
+    status = inspect_data_files(city_name=name, city_code=code, city_file=city_file)
+    summary["data_files"] = {
+        "denue_count": len(status.get("denue", {}).get("files", [])),
+        "cpv_count": len(status.get("cpv", {}).get("files", [])),
+        "ce2024_count": len(status.get("ce2024", {}).get("files", [])),
+        "conapo_count": len(status.get("conapo", {}).get("files", [])),
+        "osm_count": len(status.get("osm", {}).get("files", []))
+    }
+    if not status.get("denue", {}).get("files"):
+        warnings.append("No se detectó ningún archivo DENUE en la carpeta del proyecto ni en data/.")
+    if not status.get("cpv", {}).get("files"):
+        warnings.append("No se detectó ningún archivo Censo CPV (RESAGEBURB) en la carpeta del proyecto ni en data/.")
+
+    is_valid = len(errors) == 0
+    status_str = "ok" if is_valid and len(warnings) == 0 else ("warning" if is_valid else "error")
+
+    return {
+        "valid": is_valid,
+        "status": status_str,
+        "errors": errors,
+        "warnings": warnings,
+        "summary": summary
+    }
+
+
 def broadcast_log(line: str, progress: Optional[int] = None, step_name: Optional[str] = None):
     """Envía un mensaje de log y estado a todos los clientes conectados por SSE."""
     msg = {
@@ -982,6 +1176,13 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 return
             factors_res = calculate_conapo_factors(city_file)
             self.serve_json(factors_res)
+        elif path == "/api/validate":
+            city_file = query.get("file", [""])[0]
+            if not city_file:
+                self.serve_error("Parámetro 'file' faltante", 400)
+                return
+            val_res = validate_city_configuration(city_file)
+            self.serve_json(val_res)
         elif path == "/api/density":
             from tools.poi_studio import load_demand_sample
             city_file = query.get("file", [""])[0]
