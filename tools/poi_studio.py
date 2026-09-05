@@ -189,13 +189,25 @@ def save_city_pois(rel_or_abs_path: str, new_pois: List[Dict[str, Any]]) -> None
 
 def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Dict[str, Any]]:
     """
-    Carga puntos de demanda reales de forma estrictamente aislada:
-    1. dist/<ciudad>/demand_data.json (si este proyecto específico ya fue compilado).
-    2. DENUE en tiempo real EXCLUSIVAMENTE desde la carpeta asignada a este proyecto (data_dir).
-    Si el proyecto no ha sido compilado y no tiene DENUE propio, retorna [] (cero contaminación cruzada).
+    Carga puntos de demanda de referencia espacial EXCLUSIVAMENTE derivados de las fuentes oficiales
+    de datos (DENUE y Censo CPV RESAGEBURB) en la carpeta del proyecto (target_data_dir).
+
+    Reglas de Integridad:
+    1. CERO contaminación de POIs manuales: Ningún POI personalizado (ej. aeropuertos 'AIR_',
+       estadios, universidades creadas en el YAML o 'is_special: True') puede aparecer en la
+       capa de referencia de empleo o población.
+    2. CERO fallbacks cruzados a otras ciudades: Se limita estrictamente a los datos del proyecto activo.
+    3. Caché de alto rendimiento: Si existe '.density_cache.json' en la carpeta de datos y sus
+       mtimes coinciden con los archivos fuente, se carga de inmediato.
+    4. Si no hay archivos fuente en la carpeta de datos pero existe demand_data.json compilado
+       (ej. entornos de test o proyectos heredados), se purgan estrictamente todos los POIs
+       y puntos especiales antes de retornarlo.
     """
     city_base = ""
     target_data_dir = None
+    poi_ids = set()
+    poi_prefixes = ("AIR_", "UNI_", "TOU_", "MED_", "SPO_", "TRA_")
+
     if city_file:
         city_base = os.path.splitext(os.path.basename(city_file))[0].lower()
         try:
@@ -205,6 +217,9 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
                 target_data_dir = cfg_dir if os.path.isabs(cfg_dir) else os.path.join(ROOT_DIR, cfg_dir)
             if not bbox:
                 bbox = cdata.get("city", {}).get("bbox")
+            for p in cdata.get("pois", []):
+                if isinstance(p, dict) and p.get("id"):
+                    poi_ids.add(str(p["id"]))
         except Exception:
             pass
 
@@ -213,7 +228,244 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
         if os.path.exists(cand_dir):
             target_data_dir = cand_dir
 
-    # 1. Buscar demand_data.json compilado EXCLUSIVAMENTE para esta ciudad
+    def _clean_and_filter(pts: List[Dict[str, Any]], box: Optional[List[float]]) -> List[Dict[str, Any]]:
+        clean_pts = []
+        for p in pts:
+            p_id = str(p.get("id", ""))
+            if p.get("is_special"):
+                continue
+            if p_id in poi_ids:
+                continue
+            if any(p_id.startswith(pref) for pref in poi_prefixes):
+                continue
+            loc = p.get("location")
+            if not loc or len(loc) != 2:
+                continue
+            if box and len(box) == 4:
+                if not (box[0] <= loc[0] <= box[2] and box[1] <= loc[1] <= box[3]):
+                    continue
+            clean_pts.append({
+                "id": p_id,
+                "location": [round(float(loc[0]), 5), round(float(loc[1]), 5)],
+                "jobs": int(round(p.get("jobs", 0))),
+                "residents": int(round(p.get("residents", 0)))
+            })
+        return clean_pts
+
+    # Detectar archivos DENUE y Censo en target_data_dir
+    denue_files = []
+    cpv_files = []
+    if target_data_dir and os.path.exists(target_data_dir):
+        raw_denue = glob.glob(os.path.join(target_data_dir, "*denue*.csv")) + glob.glob(os.path.join(target_data_dir, "*DENUE*.csv"))
+        denue_files = sorted(list(dict.fromkeys(os.path.normpath(f) for f in raw_denue if os.path.isfile(f))))
+
+        raw_cpv = (
+            glob.glob(os.path.join(target_data_dir, "*resageburb*.csv")) +
+            glob.glob(os.path.join(target_data_dir, "*RESAGEBURB*.csv")) +
+            glob.glob(os.path.join(target_data_dir, "*censo*.csv")) +
+            glob.glob(os.path.join(target_data_dir, "*CENSO*.csv"))
+        )
+        cpv_files = sorted(list(dict.fromkeys(os.path.normpath(f) for f in raw_cpv if os.path.isfile(f))))
+
+    # Si hay fuentes oficiales disponibles en target_data_dir
+    if (denue_files or cpv_files) and bbox and len(bbox) == 4:
+        cache_path = os.path.join(target_data_dir, ".density_cache.json")
+        src_files = denue_files + cpv_files
+        src_mtimes = {os.path.basename(f): os.path.getmtime(f) for f in src_files}
+
+        # 1. Verificar si existe caché válido
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, "r", encoding="utf-8") as f:
+                    cached_data = json.load(f)
+                if (
+                    cached_data.get("mtimes") == src_mtimes and
+                    cached_data.get("bbox") == bbox and
+                    isinstance(cached_data.get("points"), list)
+                ):
+                    return _clean_and_filter(cached_data["points"], bbox)
+            except Exception:
+                pass
+
+        # 2. Generar muestras de densidad a partir de archivos oficiales en tiempo real
+        try:
+            import numpy as np
+            import pandas as pd
+            from sb_mexico.inegi import DENUE_ESTRATOS, format_cve_mun
+
+            grid_size = 0.0025
+            df_denue = None
+            mza_coords = None
+            ageb_coords = None
+
+            if denue_files:
+                dfs_d = []
+                for df_path in denue_files:
+                    for enc in ['latin1', 'utf-8-sig', 'utf-8', 'cp1252']:
+                        try:
+                            t_df = pd.read_csv(df_path, encoding=enc, low_memory=False, dtype=str)
+                            t_df.columns = [c.strip().lower() for c in t_df.columns]
+                            dfs_d.append(t_df)
+                            break
+                        except Exception:
+                            continue
+                if dfs_d:
+                    df_denue = pd.concat(dfs_d, ignore_index=True)
+                    lat_cols = [c for c in df_denue.columns if 'latitud' in c]
+                    lon_cols = [c for c in df_denue.columns if 'longitud' in c]
+                    if lat_cols and lon_cols:
+                        df_denue['lat'] = pd.to_numeric(df_denue[lat_cols[0]], errors='coerce')
+                        df_denue['lon'] = pd.to_numeric(df_denue[lon_cols[0]], errors='coerce')
+                        df_denue = df_denue[
+                            (df_denue['lon'] >= bbox[0]) & (df_denue['lon'] <= bbox[2]) &
+                            (df_denue['lat'] >= bbox[1]) & (df_denue['lat'] <= bbox[3])
+                        ].dropna(subset=['lat', 'lon']).copy()
+
+                        col_per = 'per_ocu' if 'per_ocu' in df_denue.columns else (
+                            [c for c in df_denue.columns if 'personal' in c or 'estrato' in c] + [''])[0]
+                        if col_per:
+                            df_denue['jobs'] = df_denue[col_per].astype(str).str.strip().map(DENUE_ESTRATOS).fillna(2.24)
+                        else:
+                            df_denue['jobs'] = 2.24
+
+                        # Normalización para matching con CPV
+                        if 'cve_mun' in df_denue.columns and 'cve_ent' in df_denue.columns:
+                            df_denue['cve_mun_clean'] = [format_cve_mun(m, e) for m, e in zip(df_denue['cve_mun'], df_denue['cve_ent'])]
+                        else:
+                            df_denue['cve_mun_clean'] = "-1"
+
+                        if 'ageb' in df_denue.columns:
+                            df_denue['ageb_clean'] = df_denue['ageb'].astype(str).str.strip().str.upper().str.replace('-', '').str.zfill(4)
+                        else:
+                            df_denue['ageb_clean'] = ""
+
+                        if 'manzana' in df_denue.columns:
+                            df_denue['mza_clean'] = pd.to_numeric(df_denue['manzana'], errors='coerce').fillna(-1).astype(int).astype(str)
+                        else:
+                            df_denue['mza_clean'] = "-1"
+
+                        valid_mza = df_denue[df_denue['mza_clean'] != '-1']
+                        if len(valid_mza) > 0:
+                            mza_coords = valid_mza.groupby(['cve_mun_clean', 'ageb_clean', 'mza_clean'])[['lon', 'lat']].mean().reset_index()
+                        ageb_coords = df_denue.groupby(['cve_mun_clean', 'ageb_clean'])[['lon', 'lat']].mean().reset_index()
+
+            # Procesar Censo CPV
+            df_cpv = None
+            if cpv_files and (mza_coords is not None or ageb_coords is not None):
+                dfs_c = []
+                for cpv_path in cpv_files:
+                    for enc in ['utf-8-sig', 'latin1', 'utf-8', 'cp1252']:
+                        try:
+                            t_df = pd.read_csv(cpv_path, encoding=enc, low_memory=False, dtype=str)
+                            t_df.columns = [c.strip().replace('\ufeff', '').replace('ï»¿', '').upper() for c in t_df.columns]
+                            dfs_c.append(t_df)
+                            break
+                        except Exception:
+                            continue
+                if dfs_c:
+                    raw_cpv_df = pd.concat(dfs_c, ignore_index=True)
+                    req = ['ENTIDAD', 'MUN', 'AGEB', 'MZA', 'POBTOT']
+                    if all(c in raw_cpv_df.columns for c in req):
+                        raw_cpv_df['mza_num'] = pd.to_numeric(raw_cpv_df['MZA'].replace('*', '1'), errors='coerce').fillna(0)
+                        raw_cpv_df['pobtot_num'] = pd.to_numeric(raw_cpv_df['POBTOT'].replace('*', '1.5'), errors='coerce').fillna(0)
+                        raw_cpv_df = raw_cpv_df[(raw_cpv_df['mza_num'] > 0) & (raw_cpv_df['pobtot_num'] > 0)].copy()
+
+                        raw_cpv_df['cve_mun_clean'] = [format_cve_mun(m, e) for m, e in zip(raw_cpv_df['MUN'], raw_cpv_df['ENTIDAD'])]
+                        raw_cpv_df['ageb_clean'] = raw_cpv_df['AGEB'].astype(str).str.strip().str.upper().str.replace('-', '').str.zfill(4)
+                        raw_cpv_df['mza_clean'] = raw_cpv_df['mza_num'].astype(int).astype(str)
+
+                        matched_parts = []
+                        if mza_coords is not None and len(mza_coords) > 0:
+                            merged_mza = pd.merge(raw_cpv_df, mza_coords, on=['cve_mun_clean', 'ageb_clean', 'mza_clean'], how='inner')
+                            matched_parts.append(merged_mza)
+                            key_mza = raw_cpv_df['cve_mun_clean'] + "_" + raw_cpv_df['ageb_clean'] + "_" + raw_cpv_df['mza_clean']
+                            key_matched = merged_mza['cve_mun_clean'] + "_" + merged_mza['ageb_clean'] + "_" + merged_mza['mza_clean']
+                            unmatched = raw_cpv_df[~key_mza.isin(key_matched)]
+                        else:
+                            unmatched = raw_cpv_df
+
+                        if ageb_coords is not None and len(ageb_coords) > 0 and len(unmatched) > 0:
+                            merged_ageb = pd.merge(unmatched, ageb_coords, on=['cve_mun_clean', 'ageb_clean'], how='inner')
+                            matched_parts.append(merged_ageb)
+
+                        if matched_parts:
+                            df_cpv = pd.concat(matched_parts, ignore_index=True)
+                            df_cpv = df_cpv[
+                                (df_cpv['lon'] >= bbox[0]) & (df_cpv['lon'] <= bbox[2]) &
+                                (df_cpv['lat'] >= bbox[1]) & (df_cpv['lat'] <= bbox[3])
+                            ].dropna(subset=['lat', 'lon']).copy()
+
+            # Agregación espacial en cuadrícula
+            grp_d = None
+            if df_denue is not None and len(df_denue) > 0:
+                df_denue['gx'] = np.floor(df_denue['lon'] / grid_size).astype(int)
+                df_denue['gy'] = np.floor(df_denue['lat'] / grid_size).astype(int)
+                grp_d = df_denue.groupby(['gx', 'gy']).agg(
+                    jobs=('jobs', 'sum'),
+                    lon=('lon', 'mean'),
+                    lat=('lat', 'mean')
+                ).reset_index()
+
+            grp_c = None
+            if df_cpv is not None and len(df_cpv) > 0:
+                df_cpv['gx'] = np.floor(df_cpv['lon'] / grid_size).astype(int)
+                df_cpv['gy'] = np.floor(df_cpv['lat'] / grid_size).astype(int)
+                grp_c = df_cpv.groupby(['gx', 'gy']).agg(
+                    residents=('pobtot_num', 'sum'),
+                    lon=('lon', 'mean'),
+                    lat=('lat', 'mean')
+                ).reset_index()
+
+            if grp_d is not None and grp_c is not None:
+                merged_grid = pd.merge(grp_d, grp_c, on=['gx', 'gy'], how='outer', suffixes=('_d', '_c'))
+                merged_grid['jobs'] = merged_grid['jobs'].fillna(0).round().astype(int)
+                merged_grid['residents'] = merged_grid['residents'].fillna(0).round().astype(int)
+                merged_grid['lon'] = merged_grid['lon_d'].fillna(merged_grid['lon_c']).round(5)
+                merged_grid['lat'] = merged_grid['lat_d'].fillna(merged_grid['lat_c']).round(5)
+            elif grp_d is not None:
+                merged_grid = grp_d
+                merged_grid['jobs'] = merged_grid['jobs'].round().astype(int)
+                merged_grid['residents'] = 0
+                merged_grid['lon'] = merged_grid['lon'].round(5)
+                merged_grid['lat'] = merged_grid['lat'].round(5)
+            elif grp_c is not None:
+                merged_grid = grp_c
+                merged_grid['jobs'] = 0
+                merged_grid['residents'] = merged_grid['residents'].round().astype(int)
+                merged_grid['lon'] = merged_grid['lon'].round(5)
+                merged_grid['lat'] = merged_grid['lat'].round(5)
+            else:
+                merged_grid = None
+
+            if merged_grid is not None and len(merged_grid) > 0:
+                raw_points = []
+                for i, r in merged_grid.iterrows():
+                    raw_points.append({
+                        'id': f"ref_{i+1:04d}",
+                        'location': [float(r['lon']), float(r['lat'])],
+                        'jobs': int(r['jobs']),
+                        'residents': int(r['residents'])
+                    })
+
+                # Guardar caché atómicamente
+                try:
+                    cache_payload = {
+                        "bbox": bbox,
+                        "mtimes": src_mtimes,
+                        "points": raw_points
+                    }
+                    with open(cache_path, "w", encoding="utf-8") as cf:
+                        json.dump(cache_payload, cf)
+                except Exception:
+                    pass
+
+                return _clean_and_filter(raw_points, bbox)
+
+        except Exception as e:
+            print(f"[WARN] Error al procesar datos brutos para {city_base}: {e}")
+
+    # Fallback estricto: Si NO hay archivos fuente brutos en data/, pero existe demand_data.json
+    # compilado (ej. para tests o proyectos heredados), cargar pero PURGANDO estrictamente cualquier POI manual o especial
     if city_base:
         city_demand_path = os.path.join(ROOT_DIR, "dist", city_base, "demand_data.json")
         if os.path.exists(city_demand_path):
@@ -221,65 +473,9 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
                 with open(city_demand_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 points = data.get("points", [])
-                if bbox and len(bbox) == 4:
-                    points = [
-                        p for p in points
-                        if bbox[0] <= p["location"][0] <= bbox[2] and bbox[1] <= p["location"][1] <= bbox[3]
-                    ]
-                if points:
-                    return points
+                return _clean_and_filter(points, bbox)
             except Exception as e:
                 print(f"[WARN] Error al leer {city_demand_path}: {e}")
-
-    # Estrategia 2: Si no hay demand_data compilado para esta ciudad,
-    # procesar DENUE en tiempo real ÚNICAMENTE desde su propia carpeta de datos
-    if target_data_dir and os.path.exists(target_data_dir) and bbox and len(bbox) == 4:
-        denue_files = glob.glob(os.path.join(target_data_dir, "*denue*.csv")) + glob.glob(os.path.join(target_data_dir, "*DENUE*.csv"))
-        if denue_files:
-            try:
-                import pandas as pd
-                import math
-                df = pd.read_csv(denue_files[0], encoding='latin1', low_memory=False, dtype=str)
-                lat_cols = [c for c in df.columns if 'latitud' in c.lower()]
-                lon_cols = [c for c in df.columns if 'longitud' in c.lower()]
-                if lat_cols and lon_cols:
-                    lat_col = lat_cols[0]
-                    lon_col = lon_cols[0]
-
-                    df['lat'] = pd.to_numeric(df[lat_col], errors='coerce')
-                    df['lon'] = pd.to_numeric(df[lon_col], errors='coerce')
-
-                    df = df[
-                        (df['lon'] >= bbox[0]) & (df['lon'] <= bbox[2]) &
-                        (df['lat'] >= bbox[1]) & (df['lat'] <= bbox[3])
-                    ].dropna(subset=['lat', 'lon'])
-
-                    # Bins de agregación espacial rápida (~250m)
-                    grid_size = 0.0025
-                    grid = {}
-                    for _, r in df.iterrows():
-                        r_lon = r['lon']
-                        r_lat = r['lat']
-                        k = f"{int(math.floor(r_lon / grid_size))}_{int(math.floor(r_lat / grid_size))}"
-                        if k not in grid:
-                            grid[k] = {'sum_lon': 0.0, 'sum_lat': 0.0, 'count': 0}
-                        grid[k]['sum_lon'] += r_lon
-                        grid[k]['sum_lat'] += r_lat
-                        grid[k]['count'] += 1
-
-                    pts = []
-                    for idx, (k, cell) in enumerate(grid.items()):
-                        c_lon = cell['sum_lon'] / cell['count']
-                        c_lat = cell['sum_lat'] / cell['count']
-                        pts.append({
-                            'id': f"denue_{idx+1:04d}",
-                            'location': [round(c_lon, 5), round(c_lat, 5)],
-                            'jobs': int(cell['count'] * 4.5),
-                            'residents': 0
-                        })
-                    return pts
-            except Exception as e:
-                print(f"[WARN] Error al procesar DENUE en tiempo real para {city_base}: {e}")
 
     return []
 

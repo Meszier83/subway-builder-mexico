@@ -1323,6 +1323,59 @@
             });
         }
 
+        function calculatePoiLiveStats(poi) {
+            const jobsManual = parseInt(poi.jobs) || 0;
+            const radius = parseInt(poi.radius_m) || 750;
+            const mode = (poi.mode || 'MAX').toUpperCase();
+            const lon = poi.loc ? poi.loc[0] : null;
+            const lat = poi.loc ? poi.loc[1] : null;
+
+            let absorbedJobs = 0;
+            let absorbedPop = 0;
+            let absorbedNodesCount = 0;
+
+            if (densityPoints && densityPoints.length > 0 && lon !== null && lat !== null) {
+                densityPoints.forEach(p => {
+                    const d = getDistanceMeters(lon, lat, p.location[0], p.location[1]);
+                    if (d <= radius) {
+                        absorbedJobs += (p.jobs || 0);
+                        absorbedPop += (p.residents || 0);
+                        absorbedNodesCount++;
+                    }
+                });
+            }
+
+            let finalJobs = jobsManual;
+            let formulaText = "";
+            if (mode === "MAX") {
+                finalJobs = Math.max(jobsManual, absorbedJobs);
+                if (absorbedJobs >= jobsManual && jobsManual > 0) {
+                    formulaText = `Piso DENUE (${absorbedJobs.toLocaleString()}) supera manual (${jobsManual.toLocaleString()})`;
+                } else {
+                    formulaText = `Piso manual: ${jobsManual.toLocaleString()} (absorbe ${absorbedJobs.toLocaleString()} DENUE)`;
+                }
+            } else if (mode === "BOOST" || mode === "ADDITIVE") {
+                finalJobs = jobsManual + absorbedJobs;
+                formulaText = `Manual: ${jobsManual.toLocaleString()} + DENUE: ${absorbedJobs.toLocaleString()}`;
+            } else if (mode === "REPLACE") {
+                finalJobs = jobsManual;
+                formulaText = `Fijo manual: ${jobsManual.toLocaleString()} (sustituye ${absorbedJobs.toLocaleString()} DENUE)`;
+            } else {
+                finalJobs = Math.max(jobsManual, absorbedJobs);
+                formulaText = `Piso: ${jobsManual.toLocaleString()}`;
+            }
+
+            return {
+                manual: jobsManual,
+                absorbed: absorbedJobs,
+                absorbedPop: absorbedPop,
+                absorbedNodes: absorbedNodesCount,
+                finalJobs: finalJobs,
+                mode: mode,
+                formulaText: formulaText
+            };
+        }
+
         function renderAllPois() {
             poiLayers.forEach(({ marker, circle }) => {
                 map.removeLayer(marker);
@@ -1335,6 +1388,7 @@
                 const color = CATEGORY_COLORS[cat];
                 const radius = poi.radius_m || 750;
                 const loc = [poi.loc[1], poi.loc[0]];
+                const stats = calculatePoiLiveStats(poi);
 
                 const circle = L.circle(loc, {
                     radius: radius,
@@ -1349,7 +1403,16 @@
                     draggable: true
                 }).addTo(map);
 
-                marker.bindTooltip(`<b>${poi.id}</b><br>Cuota: ${(poi.jobs || 0).toLocaleString()} | Radio: ${radius}m`, {
+                let formulaBadge = '';
+                if (stats.mode === 'BOOST') {
+                    formulaBadge = `<br><span style="color:#60a5fa; font-size:11px;">Manual: ${stats.manual.toLocaleString()} + DENUE: +${stats.absorbed.toLocaleString()}</span>`;
+                } else if (stats.mode === 'MAX') {
+                    formulaBadge = `<br><span style="color:#94a3b8; font-size:11px;">Piso DENUE: ${stats.absorbed.toLocaleString()} | Base: ${stats.manual.toLocaleString()}</span>`;
+                } else if (stats.mode === 'REPLACE') {
+                    formulaBadge = `<br><span style="color:#94a3b8; font-size:11px;">Fijo manual (sustituye ${stats.absorbed.toLocaleString()} DENUE)</span>`;
+                }
+
+                marker.bindTooltip(`<b>${poi.id}</b><br>Final: <strong style="color:#10b981;">${stats.finalJobs.toLocaleString()}</strong> | Radio: ${radius}m${formulaBadge}`, {
                     direction: 'top',
                     offset: [0, -16]
                 });
@@ -1387,6 +1450,7 @@
 
             pois.forEach(poi => {
                 const cat = getPoiCategory(poi.id);
+                const stats = calculatePoiLiveStats(poi);
                 const card = document.createElement('div');
                 card.className = `poi-card ${activeEditingPoiId === poi.id ? 'active' : ''}`;
                 card.id = `card-${poi.id}`;
@@ -1400,9 +1464,12 @@
                         <span class="poi-badge badge-${cat.toLowerCase()}">${poi.mode || 'MAX'}</span>
                     </div>
                     <div class="poi-meta">
-                        <span>Empleos: <strong>${(poi.jobs || 0).toLocaleString()}</strong></span>
+                        <span>Final: <strong style="color:var(--accent-green);">${stats.finalJobs.toLocaleString()}</strong></span>
                         <span>Radio: <strong>${poi.radius_m || 750} m</strong></span>
                         <span>Coords: <strong>${poi.loc[1]}, ${poi.loc[0]}</strong></span>
+                    </div>
+                    <div style="font-size:10px; color:var(--text-muted); padding-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${stats.formulaText}">
+                        ${stats.formulaText}
                     </div>
                     <div class="poi-actions">
                         <button class="btn btn-sm" onclick="zoomToPoi('${poi.id}')"><i class="fa-solid fa-magnifying-glass-location"></i> Ver</button>
@@ -1549,6 +1616,8 @@
             };
 
             if (activeEditingPoiId) {
+                const dupExists = pois.some(p => p.id === id && p.id !== activeEditingPoiId);
+                if (dupExists) { alert(`Ya existe otro POI con el ID '${id}'. Elige un ID único.`); return; }
                 const idx = pois.findIndex(p => p.id === activeEditingPoiId);
                 if (idx >= 0) pois[idx] = poiObj;
             } else {
@@ -2024,8 +2093,10 @@
             try {
                 const res = await fetch(`/api/density?file=${encodeURIComponent(cityFile)}`);
                 const data = await res.json();
-                if (data.points && data.points.length > 0) {
-                    densityPoints = data.points;
+                const rawPoints = data.points || [];
+                const declaredPoiIds = new Set((currentCityData?.pois || []).map(p => p.id));
+                densityPoints = rawPoints.filter(p => !p.is_special && !declaredPoiIds.has(p.id));
+                if (densityPoints.length > 0) {
                     densityPoints.forEach(pt => {
                         const isJobDominant = (pt.jobs || 0) > (pt.residents || 0);
                         const radius = Math.max(3, Math.min(10, Math.sqrt((pt.residents || 0) + (pt.jobs || 0)) * 0.25));
@@ -2053,6 +2124,8 @@
                     if (document.getElementById('chk-toggle-jobs').checked) {
                         jobsLayerGroup.addTo(map);
                     }
+                    renderAllPois();
+                    renderPoiList();
                 }
             } catch (e) {
                 console.log("No hay capa de demanda precargada:", e);

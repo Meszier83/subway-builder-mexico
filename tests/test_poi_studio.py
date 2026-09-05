@@ -100,6 +100,65 @@ class TestPoiStudio(unittest.TestCase):
             if os.path.exists(test_dist_dir):
                 os.rmdir(test_dist_dir)
 
+    def test_load_demand_sample_excludes_custom_pois(self):
+        """Verifica que load_demand_sample nunca incluya POIs manuales o especiales en los puntos de referencia."""
+        from tools.poi_studio import load_demand_sample
+        import json
+
+        test_dist_dir = os.path.join(os.path.dirname(__file__), "..", "dist", "test_poi_city")
+        os.makedirs(test_dist_dir, exist_ok=True)
+        demand_json_path = os.path.join(test_dist_dir, "demand_data.json")
+
+        sample_data = {
+            "points": [
+                {"id": "dp_0001", "location": [-86.85, 21.15], "jobs": 150, "residents": 300},
+                {"id": "AIR_Cancún", "location": [-86.87, 21.04], "jobs": 8542, "residents": 0, "is_special": True},
+                {"id": "UNI_Caribe", "location": [-86.82, 21.20], "jobs": 4500, "residents": 0, "is_special": True},
+                {"id": "TOU_Plaza", "location": [-86.80, 21.12], "jobs": 2000, "residents": 0},
+            ]
+        }
+        with open(demand_json_path, "w", encoding="utf-8") as f:
+            json.dump(sample_data, f)
+
+        try:
+            bbox = [-87.0, 21.0, -86.7, 21.4]
+            pts = load_demand_sample(bbox, city_file="cities/test_poi_city.yaml")
+            ids = [p["id"] for p in pts]
+            self.assertIn("dp_0001", ids)
+            self.assertNotIn("AIR_Cancún", ids)
+            self.assertNotIn("UNI_Caribe", ids)
+            self.assertNotIn("TOU_Plaza", ids)
+            for p in pts:
+                self.assertFalse(p.get("is_special", False))
+                self.assertNotEqual(p.get("jobs"), 8542)
+        finally:
+            if os.path.exists(demand_json_path):
+                os.remove(demand_json_path)
+            if os.path.exists(test_dist_dir):
+                os.rmdir(test_dist_dir)
+
+    def test_load_demand_sample_from_raw_inegi_cancun(self):
+        """Verifica que en una ciudad real (Cancún), la densidad se genere de los archivos oficiales sin POIs."""
+        from tools.poi_studio import load_demand_sample, load_city_data
+
+        cdata = load_city_data("cities/cancun.yaml")
+        declared_pois = {p["id"] for p in cdata.get("pois", [])}
+
+        pts = load_demand_sample(city_file="cities/cancun.yaml")
+        self.assertGreater(len(pts), 500)
+
+        # Ningún punto de referencia debe ser un POI declarado
+        for p in pts:
+            self.assertNotIn(p["id"], declared_pois)
+            self.assertFalse(p.get("is_special", False))
+            self.assertFalse(any(p["id"].startswith(pref) for pref in ("AIR_", "UNI_", "TOU_", "MED_", "SPO_", "TRA_")))
+
+        # Verificar que existan tanto empleos (DENUE) como habitantes (CPV)
+        total_jobs = sum(p["jobs"] for p in pts)
+        total_residents = sum(p["residents"] for p in pts)
+        self.assertGreater(total_jobs, 100_000)
+        self.assertGreater(total_residents, 500_000)
+
 if __name__ == "__main__":
     unittest.main()
 
