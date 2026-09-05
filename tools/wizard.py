@@ -146,6 +146,11 @@ def load_city_data(rel_or_abs_path: str) -> Dict[str, Any]:
         data["data_dir"] = ""
     if not isinstance(data.get("data_exclusions"), list):
         data["data_exclusions"] = []
+    if not isinstance(data.get("isolated_zones"), list):
+        if isinstance(data.get("city", {}).get("isolated_zones"), list):
+            data["isolated_zones"] = data["city"]["isolated_zones"]
+        else:
+            data["isolated_zones"] = []
 
     return data
 
@@ -236,12 +241,24 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
     if isolated_zones_cfg and isinstance(isolated_zones_cfg, list):
         lines.append("isolated_zones:")
         for z in isolated_zones_cfg:
-            z_id = z.get("id", "zona")
-            z_name = z.get("name", z_id)
-            z_bbox = z.get("bbox", [])
+            z_id = str(z.get("id", "zona")).strip()
+            z_name = str(z.get("name", z_id)).strip()
+            raw_b = z.get("bbox", [])
+            if isinstance(raw_b, (list, tuple)) and len(raw_b) == 4:
+                try:
+                    norm_b = [
+                        round(min(float(raw_b[0]), float(raw_b[2])), 4),
+                        round(min(float(raw_b[1]), float(raw_b[3])), 4),
+                        round(max(float(raw_b[0]), float(raw_b[2])), 4),
+                        round(max(float(raw_b[1]), float(raw_b[3])), 4)
+                    ]
+                except (ValueError, TypeError):
+                    norm_b = raw_b
+            else:
+                norm_b = raw_b
             lines.append(f'  - id: "{z_id}"')
             lines.append(f'    name: "{z_name}"')
-            lines.append(f'    bbox: {z_bbox}')
+            lines.append(f'    bbox: {norm_b}')
         lines.append("")
 
     # Bloque de POIs
@@ -540,6 +557,7 @@ def inspect_data_files(city_name: str = "", city_code: str = "", city_file: str 
     cpv = find_files(["*RESAGEBURB*.csv", "*resageburb*.csv", "*censo*.csv", "*cpv*.csv"])
     ce2024 = find_files(["*SAIC*.csv", "*saic*.csv", "*exporta*.csv", "*tr_ce*.csv", "*ce2024*.csv", "*ce_2024*.csv", "*ce*.csv"])
     conapo = find_files(["*pobproy*.csv", "*quinq*.csv", "*pob_proy*.csv", "*conapo*.csv", "data-*.csv", "*proyeccion*.csv"])
+    enoe = find_files(["*enoe*.csv", "*ENOE*.csv", "*trim*.csv", "*2024_trim*.csv", "*2025_trim*.csv", "*2026_trim*.csv"])
 
     # Para OSM: buscar en la carpeta del proyecto, y solo si falta, verificar extracto nacional en data/
     osm = find_files(["*.osm.pbf", "*.osm", "roads.geojson"])
@@ -566,6 +584,7 @@ def inspect_data_files(city_name: str = "", city_code: str = "", city_file: str 
         "cpv": {"status": "ok" if cpv else "missing", "files": cpv},
         "ce2024": {"status": "ok" if ce2024 else "missing", "files": ce2024},
         "conapo": {"status": "ok" if conapo else "missing", "files": conapo},
+        "enoe": {"status": "ok" if enoe else "missing", "files": enoe},
         "osm": {"status": "ok" if osm else "missing", "files": osm},
         "all_ready": bool(denue and cpv)
     }
@@ -824,6 +843,64 @@ def calculate_conapo_factors(city_file: str) -> Dict[str, Any]:
         "conapo_file": os.path.basename(conapo_path),
         "projection_year": proj_year,
         "factors": factors_list
+    }
+
+
+def detect_macro_parameters(city_file: str) -> Dict[str, Any]:
+    """
+    Detecta o restablece los parámetros macroeconómicos oficiales (ENOE / Modelo Gravitatorio):
+    1. Si existe un archivo ENOE en la carpeta del proyecto, extrae Tasa PEA y TIL1 reales.
+    2. Si no existe, provee los valores estándar oficiales del modelo para la entidad (62.0% PEA, 45.0% TIL1, etc.).
+    """
+    target_dir = None
+    if city_file:
+        try:
+            cdata = load_city_data(city_file)
+            cfg_dir = cdata.get("data_dir")
+            if cfg_dir:
+                target_dir = cfg_dir if os.path.isabs(cfg_dir) else os.path.join(ROOT_DIR, cfg_dir)
+            else:
+                city_base = os.path.splitext(os.path.basename(city_file))[0].lower()
+                cand = os.path.join(ROOT_DIR, "data", city_base)
+                if os.path.exists(cand):
+                    target_dir = cand
+        except Exception:
+            pass
+
+    enoe_files = []
+    if target_dir and os.path.exists(target_dir):
+        enoe_candidates = (
+            glob.glob(os.path.join(target_dir, "*enoe*.csv")) +
+            glob.glob(os.path.join(target_dir, "*ENOE*.csv")) +
+            glob.glob(os.path.join(target_dir, "*trim*.csv"))
+        )
+        enoe_files = sorted(list(dict.fromkeys(os.path.normpath(f) for f in enoe_candidates if os.path.isfile(f))))
+
+    tasa_pea = 0.62
+    til_1 = 0.45
+    source_msg = "Valores estándar oficiales (ENOE Estatal / INEGI)"
+
+    if enoe_files:
+        try:
+            from sb_mexico.inegi import parse_enoe_indicators
+            enoe_res = parse_enoe_indicators(enoe_files[0])
+            tasa_pea = enoe_res.get("tasa_pea", 0.62)
+            til_1 = enoe_res.get("til_1", 0.45)
+            source_msg = f"Detectado automáticamente desde archivo ENOE ({os.path.basename(enoe_files[0])})"
+        except Exception as e:
+            source_msg = f"Error al parsear ENOE ({e}), usando referencia oficial INEGI"
+
+    return {
+        "status": "ok",
+        "source": source_msg,
+        "has_enoe_file": bool(enoe_files),
+        "parameters": {
+            "tasa_pea": round(float(tasa_pea), 4),
+            "til_1_state": round(float(til_1), 4),
+            "gravity_beta": 0.120,
+            "max_distance_km": 50.0,
+            "max_pop_size": 150
+        }
     }
 
 
@@ -1176,6 +1253,13 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 return
             factors_res = calculate_conapo_factors(city_file)
             self.serve_json(factors_res)
+        elif path == "/api/macro/detect":
+            city_file = query.get("file", [""])[0]
+            if not city_file:
+                self.serve_error("Parámetro 'file' faltante", 400)
+                return
+            res = detect_macro_parameters(city_file)
+            self.serve_json(res)
         elif path == "/api/validate":
             city_file = query.get("file", [""])[0]
             if not city_file:

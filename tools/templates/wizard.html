@@ -200,6 +200,20 @@
       stroke-width: 3px !important;
     }
 
+    .draggable-isolated-rect {
+      cursor: pointer !important;
+      pointer-events: auto !important;
+      transition: fill-opacity 0.2s, stroke-width 0.2s;
+    }
+    .draggable-isolated-rect:hover {
+      fill-opacity: 0.35 !important;
+      stroke-width: 3px !important;
+    }
+    .isolated-corner-handle {
+      cursor: pointer !important;
+      user-select: none;
+    }
+
     .terminal-scroll {
       font-family: 'JetBrains Mono', monospace;
       white-space: pre-wrap;
@@ -412,6 +426,28 @@
             <span class="text-gray-300 font-semibold">Incluir Océano / Costera</span>
             <input type="checkbox" id="cfg_include_ocean" class="w-4 h-4 accent-metro-orange rounded">
           </div>
+
+          <!-- Zonas Topológicas Aisladas (Islas / Cuencas) -->
+          <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border space-y-2.5">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-1.5">
+                <i data-lucide="shield-alert" class="w-4 h-4 text-cyan-400"></i>
+                <span class="font-bold text-gray-200">Zonas Aisladas (Islas)</span>
+              </div>
+              <span id="isolatedZonesBadge" class="text-[10px] bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 px-2 py-0.5 rounded-full font-bold">0 zonas</span>
+            </div>
+            <p class="text-[11px] text-gray-400 leading-tight">
+              Contén la demanda de islas o cuencas para eliminar viajes automovilísticos cruzando el mar.
+            </p>
+            <button type="button" onclick="startDrawingIsolatedZone()" id="btnDrawIsolatedZone" class="w-full bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/40 text-cyan-300 text-xs font-bold py-1.5 px-2.5 rounded-lg flex items-center justify-center space-x-1.5 transition shadow">
+              <i data-lucide="box-select" class="w-3.5 h-3.5"></i>
+              <span>+ Trazar Zona Aislada</span>
+            </button>
+            <!-- Lista interactiva de zonas aisladas -->
+            <div id="isolatedZonesListContainer" class="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+              <!-- Renderizado dinámicamente -->
+            </div>
+          </div>
         </div>
 
         <div class="pt-4 mt-auto">
@@ -430,6 +466,14 @@
       <!-- Mapa Interactivo Leaflet Contenido -->
       <div class="flex-1 h-full bg-metro-card border border-metro-border rounded-xl overflow-hidden relative shadow-xl z-0">
         <div id="mapBbox" class="w-full h-full"></div>
+
+        <!-- Banner Flotante de Modo Trazado de Zona Aislada -->
+        <div id="drawingIsolatedBanner" class="hidden absolute top-4 left-1/2 -translate-x-1/2 bg-cyan-950/95 text-cyan-200 border border-cyan-500/60 backdrop-blur-md px-4 py-2 rounded-xl text-xs font-semibold shadow-2xl flex items-center space-x-3 z-[1000]">
+          <i data-lucide="box-select" class="w-4 h-4 text-cyan-400 animate-pulse"></i>
+          <span>Haz clic y arrastra sobre el mapa para encuadrar la isla</span>
+          <button type="button" onclick="cancelDrawingIsolatedZone()" class="bg-cyan-800/80 hover:bg-cyan-700 text-white text-[11px] font-bold px-2 py-0.5 rounded border border-cyan-400/40 transition">Cancelar (Esc)</button>
+        </div>
+
         <div class="absolute bottom-4 left-4 bg-metro-card/90 backdrop-blur border border-metro-border px-3.5 py-2 rounded-lg text-xs text-gray-300 z-[999] shadow-lg pointer-events-none">
           <span class="font-bold text-metro-orange">Tip:</span> Arrastra las esquinas del rectángulo para calibrar el BBOX.
         </div>
@@ -542,53 +586,76 @@
     <!-- --------------------------------------------------------------------- -->
     <section id="stepView-3" class="step-view hidden absolute inset-0 p-6 flex flex-col md:flex-row gap-6 overflow-y-auto w-full h-full">
       <div class="w-full md:w-1/2 bg-metro-card border border-metro-border rounded-xl p-5 shadow-xl flex flex-col space-y-4">
-        <div class="border-b border-metro-border pb-3">
-          <h2 class="text-base font-bold text-white flex items-center space-x-2">
-            <i data-lucide="sliders" class="w-5 h-5 text-metro-orange"></i>
-            <span>Parámetros Macroeconómicos (ENOE / Gravitatorio)</span>
-          </h2>
-          <p class="text-xs text-gray-400 mt-1">Calibra las tasas de empleo, informalidad y fricción espacial $\beta$.</p>
+        <div class="border-b border-metro-border pb-3 flex justify-between items-center">
+          <div>
+            <h2 class="text-base font-bold text-stone-900 flex items-center space-x-2">
+              <i data-lucide="sliders" class="w-5 h-5 text-metro-orange"></i>
+              <span>Parámetros Macroeconómicos (ENOE / Gravitatorio)</span>
+            </h2>
+            <p class="text-xs text-stone-600 mt-1">Calibra las tasas de empleo, informalidad y alcance de los viajes metropolitanos.</p>
+          </div>
+          <button onclick="resetMacroeconomicParameters()" id="btnResetMacro" class="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold rounded-lg flex items-center space-x-1.5 transition shadow-xs" title="Restablecer o auto-detectar según la ENOE de INEGI">
+            <i data-lucide="rotate-ccw" class="w-3.5 h-3.5 text-amber-700"></i>
+            <span>Restablecer Oficiales</span>
+          </button>
         </div>
 
         <div class="space-y-4 text-xs">
           <!-- Tasa PEA -->
           <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border">
-            <div class="flex justify-between font-bold mb-1">
-              <span class="text-gray-300">Tasa de Participación Laboral (PEA)</span>
-              <span id="val_tasa_pea" class="text-metro-orange font-mono">66.44%</span>
+            <div class="flex justify-between items-center mb-1">
+              <div class="flex items-center space-x-2">
+                <span class="text-stone-900 font-bold text-xs">Tasa de Participación Laboral (PEA)</span>
+                <span class="text-[10px] px-1.5 py-0.5 bg-orange-100 border border-orange-200 text-orange-800 rounded font-semibold">ENOE · INEGI</span>
+              </div>
+              <span id="val_tasa_pea" class="text-metro-orange font-mono font-bold text-sm">62.00%</span>
             </div>
-            <input type="range" min="0.40" max="0.80" step="0.005" id="cfg_tasa_pea" oninput="document.getElementById('val_tasa_pea').innerText = (this.value * 100).toFixed(2) + '%'" class="w-full accent-metro-orange">
-            <p class="text-[11px] text-gray-500 mt-1">Derivada de la Encuesta Nacional de Ocupación y Empleo (ENOE) para la entidad.</p>
+            <input type="range" min="0.40" max="0.80" step="0.005" id="cfg_tasa_pea" oninput="document.getElementById('val_tasa_pea').innerText = (this.value * 100).toFixed(2) + '%'" class="w-full accent-metro-orange cursor-pointer">
+            <p class="text-[11px] text-stone-600 mt-1 leading-relaxed">
+              <strong>Efecto en el juego:</strong> Porcentaje de la población de 15+ años que trabaja o busca empleo. Multiplica la población censal para calcular cuántos <em>pasajeros diarios</em> saldrán de cada colonia hacia el metro.
+            </p>
           </div>
 
           <!-- Informalidad TIL1 -->
           <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border">
-            <div class="flex justify-between font-bold mb-1">
-              <span class="text-gray-300">Tasa de Informalidad Laboral (TIL1)</span>
-              <span id="val_til_1" class="text-metro-green font-mono">44.97%</span>
+            <div class="flex justify-between items-center mb-1">
+              <div class="flex items-center space-x-2">
+                <span class="text-stone-900 font-bold text-xs">Tasa de Informalidad Laboral (TIL1)</span>
+                <span class="text-[10px] px-1.5 py-0.5 bg-emerald-100 border border-emerald-200 text-emerald-800 rounded font-semibold">ENOE / CE · INEGI</span>
+              </div>
+              <span id="val_til_1" class="text-metro-green font-mono font-bold text-sm">45.00%</span>
             </div>
-            <input type="range" min="0.20" max="0.75" step="0.005" id="cfg_til_1" oninput="document.getElementById('val_til_1').innerText = (this.value * 100).toFixed(2) + '%'" class="w-full accent-metro-green">
-            <p class="text-[11px] text-gray-500 mt-1">Ajusta el multiplicador de microempresas formales vs informales.</p>
+            <input type="range" min="0.20" max="0.75" step="0.005" id="cfg_til_1" oninput="document.getElementById('val_til_1').innerText = (this.value * 100).toFixed(2) + '%'" class="w-full accent-metro-green cursor-pointer">
+            <p class="text-[11px] text-stone-600 mt-1 leading-relaxed">
+              <strong>Efecto en el juego:</strong> Proporción de empleo informal. Escala y expande los empleos en micro y pequeños negocios del DENUE para reflejar la actividad económica real no registrada formalmente.
+            </p>
           </div>
 
           <!-- Beta Gravitatorio -->
           <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border">
-            <div class="flex justify-between font-bold mb-1">
-              <span class="text-gray-300">Fricción Espacial Gravitatoria (&beta;)</span>
-              <span id="val_gravity_beta" class="text-metro-pink font-mono">0.120</span>
+            <div class="flex justify-between items-center mb-1">
+              <div class="flex items-center space-x-2">
+                <span class="text-stone-900 font-bold text-xs">Fricción Espacial Gravitatoria (&beta;)</span>
+                <span class="text-[10px] px-1.5 py-0.5 bg-purple-100 border border-purple-200 text-purple-800 rounded font-semibold">Modelo Furness</span>
+              </div>
+              <span id="val_gravity_beta" class="text-metro-pink font-mono font-bold text-sm">0.120</span>
             </div>
-            <input type="range" min="0.05" max="0.25" step="0.005" id="cfg_gravity_beta" oninput="document.getElementById('val_gravity_beta').innerText = parseFloat(this.value).toFixed(3)" class="w-full accent-metro-pink">
-            <p class="text-[11px] text-gray-500 mt-1">Determina el decaimiento de viajes por distancia $f(d_{ij}) = \exp(-\beta \cdot d_{ij})$.</p>
+            <input type="range" min="0.05" max="0.25" step="0.005" id="cfg_gravity_beta" oninput="document.getElementById('val_gravity_beta').innerText = parseFloat(this.value).toFixed(3)" class="w-full accent-metro-pink cursor-pointer">
+            <p class="text-[11px] text-stone-600 mt-1 leading-relaxed">
+              <strong>Efecto en el juego:</strong> Resistencia a la distancia. Valores bajos (0.08–0.10) generan trayectos metropolitanos largos a través de toda la ciudad; valores altos (0.15–0.20) concentran viajes cortos vecinales.
+            </p>
           </div>
 
           <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block text-gray-400 font-semibold mb-1">Distancia Máx. (km)</label>
-              <input type="number" id="cfg_max_distance_km" value="50.0" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white font-mono">
+            <div class="bg-metro-panel p-3 rounded-lg border border-metro-border">
+              <label class="block text-stone-900 font-bold text-xs mb-1">Distancia Máx. de Viaje (km)</label>
+              <input type="number" id="cfg_max_distance_km" value="50.0" class="w-full bg-white border border-metro-border rounded-lg px-3 py-1.5 text-stone-900 font-mono text-xs">
+              <p class="text-[10px] text-stone-600 mt-1">Límite de corte: se descartan viajes cotidianos más allá de este radio.</p>
             </div>
-            <div>
-              <label class="block text-gray-400 font-semibold mb-1">Máx. Cohorte Pop</label>
-              <input type="number" id="cfg_max_pop_size" value="150" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white font-mono">
+            <div class="bg-metro-panel p-3 rounded-lg border border-metro-border">
+              <label class="block text-stone-900 font-bold text-xs mb-1">Máx. Cohorte de Pasajeros</label>
+              <input type="number" id="cfg_max_pop_size" value="150" class="w-full bg-white border border-metro-border rounded-lg px-3 py-1.5 text-stone-900 font-mono text-xs">
+              <p class="text-[10px] text-stone-600 mt-1">Tamaño máximo de cada grupo de pasajeros generado en el motor del juego.</p>
             </div>
           </div>
         </div>
@@ -765,6 +832,12 @@
               <i data-lucide="info" class="w-3.5 h-3.5 shrink-0 text-amber-600"></i>
               <span>El motor añade automáticamente "Terminal". Se recomienda escribir solo el nombre de la ciudad o terminal (ej. <em>Cancún</em>).</span>
             </p>
+
+            <!-- Alerta de ID Duplicado -->
+            <p id="poiIdDuplicateWarning" class="hidden text-[10px] text-rose-800 bg-rose-50 border border-rose-200 rounded-lg p-2 flex items-center space-x-1.5">
+              <i data-lucide="alert-triangle" class="w-3.5 h-3.5 shrink-0 text-rose-600"></i>
+              <span>¡ID duplicado! Este ID ya pertenece a otro POI. Debe ser único para evitar que Subway Builder lo sobreescriba en el mapa.</span>
+            </p>
           </div>
 
           <!-- Opciones Avanzadas de Localización (Colapsable) -->
@@ -802,12 +875,13 @@
             </div>
           </div>
 
-          <div class="space-y-1">
-            <div class="flex justify-between items-center text-xs">
-              <label class="text-[10px] font-bold uppercase tracking-wider text-stone-500">Radio de Absorción</label>
-              <span id="editPoiRadiusDisplay" class="font-mono font-bold text-metro-orange">750 m</span>
+          <!-- Radio de Captura -->
+          <div class="space-y-1.5">
+            <div class="flex justify-between items-center">
+              <label class="text-[10px] font-bold uppercase tracking-wider text-stone-500">Radio de Absorción DENUE</label>
+              <span id="editPoiRadiusDisplay" class="font-mono text-xs font-bold text-stone-900">750 m</span>
             </div>
-            <input type="range" min="200" max="3500" step="50" value="750" id="editPoiRadius" oninput="onPoiRadiusSlider(this.value)" class="w-full accent-metro-orange cursor-pointer">
+            <input type="range" id="editPoiRadius" min="100" max="3000" step="50" value="750" oninput="onPoiRadiusSliderChanged(this.value)" class="w-full accent-metro-orange h-1.5 bg-stone-200 rounded-lg cursor-pointer">
           </div>
 
           <div class="grid grid-cols-2 gap-2">
@@ -818,11 +892,16 @@
             <div class="space-y-1">
               <label class="text-[10px] font-bold uppercase tracking-wider text-stone-500">Modo Asignación</label>
               <select id="editPoiMode" onchange="updatePoiPreviewFromForm()" class="w-full text-xs font-bold bg-white border border-stone-300 rounded-lg px-2 py-1.5 text-stone-900">
-                <option value="MAX">MAX (Recomendado)</option>
-                <option value="BOOST">BOOST (Suma)</option>
-                <option value="REPLACE">REPLACE (Fijo)</option>
+                <option value="MAX">MAX (Piso mínimo garantizado)</option>
+                <option value="BOOST">BOOST (Suma manual + DENUE local)</option>
+                <option value="REPLACE">REPLACE (Cuota fija, sustituye DENUE)</option>
               </select>
             </div>
+          </div>
+          <div class="text-[10px] text-stone-500 bg-stone-50 border border-stone-200 rounded-lg p-2 font-sans space-y-0.5">
+            <p><strong>MAX:</strong> Garantiza un piso (si el DENUE local tiene más, prevalece el DENUE). Ideal para aeropuertos y estadios.</p>
+            <p><strong>BOOST:</strong> Suma la cuota manual sobre el DENUE local. Ideal para estudiantes sobre áreas comerciales.</p>
+            <p><strong>REPLACE:</strong> Fija exactamente la cuota manual y reemplaza el DENUE local.</p>
           </div>
 
           <!-- PANEL INTEGRADO: TELEMETRÍA DE ABSORCIÓN & POIs AFECTADOS -->
@@ -1100,6 +1179,10 @@
             <input type="checkbox" id="chkLayerPois" checked onchange="toggleDemandLayers()" class="w-4 h-4 accent-amber-500 rounded">
             <span>POIs y Aeropuertos (Dorado)</span>
           </label>
+          <label class="flex items-center space-x-2 text-cyan-400 cursor-pointer">
+            <input type="checkbox" id="chkLayerIsolated" checked onchange="toggleDemandLayers()" class="w-4 h-4 accent-cyan-500 rounded">
+            <span>Zonas Aisladas / Islas (Cian)</span>
+          </label>
         </div>
 
         <!-- Botón de Descarga -->
@@ -1299,6 +1382,68 @@
     </div>
   </div>
 
+  <!-- Modal Crear / Editar Zona Aislada -->
+  <div id="modalIsolatedZone" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white border border-stone-200 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
+      <div class="flex justify-between items-center border-b border-stone-200 pb-3">
+        <div>
+          <h3 id="modalIsolatedTitle" class="text-base font-bold text-stone-900 flex items-center space-x-2">
+            <i data-lucide="shield-alert" class="w-5 h-5 text-cyan-600"></i>
+            <span>Zona Aislada (Isla)</span>
+          </h3>
+          <p class="text-xs text-stone-500 mt-0.5">Asigna nombre e identificador único a la zona contenida.</p>
+        </div>
+        <button onclick="closeIsolatedZoneModal()" class="text-stone-400 hover:text-stone-800 p-1.5 rounded-lg hover:bg-stone-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <input type="hidden" id="iso_edit_index" value="-1">
+
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-stone-700 font-semibold mb-1">Nombre Descriptivo</label>
+          <input type="text" id="iso_name" oninput="onIsoNameInput()" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-cyan-600 focus:outline-none" placeholder="ej. Isla Mujeres">
+        </div>
+
+        <div>
+          <label class="block text-stone-700 font-semibold mb-1">Identificador ID (minúsculas, sin espacios)</label>
+          <input type="text" id="iso_id" class="w-full bg-stone-50 font-mono border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-bold focus:border-cyan-600 focus:outline-none" placeholder="isla_mujeres">
+        </div>
+
+        <div class="bg-stone-50 p-3 rounded-lg border border-stone-200 space-y-2">
+          <span class="font-bold text-stone-800 block text-[11px]">Coordenadas BBOX [W, S, E, N]</span>
+          <div class="grid grid-cols-2 gap-2 font-mono text-[11px]">
+            <div>
+              <span class="text-stone-500">Min Lon (O):</span>
+              <input type="number" step="0.0001" id="iso_bbox_0" class="w-full bg-white border border-stone-300 rounded px-2 py-1 text-stone-900 font-semibold">
+            </div>
+            <div>
+              <span class="text-stone-500">Min Lat (S):</span>
+              <input type="number" step="0.0001" id="iso_bbox_1" class="w-full bg-white border border-stone-300 rounded px-2 py-1 text-stone-900 font-semibold">
+            </div>
+            <div>
+              <span class="text-stone-500">Max Lon (E):</span>
+              <input type="number" step="0.0001" id="iso_bbox_2" class="w-full bg-white border border-stone-300 rounded px-2 py-1 text-stone-900 font-semibold">
+            </div>
+            <div>
+              <span class="text-stone-500">Max Lat (N):</span>
+              <input type="number" step="0.0001" id="iso_bbox_3" class="w-full bg-white border border-stone-300 rounded px-2 py-1 text-stone-900 font-semibold">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end space-x-2 pt-3 border-t border-stone-200">
+        <button onclick="closeIsolatedZoneModal()" class="px-4 py-2 bg-stone-100 text-stone-700 text-xs font-bold rounded-lg hover:bg-stone-200 transition">Cancelar</button>
+        <button onclick="submitIsolatedZoneModal()" class="px-5 py-2 bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-bold rounded-lg transition shadow flex items-center space-x-1.5">
+          <i data-lucide="check" class="w-4 h-4"></i>
+          <span>Guardar Zona</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- ========================================================================= -->
   <!-- SISTEMA REACTIVO JAVASCRIPT & ESTADO DEL WIZARD -->
   <!-- ========================================================================= -->
@@ -1319,6 +1464,15 @@
 
     let bboxHandlesGroup = null;
     let bboxCornerMarkers = { NW: null, NE: null, SE: null, SW: null };
+    let bboxMainGroup = null;
+    let isolatedZonesGroup = null;
+    let isolatedHandlesGroup = null;
+    let isolatedZonesDemandGroup = null;
+    let selectedIsolatedZoneIndex = -1;
+    let isDrawingIsolated = false;
+    let drawStartLatLng = null;
+    let drawTempRect = null;
+    let isolatedCornerMarkers = { NW: null, NE: null, SE: null, SW: null };
 
     // Inicialización al cargar la ventana
     window.addEventListener('DOMContentLoaded', async () => {
@@ -1720,8 +1874,17 @@
       // 1. Mapa BBOX
       const b1 = createBaseLayers();
       mapBbox = L.map('mapBbox', { ...mapOptions, layers: [b1.baseMapDefault] }).setView([21.16, -86.85], 11);
-      L.control.layers(b1.layerControl, null, { position: 'topright' }).addTo(mapBbox);
+      bboxMainGroup = L.featureGroup().addTo(mapBbox);
       bboxHandlesGroup = L.layerGroup().addTo(mapBbox);
+      isolatedZonesGroup = L.featureGroup().addTo(mapBbox);
+      isolatedHandlesGroup = L.layerGroup().addTo(mapBbox);
+
+      const bboxOverlays = {
+        "📦 BBOX Metropolitano": bboxMainGroup,
+        "🏝️ Zonas Aisladas (Islas)": isolatedZonesGroup
+      };
+      L.control.layers(b1.layerControl, bboxOverlays, { position: 'topright' }).addTo(mapBbox);
+      setupIsolatedDrawingEvents();
 
       // 2. Mapa POI Studio
       const b2 = createBaseLayers();
@@ -1736,10 +1899,18 @@
       // 3. Mapa Demand Viewer
       const b3 = createBaseLayers();
       mapDemand = L.map('mapDemand', { ...mapOptions, layers: [b3.baseMapDefault] }).setView([21.16, -86.85], 11);
-      L.control.layers(b3.layerControl, null, { position: 'topright' }).addTo(mapDemand);
       demandLayers.residents = L.layerGroup().addTo(mapDemand);
       demandLayers.jobs = L.layerGroup().addTo(mapDemand);
       demandLayers.pois = L.layerGroup().addTo(mapDemand);
+      isolatedZonesDemandGroup = L.layerGroup().addTo(mapDemand);
+
+      const demandOverlays = {
+        "👥 Población (Azul)": demandLayers.residents,
+        "💼 Empleo (Rojo)": demandLayers.jobs,
+        "⭐ POIs Especiales (Naranja)": demandLayers.pois,
+        "🏝️ Zonas Aisladas (Cian)": isolatedZonesDemandGroup
+      };
+      L.control.layers(b3.layerControl, demandOverlays, { position: 'topright' }).addTo(mapDemand);
     }
 
     function createCornerIcon(key) {
@@ -1771,7 +1942,10 @@
 
     function updateBboxLayer(bbox, fit = true) {
       if (!mapBbox || !bbox || bbox.length !== 4) return;
-      if (bboxRectangle) mapBbox.removeLayer(bboxRectangle);
+      if (bboxRectangle) {
+        if (bboxMainGroup) bboxMainGroup.removeLayer(bboxRectangle);
+        else mapBbox.removeLayer(bboxRectangle);
+      }
       if (bboxHandlesGroup) bboxHandlesGroup.clearLayers();
 
       let minLon = Math.min(parseFloat(bbox[0]), parseFloat(bbox[2]));
@@ -1790,7 +1964,7 @@
         fillOpacity: 0.16,
         dashArray: '6, 6',
         className: 'draggable-bbox-rect'
-      }).addTo(mapBbox);
+      }).addTo(bboxMainGroup || mapBbox);
 
       bboxRectangle.bindTooltip("<strong>Área de Delimitación BBOX</strong><br><span class='text-[11px]'>📍 Arrastra para mover el cuadro &bull; Esquinas para redimensionar</span>", {
         sticky: true,
@@ -1976,6 +2150,454 @@
       triggerAutoSave();
     }
 
+    // =========================================================================
+    // GESTIÓN Y TRAZADO INTERACTIVO DE ZONAS AISLADAS (ISLAS / CUENCAS)
+    // =========================================================================
+    function createIsolatedCornerIcon(key) {
+      return L.divIcon({
+        className: 'isolated-corner-handle',
+        html: `
+          <div style="
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            background: #E8E1D3;
+            border: 2px solid #06B6D4;
+            border-radius: 50%;
+            box-shadow: 0 0 8px rgba(6,182,212,0.8);
+            color: #083344;
+            font-size: 8px;
+            font-weight: 800;
+            cursor: pointer;
+          ">
+            <div style="width: 5px; height: 5px; background: #06B6D4; border-radius: 50%;"></div>
+          </div>
+        `,
+        iconSize: [20, 20],
+        iconAnchor: [10, 10]
+      });
+    }
+
+    function setupIsolatedDrawingEvents() {
+      if (!mapBbox) return;
+
+      mapBbox.on('mousedown', (e) => {
+        if (!isDrawingIsolated) return;
+        drawStartLatLng = e.latlng;
+        if (drawTempRect) mapBbox.removeLayer(drawTempRect);
+        drawTempRect = L.rectangle([drawStartLatLng, drawStartLatLng], {
+          color: '#06B6D4',
+          weight: 2,
+          dashArray: '5, 5',
+          fillColor: '#06B6D4',
+          fillOpacity: 0.25
+        }).addTo(mapBbox);
+      });
+
+      mapBbox.on('mousemove', (e) => {
+        if (!isDrawingIsolated || !drawStartLatLng || !drawTempRect) return;
+        drawTempRect.setBounds([drawStartLatLng, e.latlng]);
+      });
+
+      mapBbox.on('mouseup', (e) => {
+        if (!isDrawingIsolated || !drawStartLatLng) return;
+        const endLatLng = e.latlng;
+        const minLon = Math.min(drawStartLatLng.lng, endLatLng.lng);
+        const minLat = Math.min(drawStartLatLng.lat, endLatLng.lat);
+        const maxLon = Math.max(drawStartLatLng.lng, endLatLng.lng);
+        const maxLat = Math.max(drawStartLatLng.lat, endLatLng.lat);
+
+        if (drawTempRect) {
+          mapBbox.removeLayer(drawTempRect);
+          drawTempRect = null;
+        }
+        cancelDrawingIsolatedZone();
+
+        // Evitar clics accidentales o áreas microscópicas
+        if (maxLon - minLon < 0.001 || maxLat - minLat < 0.001) {
+          showToast("Área trazada muy pequeña o inválida", "warning");
+          return;
+        }
+
+        openIsolatedZoneModal(-1, [
+          parseFloat(minLon.toFixed(4)),
+          parseFloat(minLat.toFixed(4)),
+          parseFloat(maxLon.toFixed(4)),
+          parseFloat(maxLat.toFixed(4))
+        ]);
+      });
+
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && isDrawingIsolated) {
+          cancelDrawingIsolatedZone();
+        }
+      });
+    }
+
+    function startDrawingIsolatedZone() {
+      if (!currentCityFile) {
+        showToast("Selecciona o crea un proyecto primero", "warning");
+        return;
+      }
+      isDrawingIsolated = true;
+      if (mapBbox) {
+        mapBbox.dragging.disable();
+        mapBbox.getContainer().style.cursor = 'crosshair';
+      }
+      const banner = document.getElementById('drawingIsolatedBanner');
+      if (banner) banner.classList.remove('hidden');
+      lucide.createIcons();
+      showToast("Modo trazado activo: Haz clic y arrastra sobre la isla", "info");
+    }
+
+    function cancelDrawingIsolatedZone() {
+      isDrawingIsolated = false;
+      drawStartLatLng = null;
+      if (drawTempRect && mapBbox) {
+        mapBbox.removeLayer(drawTempRect);
+        drawTempRect = null;
+      }
+      if (mapBbox) {
+        mapBbox.dragging.enable();
+        mapBbox.getContainer().style.cursor = '';
+      }
+      const banner = document.getElementById('drawingIsolatedBanner');
+      if (banner) banner.classList.add('hidden');
+    }
+
+    function openIsolatedZoneModal(index = -1, bboxCoords = null) {
+      document.getElementById('iso_edit_index').value = index;
+      const titleEl = document.getElementById('modalIsolatedTitle');
+
+      if (!cityData.isolated_zones) cityData.isolated_zones = [];
+
+      if (index >= 0 && index < cityData.isolated_zones.length) {
+        const z = cityData.isolated_zones[index];
+        if (titleEl) titleEl.innerHTML = `<i data-lucide="shield-alert" class="w-5 h-5 text-cyan-600"></i><span>Editar Zona Aislada</span>`;
+        document.getElementById('iso_name').value = z.name || "";
+        document.getElementById('iso_id').value = z.id || "";
+        const b = z.bbox || [-86.76, 21.20, -86.68, 21.28];
+        document.getElementById('iso_bbox_0').value = b[0];
+        document.getElementById('iso_bbox_1').value = b[1];
+        document.getElementById('iso_bbox_2').value = b[2];
+        document.getElementById('iso_bbox_3').value = b[3];
+      } else {
+        if (titleEl) titleEl.innerHTML = `<i data-lucide="shield-alert" class="w-5 h-5 text-cyan-600"></i><span>Nueva Zona Aislada (Isla)</span>`;
+        const nextIdx = cityData.isolated_zones.length + 1;
+        document.getElementById('iso_name').value = `Isla ${nextIdx}`;
+        document.getElementById('iso_id').value = `isla_${nextIdx}`;
+        let b = bboxCoords;
+        if (!b || b.length !== 4) {
+          const mainB = cityData.city.bbox || [-87.0, 21.0, -86.7, 21.3];
+          const midLon = (mainB[0] + mainB[2]) / 2;
+          const midLat = (mainB[1] + mainB[3]) / 2;
+          b = [
+            parseFloat((midLon - 0.03).toFixed(4)),
+            parseFloat((midLat - 0.03).toFixed(4)),
+            parseFloat((midLon + 0.03).toFixed(4)),
+            parseFloat((midLat + 0.03).toFixed(4))
+          ];
+        }
+        document.getElementById('iso_bbox_0').value = b[0];
+        document.getElementById('iso_bbox_1').value = b[1];
+        document.getElementById('iso_bbox_2').value = b[2];
+        document.getElementById('iso_bbox_3').value = b[3];
+      }
+
+      document.getElementById('modalIsolatedZone').classList.remove('hidden');
+      lucide.createIcons();
+      setTimeout(() => document.getElementById('iso_name').focus(), 50);
+    }
+
+    function closeIsolatedZoneModal() {
+      document.getElementById('modalIsolatedZone').classList.add('hidden');
+    }
+
+    function onIsoNameInput() {
+      const editIdx = parseInt(document.getElementById('iso_edit_index').value, 10);
+      if (editIdx === -1) {
+        const nameVal = document.getElementById('iso_name').value;
+        const slug = nameVal.trim().toLowerCase()
+          .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9_]+/g, "_")
+          .replace(/^_+|_+$/g, "");
+        if (slug) document.getElementById('iso_id').value = slug;
+      }
+    }
+
+    function submitIsolatedZoneModal() {
+      const editIdx = parseInt(document.getElementById('iso_edit_index').value, 10);
+      const name = document.getElementById('iso_name').value.trim();
+      let id = document.getElementById('iso_id').value.trim().toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9_]+/g, "_");
+
+      if (!name) {
+        showToast("El nombre descriptivo es obligatorio", "warning");
+        return;
+      }
+      if (!id) id = "zona_" + Date.now();
+
+      const b0 = parseFloat(document.getElementById('iso_bbox_0').value);
+      const b1 = parseFloat(document.getElementById('iso_bbox_1').value);
+      const b2 = parseFloat(document.getElementById('iso_bbox_2').value);
+      const b3 = parseFloat(document.getElementById('iso_bbox_3').value);
+
+      if (isNaN(b0) || isNaN(b1) || isNaN(b2) || isNaN(b3)) {
+        showToast("Las 4 coordenadas BBOX deben ser numéricas", "error");
+        return;
+      }
+      if (b0 >= b2 || b1 >= b3) {
+        showToast("Coordenadas BBOX inválidas: Min Lon/Lat debe ser menor a Max Lon/Lat", "error");
+        return;
+      }
+
+      const normalizedBbox = [
+        parseFloat(Math.min(b0, b2).toFixed(4)),
+        parseFloat(Math.min(b1, b3).toFixed(4)),
+        parseFloat(Math.max(b0, b2).toFixed(4)),
+        parseFloat(Math.max(b1, b3).toFixed(4))
+      ];
+
+      if (!cityData.isolated_zones) cityData.isolated_zones = [];
+
+      if (editIdx >= 0 && editIdx < cityData.isolated_zones.length) {
+        cityData.isolated_zones[editIdx] = { id, name, bbox: normalizedBbox };
+        selectedIsolatedZoneIndex = editIdx;
+      } else {
+        cityData.isolated_zones.push({ id, name, bbox: normalizedBbox });
+        selectedIsolatedZoneIndex = cityData.isolated_zones.length - 1;
+      }
+
+      closeIsolatedZoneModal();
+      renderIsolatedZones();
+      triggerAutoSave();
+      showToast(`Zona aislada "${name}" guardada con éxito`, "success");
+    }
+
+    function deleteIsolatedZone(index) {
+      if (!cityData.isolated_zones || index < 0 || index >= cityData.isolated_zones.length) return;
+      const zone = cityData.isolated_zones[index];
+      if (!confirm(`¿Eliminar la zona aislada "${zone.name || zone.id}"?`)) return;
+
+      cityData.isolated_zones.splice(index, 1);
+      if (selectedIsolatedZoneIndex === index) {
+        selectedIsolatedZoneIndex = -1;
+      } else if (selectedIsolatedZoneIndex > index) {
+        selectedIsolatedZoneIndex--;
+      }
+      renderIsolatedZones();
+      triggerAutoSave();
+      showToast("Zona aislada eliminada", "info");
+    }
+
+    function fitMapToIsolatedZone(index) {
+      if (!cityData.isolated_zones || index < 0 || index >= cityData.isolated_zones.length) return;
+      const z = cityData.isolated_zones[index];
+      const b = z.bbox;
+      if (mapBbox && b && b.length === 4) {
+        mapBbox.fitBounds([[b[1], b[0]], [b[3], b[2]]], { padding: [50, 50] });
+      }
+      selectIsolatedZone(index);
+    }
+
+    function selectIsolatedZone(index) {
+      selectedIsolatedZoneIndex = index;
+      renderIsolatedZonesList();
+      renderIsolatedZonesOnMap();
+    }
+
+    function renderIsolatedZonesList() {
+      const container = document.getElementById('isolatedZonesListContainer');
+      const badge = document.getElementById('isolatedZonesBadge');
+      const zones = cityData.isolated_zones || [];
+
+      if (badge) {
+        badge.innerText = `${zones.length} ${zones.length === 1 ? 'zona' : 'zonas'}`;
+      }
+
+      if (!container) return;
+      container.innerHTML = '';
+
+      if (zones.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-3 text-stone-500 text-[11px] italic bg-metro-dark/40 rounded-lg border border-metro-border/50">
+            Sin zonas aisladas configuradas.<br>Usa "+ Trazar Zona Aislada" para definir islas.
+          </div>
+        `;
+        return;
+      }
+
+      zones.forEach((z, idx) => {
+        const isSelected = (idx === selectedIsolatedZoneIndex);
+        const card = document.createElement('div');
+        card.className = `p-2.5 rounded-lg border transition text-xs flex flex-col space-y-1.5 cursor-pointer ${
+          isSelected
+            ? 'bg-cyan-950/40 border-cyan-500/70 shadow-md shadow-cyan-950/50'
+            : 'bg-metro-panel border-metro-border hover:border-cyan-500/40'
+        }`;
+
+        const b = z.bbox || [0, 0, 0, 0];
+        const bboxFmt = `[${b[0].toFixed(2)}, ${b[1].toFixed(2)}, ${b[2].toFixed(2)}, ${b[3].toFixed(2)}]`;
+
+        card.innerHTML = `
+          <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-1.5 overflow-hidden">
+              <span class="text-sm">🏝️</span>
+              <span class="font-bold text-white truncate">${escapeHtml(z.name || z.id)}</span>
+              <span class="text-[10px] font-mono text-cyan-300/80 bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-500/30 shrink-0">${escapeHtml(z.id)}</span>
+            </div>
+            <div class="flex items-center space-x-1 shrink-0">
+              <button title="Enfocar en mapa" onclick="event.stopPropagation(); fitMapToIsolatedZone(${idx})" class="p-1 text-gray-400 hover:text-cyan-400 rounded hover:bg-metro-card transition">
+                <i data-lucide="crosshair" class="w-3.5 h-3.5"></i>
+              </button>
+              <button title="Editar nombre / coordenadas" onclick="event.stopPropagation(); openIsolatedZoneModal(${idx})" class="p-1 text-gray-400 hover:text-white rounded hover:bg-metro-card transition">
+                <i data-lucide="edit-2" class="w-3.5 h-3.5"></i>
+              </button>
+              <button title="Eliminar zona" onclick="event.stopPropagation(); deleteIsolatedZone(${idx})" class="p-1 text-gray-400 hover:text-rose-400 rounded hover:bg-metro-card transition">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </div>
+          <div class="flex justify-between items-center text-[10px] text-gray-400 font-mono">
+            <span>BBOX: ${bboxFmt}</span>
+            ${isSelected ? '<span class="text-cyan-400 font-bold">Activa</span>' : ''}
+          </div>
+        `;
+
+        card.onclick = () => selectIsolatedZone(idx);
+        container.appendChild(card);
+      });
+
+      lucide.createIcons();
+    }
+
+    function renderIsolatedZonesOnMap() {
+      if (!mapBbox || !isolatedZonesGroup) return;
+      isolatedZonesGroup.clearLayers();
+      if (isolatedHandlesGroup) isolatedHandlesGroup.clearLayers();
+
+      const zones = cityData.isolated_zones || [];
+
+      zones.forEach((z, idx) => {
+        const b = z.bbox;
+        if (!b || b.length !== 4) return;
+        const bounds = [[b[1], b[0]], [b[3], b[2]]];
+        const isSelected = (idx === selectedIsolatedZoneIndex);
+
+        const rect = L.rectangle(bounds, {
+          color: '#06B6D4',
+          weight: isSelected ? 3 : 2,
+          fillColor: '#06B6D4',
+          fillOpacity: isSelected ? 0.28 : 0.16,
+          dashArray: isSelected ? '4, 4' : '6, 4',
+          className: 'draggable-isolated-rect'
+        }).addTo(isolatedZonesGroup);
+
+        rect.bindTooltip(`
+          <div class="p-1 text-xs">
+            <strong class="text-cyan-400 flex items-center space-x-1">
+              <span>🏝️ ${escapeHtml(z.name || z.id)}</span>
+            </strong>
+            <span class="text-[10px] text-gray-300 font-mono">ID: ${escapeHtml(z.id)}</span><br>
+            <span class="text-[10px] text-cyan-200">${isSelected ? '📍 Esquinas editables activas' : 'Haz clic para seleccionar'}</span>
+          </div>
+        `, { sticky: true, className: 'poi-custom-tooltip' });
+
+        rect.on('click', (e) => {
+          L.DomEvent.stopPropagation(e);
+          selectIsolatedZone(idx);
+        });
+
+        // Tiradores de esquinas si está seleccionada
+        if (isSelected && isolatedHandlesGroup) {
+          const cornerConfigs = [
+            { key: 'NW', pos: [b[3], b[0]], label: 'NO' },
+            { key: 'NE', pos: [b[3], b[2]], label: 'NE' },
+            { key: 'SE', pos: [b[1], b[2]], label: 'SE' },
+            { key: 'SW', pos: [b[1], b[0]], label: 'SO' }
+          ];
+
+          cornerConfigs.forEach(cfg => {
+            const marker = L.marker(cfg.pos, {
+              icon: createIsolatedCornerIcon(cfg.label),
+              draggable: true,
+              zIndexOffset: 1500
+            }).addTo(isolatedHandlesGroup);
+
+            marker.bindTooltip(`<strong>${cfg.label} - ${escapeHtml(z.name)}</strong>`, { direction: 'top', offset: [0, -10] });
+
+            marker.on('drag', (e) => {
+              const latLng = e.target.getLatLng();
+              let b0 = z.bbox[0];
+              let b1 = z.bbox[1];
+              let b2 = z.bbox[2];
+              let b3 = z.bbox[3];
+
+              const MIN_SPAN = 0.005;
+              if (cfg.key === 'NW') {
+                b0 = Math.min(latLng.lng, b2 - MIN_SPAN);
+                b3 = Math.max(latLng.lat, b1 + MIN_SPAN);
+                marker.setLatLng([b3, b0]);
+              } else if (cfg.key === 'NE') {
+                b2 = Math.max(latLng.lng, b0 + MIN_SPAN);
+                b3 = Math.max(latLng.lat, b1 + MIN_SPAN);
+                marker.setLatLng([b3, b2]);
+              } else if (cfg.key === 'SE') {
+                b2 = Math.max(latLng.lng, b0 + MIN_SPAN);
+                b1 = Math.min(latLng.lat, b3 - MIN_SPAN);
+                marker.setLatLng([b1, b2]);
+              } else if (cfg.key === 'SW') {
+                b0 = Math.min(latLng.lng, b2 - MIN_SPAN);
+                b1 = Math.min(latLng.lat, b3 - MIN_SPAN);
+                marker.setLatLng([b1, b0]);
+              }
+
+              z.bbox = [
+                parseFloat(b0.toFixed(4)),
+                parseFloat(b1.toFixed(4)),
+                parseFloat(b2.toFixed(4)),
+                parseFloat(b3.toFixed(4))
+              ];
+              rect.setBounds([[z.bbox[1], z.bbox[0]], [z.bbox[3], z.bbox[2]]]);
+              renderIsolatedZonesList();
+            });
+
+            marker.on('dragend', () => {
+              triggerAutoSave();
+            });
+          });
+        }
+      });
+    }
+
+    function renderIsolatedZonesOnDemandMap() {
+      if (!mapDemand || !isolatedZonesDemandGroup) return;
+      isolatedZonesDemandGroup.clearLayers();
+
+      const zones = cityData.isolated_zones || [];
+      zones.forEach(z => {
+        const b = z.bbox;
+        if (!b || b.length !== 4) return;
+        const bounds = [[b[1], b[0]], [b[3], b[2]]];
+        L.rectangle(bounds, {
+          color: '#06B6D4',
+          weight: 2,
+          fillColor: '#06B6D4',
+          fillOpacity: 0.15,
+          dashArray: '6, 4'
+        }).bindTooltip(`<strong>🏝️ ${escapeHtml(z.name || z.id)}</strong><br><span class="text-[10px] text-stone-500">Zona Aislada</span>`, { sticky: true }).addTo(isolatedZonesDemandGroup);
+      });
+    }
+
+    function renderIsolatedZones() {
+      renderIsolatedZonesList();
+      renderIsolatedZonesOnMap();
+      renderIsolatedZonesOnDemandMap();
+    }
+
     // -------------------------------------------------------------------------
     // API CITIES Y CARGA DE DATOS
     // -------------------------------------------------------------------------
@@ -2032,6 +2654,11 @@
       if (demandLayers && demandLayers.residents) demandLayers.residents.clearLayers();
       if (demandLayers && demandLayers.jobs) demandLayers.jobs.clearLayers();
       if (demandLayers && demandLayers.pois) demandLayers.pois.clearLayers();
+      if (isolatedZonesGroup) isolatedZonesGroup.clearLayers();
+      if (isolatedHandlesGroup) isolatedHandlesGroup.clearLayers();
+      if (isolatedZonesDemandGroup) isolatedZonesDemandGroup.clearLayers();
+      selectedIsolatedZoneIndex = -1;
+      isDrawingIsolated = false;
       const metricPea = document.getElementById('metricTotalPea');
       const metricPts = document.getElementById('metricDemandPoints');
       if (metricPea) metricPea.innerText = "0";
@@ -2074,9 +2701,10 @@
     }
 
     function syncStateFromInputs() {
-      if (!cityData) cityData = { city: {}, macroeconomics: {}, pois: [], places: [] };
+      if (!cityData) cityData = { city: {}, macroeconomics: {}, pois: [], places: [], isolated_zones: [] };
       if (!cityData.city) cityData.city = {};
       if (!cityData.macroeconomics) cityData.macroeconomics = {};
+      if (!cityData.isolated_zones) cityData.isolated_zones = [];
 
       const nameEl = document.getElementById('cfg_city_name');
       if (nameEl) cityData.city.name = nameEl.value;
@@ -2214,6 +2842,10 @@
       renderPoiList();
       renderPoiMarkersOnMap();
       renderPlacesList();
+      if (!cityData.isolated_zones) {
+        cityData.isolated_zones = (cityData.city && Array.isArray(cityData.city.isolated_zones)) ? cityData.city.isolated_zones : [];
+      }
+      renderIsolatedZones();
     }
 
     // -------------------------------------------------------------------------
@@ -2440,6 +3072,50 @@
     }
 
     // -------------------------------------------------------------------------
+    // PASO 3: PARÁMETROS MACROECONÓMICOS (ENOE / GRAVITATORIO)
+    // -------------------------------------------------------------------------
+    async function resetMacroeconomicParameters() {
+      const btn = document.getElementById('btnResetMacro');
+      if (btn) btn.disabled = true;
+      showToast("Consultando parámetros oficiales ENOE / INEGI...", "info");
+      try {
+        const res = await fetch(`/api/macro/detect?file=${encodeURIComponent(currentCityFile)}`);
+        const data = await res.json();
+        if (data.status === 'ok' && data.parameters) {
+          const p = data.parameters;
+          if (!cityData.macroeconomics) cityData.macroeconomics = {};
+
+          cityData.macroeconomics.tasa_pea = p.tasa_pea;
+          cityData.macroeconomics.til_1_state = p.til_1_state;
+          cityData.macroeconomics.gravity_beta = p.gravity_beta;
+          cityData.macroeconomics.max_distance_km = p.max_distance_km;
+          cityData.macroeconomics.max_pop_size = p.max_pop_size;
+
+          document.getElementById('cfg_tasa_pea').value = p.tasa_pea;
+          document.getElementById('val_tasa_pea').innerText = (p.tasa_pea * 100).toFixed(2) + "%";
+
+          document.getElementById('cfg_til_1').value = p.til_1_state;
+          document.getElementById('val_til_1').innerText = (p.til_1_state * 100).toFixed(2) + "%";
+
+          document.getElementById('cfg_gravity_beta').value = p.gravity_beta;
+          document.getElementById('val_gravity_beta').innerText = p.gravity_beta.toFixed(3);
+
+          document.getElementById('cfg_max_distance_km').value = p.max_distance_km;
+          document.getElementById('cfg_max_pop_size').value = p.max_pop_size;
+
+          triggerAutoSave();
+          showToast(`Parámetros macroeconómicos restablecidos: ${data.source}`, "success");
+        } else {
+          showToast("No se pudieron obtener parámetros oficiales", "error");
+        }
+      } catch (e) {
+        showToast(`Error al consultar parámetros: ${e.message}`, "error");
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    // -------------------------------------------------------------------------
     // PASO 3: TABLA DE PROYECCIONES CONAPO
     // -------------------------------------------------------------------------
     async function autoCalculateConapo() {
@@ -2586,10 +3262,10 @@
       if (!existingIds.has(candidate)) return candidate;
 
       let counter = 2;
-      while (existingIds.has(`${baseId}_${counter}`)) {
+      while (existingIds.has(`${baseId}_copia_${counter}`) || existingIds.has(`${baseId}_${counter}`)) {
         counter++;
       }
-      return `${baseId}_${counter}`;
+      return `${baseId}_copia_${counter}`;
     }
 
     function duplicatePoiByIndex(idx) {
@@ -2729,6 +3405,59 @@
       renderPoiList();
     }
 
+    function calculatePoiLiveStats(poi) {
+      const jobsManual = parseInt(poi.jobs) || 0;
+      const radius = parseInt(poi.radius_m) || 750;
+      const mode = (poi.mode || 'MAX').toUpperCase();
+      const lon = poi.loc ? poi.loc[0] : null;
+      const lat = poi.loc ? poi.loc[1] : null;
+
+      let absorbedJobs = 0;
+      let absorbedPop = 0;
+      let absorbedNodesCount = 0;
+
+      if (densityPoints && densityPoints.length > 0 && lon !== null && lat !== null) {
+        densityPoints.forEach(p => {
+          const d = getDistanceMeters(lon, lat, p.location[0], p.location[1]);
+          if (d <= radius) {
+            absorbedJobs += (p.jobs || 0);
+            absorbedPop += (p.residents || 0);
+            absorbedNodesCount++;
+          }
+        });
+      }
+
+      let finalJobs = jobsManual;
+      let formulaText = "";
+      if (mode === "MAX") {
+        finalJobs = Math.max(jobsManual, absorbedJobs);
+        if (absorbedJobs >= jobsManual && jobsManual > 0) {
+          formulaText = `Piso DENUE (${absorbedJobs.toLocaleString()}) supera manual (${jobsManual.toLocaleString()})`;
+        } else {
+          formulaText = `Piso manual: ${jobsManual.toLocaleString()} (absorbe ${absorbedJobs.toLocaleString()} DENUE)`;
+        }
+      } else if (mode === "BOOST" || mode === "ADDITIVE") {
+        finalJobs = jobsManual + absorbedJobs;
+        formulaText = `Manual: ${jobsManual.toLocaleString()} + DENUE: ${absorbedJobs.toLocaleString()}`;
+      } else if (mode === "REPLACE") {
+        finalJobs = jobsManual;
+        formulaText = `Fijo manual: ${jobsManual.toLocaleString()} (sustituye ${absorbedJobs.toLocaleString()} DENUE)`;
+      } else {
+        finalJobs = Math.max(jobsManual, absorbedJobs);
+        formulaText = `Piso: ${jobsManual.toLocaleString()}`;
+      }
+
+      return {
+        manual: jobsManual,
+        absorbed: absorbedJobs,
+        absorbedPop: absorbedPop,
+        absorbedNodes: absorbedNodesCount,
+        finalJobs: finalJobs,
+        mode: mode,
+        formulaText: formulaText
+      };
+    }
+
     function renderPoiList() {
       const pois = cityData.pois || [];
       const badge = document.getElementById('poiCountBadge');
@@ -2766,6 +3495,7 @@
         const meta = TAXONOMY_META[tax] || TAXONOMY_META.CUSTOM;
         const nameStr = typeof poi.name === 'object' ? (poi.name.es || poi.name.en || poi.id) : (poi.name || poi.id);
         const isCurrent = activeEditingPoiIndex === poi.originalIndex;
+        const stats = calculatePoiLiveStats(poi);
 
         const card = document.createElement('div');
         card.className = `p-3 rounded-lg border text-xs transition shadow-sm flex flex-col space-y-2 cursor-pointer ${
@@ -2791,7 +3521,10 @@
           <div class="flex justify-between text-[11px] font-mono text-metro-muted">
             <span>ID: <strong class="text-metro-text">${poi.id}</strong></span>
             <span>Radio: <strong class="text-metro-text">${poi.radius_m || 750}m</strong></span>
-            <span>Empleos: <strong class="text-metro-green">${(poi.jobs || 0).toLocaleString()}</strong></span>
+            <span>Final: <strong class="text-metro-green font-bold">${stats.finalJobs.toLocaleString()}</strong></span>
+          </div>
+          <div class="text-[10px] font-mono text-metro-muted/80 truncate border-t border-metro-border/30 pt-1" title="${stats.formulaText}">
+            ${stats.formulaText}
           </div>
           <div class="flex justify-end space-x-1 pt-1 border-t border-metro-border/50">
             <button onclick="copyPoiByIndex(${poi.originalIndex})" class="p-1 rounded text-metro-muted hover:text-metro-orange hover:bg-metro-card transition" title="Copiar al portapapeles (Ctrl+C)">
@@ -2952,6 +3685,13 @@
         if (gameNameEl) {
           gameNameEl.innerText = `${iconEmoji}${cleanDisplay}`;
         }
+      }
+
+      // Validación de unicidad de ID en tiempo real
+      const dupWarningEl = document.getElementById('poiIdDuplicateWarning');
+      const isDuplicate = (cityData?.pois || []).some((p, i) => i !== activeEditingPoiIndex && p.id === fullId);
+      if (dupWarningEl) {
+        dupWarningEl.classList.toggle('hidden', !isDuplicate);
       }
 
       updatePoiPreviewFromForm();
@@ -3143,6 +3883,13 @@
 
       const pId = meta.prefix ? `${meta.prefix}${baseName}` : baseName;
       document.getElementById('editPoiId').value = pId;
+
+      const isDuplicate = (cityData?.pois || []).some((p, i) => i !== activeEditingPoiIndex && p.id === pId);
+      if (isDuplicate) {
+        showToast(`Error: El ID "${pId}" ya pertenece a otro POI. Cada POI debe tener un ID único.`, "error");
+        document.getElementById('editPoiBaseName')?.focus();
+        return;
+      }
 
       const esName = document.getElementById('editPoiNameEs').value.trim();
       const enName = document.getElementById('editPoiNameEn').value.trim();
@@ -3363,9 +4110,31 @@
         }).addTo(poiMarkersGroup);
 
         const nameStr = typeof poi.name === 'object' ? (poi.name.es || poi.id) : (poi.name || poi.id);
+        const stats = calculatePoiLiveStats(poi);
+
+        let formulaBadgeHtml = '';
+        if (stats.mode === 'BOOST') {
+          formulaBadgeHtml = `
+            <div class="text-[10px] font-mono text-stone-600 pt-0.5 bg-stone-50 rounded px-1.5 py-0.5 border border-stone-200">
+              Manual: <strong>${stats.manual.toLocaleString()}</strong> + DENUE: <strong class="text-blue-600">+${stats.absorbed.toLocaleString()}</strong>
+            </div>
+          `;
+        } else if (stats.mode === 'MAX') {
+          formulaBadgeHtml = `
+            <div class="text-[10px] font-mono text-stone-600 pt-0.5 bg-stone-50 rounded px-1.5 py-0.5 border border-stone-200">
+              Piso DENUE: <strong>${stats.absorbed.toLocaleString()}</strong> | Base: <strong>${stats.manual.toLocaleString()}</strong>
+            </div>
+          `;
+        } else if (stats.mode === 'REPLACE') {
+          formulaBadgeHtml = `
+            <div class="text-[10px] font-mono text-stone-600 pt-0.5 bg-stone-50 rounded px-1.5 py-0.5 border border-stone-200">
+              Fijo manual (sustituye <strong>${stats.absorbed.toLocaleString()}</strong> DENUE)
+            </div>
+          `;
+        }
 
         const toastHtml = `
-          <div class="p-2.5 bg-white text-stone-900 rounded-lg shadow-xl text-xs space-y-1 min-w-[190px]">
+          <div class="p-2.5 bg-white text-stone-900 rounded-lg shadow-xl text-xs space-y-1 min-w-[210px]">
             <div class="flex items-center justify-between space-x-2">
               <span class="font-bold text-stone-900 truncate">${nameStr}</span>
               <span class="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold" style="background: ${meta.color}22; color: ${meta.color}; border: 1px solid ${meta.color}66">${poi.mode || 'MAX'}</span>
@@ -3373,8 +4142,9 @@
             <div class="text-[11px] font-mono text-stone-600">ID: <strong class="text-stone-900">${poi.id}</strong></div>
             <div class="flex justify-between text-[11px] font-mono text-stone-700 pt-1 border-t border-stone-200">
               <span>Radio: <strong class="text-stone-900">${poi.radius_m || 750}m</strong></span>
-              <span>Empleos: <strong class="text-emerald-700 font-bold">${(poi.jobs || 0).toLocaleString()}</strong></span>
+              <span>Final: <strong class="text-emerald-700 font-bold">${stats.finalJobs.toLocaleString()}</strong></span>
             </div>
+            ${formulaBadgeHtml}
             <div class="text-[10px] text-stone-500 pt-1 border-t border-stone-200 flex items-center justify-between">
               <span>📍 Arrastra para reubicar</span>
               <span>🖱️ Clic para editar</span>
@@ -3521,8 +4291,12 @@
         densityLoadedCityFile = currentCityFile;
         const res = await fetch(`/api/density?file=${encodeURIComponent(currentCityFile)}`);
         const data = await res.json();
-        densityPoints = data.points || [];
+        const rawPoints = data.points || [];
+        const declaredPoiIds = new Set((cityData?.pois || []).map(p => p.id));
+        densityPoints = rawPoints.filter(p => !p.is_special && !declaredPoiIds.has(p.id));
         updatePoiPreviewFromForm();
+        renderPoiMarkersOnMap();
+        renderPoiList();
       } catch (e) {
         console.warn("No se pudo precargar densidad para POI Studio:", e);
       }
@@ -4022,6 +4796,8 @@
 
         document.getElementById('metricTotalPea').innerText = totalResidents.toLocaleString();
 
+        renderIsolatedZonesOnDemandMap();
+
         if (points.length > 0 && mapDemand) {
           const b = cityData.city.bbox;
           if (b && b.length === 4) mapDemand.fitBounds([[b[1], b[0]], [b[3], b[2]]]);
@@ -4032,13 +4808,19 @@
     }
 
     function toggleDemandLayers() {
-      const chkRes = document.getElementById('chkLayerResidents').checked;
-      const chkJobs = document.getElementById('chkLayerJobs').checked;
-      const chkPois = document.getElementById('chkLayerPois').checked;
+      const chkRes = document.getElementById('chkLayerResidents')?.checked;
+      const chkJobs = document.getElementById('chkLayerJobs')?.checked;
+      const chkPois = document.getElementById('chkLayerPois')?.checked;
+      const chkIso = document.getElementById('chkLayerIsolated')?.checked;
 
       if (chkRes) mapDemand.addLayer(demandLayers.residents); else mapDemand.removeLayer(demandLayers.residents);
       if (chkJobs) mapDemand.addLayer(demandLayers.jobs); else mapDemand.removeLayer(demandLayers.jobs);
       if (chkPois) mapDemand.addLayer(demandLayers.pois); else mapDemand.removeLayer(demandLayers.pois);
+      if (chkIso) {
+        if (isolatedZonesDemandGroup) mapDemand.addLayer(isolatedZonesDemandGroup);
+      } else {
+        if (isolatedZonesDemandGroup) mapDemand.removeLayer(isolatedZonesDemandGroup);
+      }
     }
 
     function downloadCityPackage() {

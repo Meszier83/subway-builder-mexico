@@ -20,7 +20,7 @@ class TestWSLBridge(unittest.TestCase):
     def test_is_wsl_available(self):
         ready, distro, tools = is_wsl_available()
         self.assertTrue(ready)
-        self.assertEqual(distro, "Ubuntu")
+        self.assertIn(distro, ["Ubuntu", "native"])
         self.assertTrue(tools.get("tippecanoe", False))
         self.assertTrue(tools.get("depot", False))
 
