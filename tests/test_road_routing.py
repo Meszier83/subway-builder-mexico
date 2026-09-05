@@ -155,8 +155,12 @@ class TestArterialRoadRouting(unittest.TestCase):
 
     def test_real_cancun_road_geojson_if_available(self):
         import os
-        roads_path = os.path.join("dist", "cancn_-_riviera_maya", "roads.geojson")
-        if not os.path.exists(roads_path):
+        candidates = [
+            os.path.join("dist", "cancun", "roads.geojson"),
+            os.path.join("dist", "cancn_-_riviera_maya", "roads.geojson")
+        ]
+        roads_path = next((p for p in candidates if os.path.exists(p)), None)
+        if not roads_path:
             self.skipTest("roads.geojson de Cancun no disponible en dist")
 
         gdf = gpd.read_file(roads_path)
@@ -176,6 +180,61 @@ class TestArterialRoadRouting(unittest.TestCase):
         self.assertGreater(road_m, base_m)
         self.assertGreater(driving_sec, base_sec)
         self.assertGreater(road_m, 18000)  # > 18 km reales
+
+    def test_straight_avenue_metric_accuracy(self):
+        # Avenida recta norte-sur con vertices cada 100m (~11 km)
+        pts = [(-86.80, round(21.10 + i * 0.001, 5)) for i in range(101)]
+        line_straight = LineString(pts)
+        gdf = gpd.GeoDataFrame({"roadClass": ["major"], "geometry": [line_straight]}, crs="EPSG:4326")
+        road_index = build_arterial_road_network(gdf)
+        self.assertIsNotNone(road_index)
+
+        # Puntos a 1.1 km en la misma mitad de la avenida
+        p1 = [-86.80, 21.11]
+        p2 = [-86.80, 21.12]
+        euclid_km = 0.01 * 110574.0 / 1000.0  # ~1.1057 km
+        road_m, sec = road_index.get_driving_impedance(p1, p2, euclid_km)
+
+        # La distancia por carretera debe ser practicamente identica a la euclidiana (ratio < 1.05)
+        # y no estar inflada al techo de 3.5x
+        ratio = road_m / (euclid_km * 1000.0)
+        self.assertAlmostEqual(ratio, 1.0, delta=0.05)
+        self.assertLess(road_m, euclid_km * 1000.0 * 1.2)
+
+    def test_straight_avenue_across_junction_boundary(self):
+        # Puntos a traves del punto medio de la avenida (21.14 a 21.16)
+        pts = [(-86.80, round(21.10 + i * 0.001, 5)) for i in range(101)]
+        line_straight = LineString(pts)
+        gdf = gpd.GeoDataFrame({"roadClass": ["major"], "geometry": [line_straight]}, crs="EPSG:4326")
+        road_index = build_arterial_road_network(gdf)
+
+        p1 = [-86.80, 21.14]
+        p2 = [-86.80, 21.16]
+        euclid_km = 0.02 * 110574.0 / 1000.0  # ~2.2115 km
+        road_m, _ = road_index.get_driving_impedance(p1, p2, euclid_km)
+
+        ratio = road_m / (euclid_km * 1000.0)
+        self.assertAlmostEqual(ratio, 1.0, delta=0.05)
+
+    def test_configurable_max_detour_ratio(self):
+        # Red vial con desvio extremo (> 5x)
+        line1 = LineString([(-86.80, 21.10), (-86.80, 21.80)])
+        line2 = LineString([(-86.80, 21.80), (-86.79, 21.80)])
+        line3 = LineString([(-86.79, 21.80), (-86.79, 21.10)])
+        gdf_extreme = gpd.GeoDataFrame({
+            "roadClass": ["major", "major", "major"],
+            "geometry": [line1, line2, line3]
+        }, crs="EPSG:4326")
+
+        # Con max_detour_ratio = 2.0
+        road_index = build_arterial_road_network(gdf_extreme, max_detour_ratio=2.0)
+        orig = [-86.80, 21.10]
+        dest = [-86.79, 21.10]
+        euclid_km = 1.0
+        road_m, _ = road_index.get_driving_impedance(orig, dest, euclid_km)
+
+        # Debe acotarse estrictamente al techo de 2.0x
+        self.assertLessEqual(road_m, 2.0 * euclid_km * 1000.0 + 50.0)
 
 
 if __name__ == "__main__":

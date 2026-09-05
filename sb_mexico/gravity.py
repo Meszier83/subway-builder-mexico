@@ -45,7 +45,17 @@ def build_demand_grid(
     """
     rng = np.random.default_rng(seed)
     
-    # 1. Resolver radios de absorción de POIs Especiales
+    # 1. Validar unicidad estricta y resolver radios de absorción de POIs Especiales
+    poi_ids = [p["id"] for p in special_pois if isinstance(p, dict) and "id" in p]
+    from collections import Counter
+    poi_id_counts = Counter(poi_ids)
+    dup_poi_ids = [pid for pid, count in poi_id_counts.items() if count > 1]
+    if dup_poi_ids:
+        raise ValueError(
+            f"Error de integridad en POIs: Se detectaron IDs duplicados: {dup_poi_ids}. "
+            "Cada POI especial debe tener un ID único para evitar colisiones y pérdida de nodos en Subway Builder."
+        )
+
     pois_resolved = []
     for poi in special_pois:
         p_id = poi["id"]
@@ -244,16 +254,10 @@ def build_demand_grid(
             "popIds": []
         })
 
-    # 7. Resolver y agregar POIs Especiales
+    # 7. Resolver y agregar POIs Especiales (preservando coordenadas exactas de usuario)
     poi_audit = []
     if len(pois_resolved) > 0:
-        poi_pts = [Point(p["loc"][0], p["loc"][1]) for p in pois_resolved]
-        if tree is not None and len(poi_pts) > 0:
-            poi_near_indices = tree.query_nearest(poi_pts, all_matches=False)[1]
-        else:
-            poi_near_indices = [None] * len(poi_pts)
-
-        for poi, pt, near_idx in zip(pois_resolved, poi_pts, poi_near_indices):
+        for poi in pois_resolved:
             manual = poi["jobs_declarados"]
             absorbed = int(round(poi["denue_jobs_absorbidos"]))
             mode = poi["mode"]
@@ -271,17 +275,8 @@ def build_demand_grid(
                 final_jobs = max(manual, absorbed)
                 status = "Fallback MAX"
 
+            # Los POIs manuales preservan fielmente las coordenadas elegidas por el usuario
             lon, lat = poi["loc"][0], poi["loc"][1]
-            if near_idx is not None and tree is not None:
-                nearest_road = road_geoms[int(near_idx)]
-                proj_candidate = nearest_points(pt, nearest_road)[1]
-                cos_lat = math.cos(math.radians(lat))
-                dx_m = (proj_candidate.x - pt.x) * 111_320.0 * cos_lat
-                dy_m = (proj_candidate.y - pt.y) * 110_574.0
-                dist_m = math.hypot(dx_m, dy_m)
-
-                if MIN_SNAP_METERS <= dist_m <= MAX_SNAP_METERS:
-                    lon, lat = proj_candidate.x, proj_candidate.y
 
             demand_points.append({
                 "id": poi["id"],
@@ -335,65 +330,106 @@ class ArterialRoadIndex:
         self,
         dist_matrix: np.ndarray,
         all_nodes_coords: np.ndarray,
-        all_node_to_junction: Dict[int, Tuple[int, float]]
+        all_node_to_junction: Dict[int, Tuple[int, int, int, float, float]],
+        cos_lat_ref: float = 1.0,
+        max_detour_ratio: float = 3.5
     ):
         self.dist_matrix = dist_matrix
         self.all_nodes_coords = all_nodes_coords
         self.all_node_to_junction = all_node_to_junction
-        self.kdtree = cKDTree(all_nodes_coords) if len(all_nodes_coords) > 0 else None
+        self.cos_lat_ref = cos_lat_ref
+        self.max_detour_ratio = max_detour_ratio
+
+        if len(all_nodes_coords) > 0:
+            kdtree_coords = all_nodes_coords.copy()
+            kdtree_coords[:, 0] *= cos_lat_ref
+            self.kdtree = cKDTree(kdtree_coords)
+        else:
+            self.kdtree = None
 
     def get_driving_impedance(
         self,
         orig_loc: Union[List[float], Tuple[float, float], np.ndarray],
         dest_loc: Union[List[float], Tuple[float, float], np.ndarray],
-        euclid_d_km: float
+        euclid_d_km: float,
+        max_detour_ratio: Optional[float] = None
     ) -> Tuple[int, int]:
         """
         Calcula distancia (m) y drivingSeconds aplicando las 3 salvaguardas:
         1. Piso Físico: dist_road >= dist_euclid
-        2. Techo de Desvío Acotado: dist_road <= 3.5 * dist_euclid
+        2. Techo de Desvío Acotado: dist_road <= max_detour_ratio * dist_euclid
         3. Fallback Seguro: Si no hay conexión en red vial, usa calculate_commute_impedance.
         """
+        detour_ceiling = max_detour_ratio if max_detour_ratio is not None else self.max_detour_ratio
         euclid_m = max(150.0, float(euclid_d_km) * 1000.0)
         if self.kdtree is None or self.dist_matrix.size == 0:
             return calculate_commute_impedance(euclid_d_km)
 
-        # 1. Proyectar origen y destino al nodo vial más cercano
-        orig_arr = np.array([orig_loc[0], orig_loc[1]], dtype=np.float64)
-        dest_arr = np.array([dest_loc[0], dest_loc[1]], dtype=np.float64)
+        # 1. Proyectar origen y destino al nodo vial métricamente más cercano
+        orig_arr = np.array([orig_loc[0] * self.cos_lat_ref, orig_loc[1]], dtype=np.float64)
+        dest_arr = np.array([dest_loc[0] * self.cos_lat_ref, dest_loc[1]], dtype=np.float64)
 
         _, orig_node_idx = self.kdtree.query(orig_arr)
         _, dest_node_idx = self.kdtree.query(dest_arr)
 
-        cos_lat = math.cos(math.radians((orig_arr[1] + dest_arr[1]) / 2.0))
+        o_coord = self.all_nodes_coords[orig_node_idx]
+        d_coord = self.all_nodes_coords[dest_node_idx]
+
+        cos_lat = math.cos(math.radians((orig_loc[1] + dest_loc[1]) / 2.0))
         d_orig_road = math.hypot(
-            (orig_arr[0] - self.all_nodes_coords[orig_node_idx][0]) * 111_320.0 * cos_lat,
-            (orig_arr[1] - self.all_nodes_coords[orig_node_idx][1]) * 110_574.0
+            (orig_loc[0] - o_coord[0]) * 111_320.0 * cos_lat,
+            (orig_loc[1] - o_coord[1]) * 110_574.0
         )
         d_dest_road = math.hypot(
-            (dest_arr[0] - self.all_nodes_coords[dest_node_idx][0]) * 111_320.0 * cos_lat,
-            (dest_arr[1] - self.all_nodes_coords[dest_node_idx][1]) * 110_574.0
+            (dest_loc[0] - d_coord[0]) * 111_320.0 * cos_lat,
+            (dest_loc[1] - d_coord[1]) * 110_574.0
         )
 
-        j_orig, d_chain_orig = self.all_node_to_junction[orig_node_idx]
-        j_dest, d_chain_dest = self.all_node_to_junction[dest_node_idx]
+        c1, ja1, jb1, s1, l1 = self.all_node_to_junction[orig_node_idx]
+        c2, ja2, jb2, s2, l2 = self.all_node_to_junction[dest_node_idx]
 
-        if j_orig == j_dest:
-            network_m = abs(d_chain_orig - d_chain_dest)
-        else:
-            network_m = float(self.dist_matrix[j_orig, j_dest])
+        # 2. Distancia a lo largo de la red vial
+        cand = []
+
+        # Caso A: Si están sobre la misma cadena vial directa
+        if c1 == c2 and c1 >= 0:
+            if ja1 == jb1 and l1 > 0:
+                # Bucle cerrado (self-loop)
+                cand.append(min(abs(s1 - s2), l1 - abs(s1 - s2)))
+            else:
+                cand.append(abs(s1 - s2))
+
+        # Caso B: Rutas a través de las intersecciones de la red
+        conns1 = [(ja1, s1)]
+        if (jb1 != ja1 or l1 > 0) and jb1 is not None:
+            conns1.append((jb1, max(0.0, l1 - s1)))
+
+        conns2 = [(ja2, s2)]
+        if (jb2 != ja2 or l2 > 0) and jb2 is not None:
+            conns2.append((jb2, max(0.0, l2 - s2)))
+
+        for u, du in conns1:
+            for v, dv in conns2:
+                if u is not None and v is not None:
+                    nw = float(self.dist_matrix[u, v])
+                    if not math.isinf(nw) and not math.isnan(nw):
+                        cand.append(du + nw + dv)
 
         # Salvaguarda 3: Fallback si no hay ruta conectada
+        if not cand:
+            return calculate_commute_impedance(euclid_d_km)
+
+        network_m = min(cand)
         if math.isinf(network_m) or math.isnan(network_m):
             return calculate_commute_impedance(euclid_d_km)
 
-        road_m = network_m + d_chain_orig + d_chain_dest + d_orig_road + d_dest_road
+        road_m = network_m + d_orig_road + d_dest_road
 
         # Salvaguarda 1: Piso Físico (dist_road >= dist_euclid)
         road_m = max(road_m, euclid_m)
 
-        # Salvaguarda 2: Techo de Desvío Acotado (dist_road <= 3.5 * dist_euclid)
-        road_m = min(road_m, 3.5 * euclid_m)
+        # Salvaguarda 2: Techo de Desvío Acotado (dist_road <= detour_ceiling * dist_euclid)
+        road_m = min(road_m, detour_ceiling * euclid_m)
 
         # Velocidad de congestión urbana con factor de desvío
         d_km = road_m / 1000.0
@@ -407,7 +443,10 @@ class ArterialRoadIndex:
         return int(round(road_m)), driving_seconds
 
 
-def build_arterial_road_network(roads_gdf: gpd.GeoDataFrame) -> Optional[ArterialRoadIndex]:
+def build_arterial_road_network(
+    roads_gdf: gpd.GeoDataFrame,
+    max_detour_ratio: float = 3.5
+) -> Optional[ArterialRoadIndex]:
     """
     Construye un índice topológico de la red arterial vial a partir de un GeoDataFrame de carreteras.
     Contrae cadenas de grado 2 a intersecciones principales para resolver caminos mínimos en milisegundos.
@@ -464,15 +503,24 @@ def build_arterial_road_network(roads_gdf: gpd.GeoDataFrame) -> Optional[Arteria
 
     # Identificar nodos de unión/intersección (grado != 2)
     junctions = set(n for n, d in G.degree() if d != 2)
-    if not junctions:
-        junctions = set(G.nodes())
+    # Garantizar que todo componente conexo (ej. rotondas o bucles aislados de grado 2) tenga al menos una unión
+    for comp in nx.connected_components(G):
+        if not any(n in junctions for n in comp):
+            junctions.add(next(iter(comp)))
 
-    node_to_junction = {j: (j, 0.0) for j in junctions}
+    j_list = list(junctions)
+    j_to_idx = {j: i for i, j in enumerate(j_list)}
     contracted_G = nx.Graph()
     for j in junctions:
         contracted_G.add_node(j)
 
+    node_info = {}
+    for j in junctions:
+        j_idx = j_to_idx[j]
+        node_info[j] = (-1, j_idx, j_idx, 0.0, 0.0)
+
     visited_edges = set()
+    chain_id = 0
     for j in junctions:
         for neighbor in G.neighbors(j):
             edge_key = tuple(sorted([j, neighbor]))
@@ -503,31 +551,34 @@ def build_arterial_road_network(roads_gdf: gpd.GeoDataFrame) -> Optional[Arteria
                 prev_w = contracted_G.get_edge_data(j, target_j, {}).get("weight", float("inf"))
                 contracted_G.add_edge(j, target_j, weight=min(total_len, prev_w))
 
-            for idx_c, node in enumerate(chain):
-                d_from_start = cum_dist[idx_c]
-                d_from_end = total_len - d_from_start
-                if d_from_start <= d_from_end or target_j not in junctions:
-                    node_to_junction[node] = (j, d_from_start)
-                else:
-                    node_to_junction[node] = (target_j, d_from_end)
+                for idx_c, node in enumerate(chain):
+                    if node not in junctions:
+                        node_info[node] = (
+                            chain_id,
+                            j_to_idx[j],
+                            j_to_idx[target_j],
+                            cum_dist[idx_c],
+                            total_len
+                        )
+                chain_id += 1
 
-    j_list = list(contracted_G.nodes())
-    j_to_idx = {j: i for i, j in enumerate(j_list)}
     adj = nx.to_scipy_sparse_array(contracted_G, nodelist=j_list, weight="weight", format="csr")
     dist_matrix = shortest_path(csgraph=adj, directed=False)
 
     all_nodes = list(G.nodes())
     all_nodes_coords = np.array(all_nodes, dtype=np.float64)
+    cos_lat_ref = math.cos(math.radians(np.mean(all_nodes_coords[:, 1]))) if len(all_nodes_coords) > 0 else 1.0
 
-    all_node_to_junction_idx = {}
+    all_node_to_junction = {}
     for idx_n, node in enumerate(all_nodes):
-        j_node, d_chain = node_to_junction[node]
-        all_node_to_junction_idx[idx_n] = (j_to_idx[j_node], d_chain)
+        all_node_to_junction[idx_n] = node_info.get(node, (-1, 0, 0, 0.0, 0.0))
 
     return ArterialRoadIndex(
         dist_matrix=dist_matrix,
         all_nodes_coords=all_nodes_coords,
-        all_node_to_junction=all_node_to_junction_idx
+        all_node_to_junction=all_node_to_junction,
+        cos_lat_ref=cos_lat_ref,
+        max_detour_ratio=max_detour_ratio
     )
 
 

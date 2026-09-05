@@ -117,6 +117,15 @@ def execute_pipeline(
     city_info = cfg["city"]
     macro = cfg["macroeconomics"]
     pois_cfg = cfg.get("pois") or []
+    poi_ids = [p.get("id") for p in pois_cfg if isinstance(p, dict) and "id" in p]
+    from collections import Counter
+    poi_counts = Counter(poi_ids)
+    dup_ids = [pid for pid, count in poi_counts.items() if count > 1]
+    if dup_ids:
+        raise ValueError(
+            f"Error de integridad en configuración de POIs: Se detectaron IDs duplicados: {dup_ids}. "
+            "Cada POI debe tener un ID único para evitar colisiones y pérdida de nodos en Subway Builder."
+        )
 
     city_code = city_info["code"]
     city_base = os.path.splitext(os.path.basename(config_path))[0].lower()
@@ -334,9 +343,10 @@ def execute_pipeline(
         roads_gdf = gpd.read_file(roads_path)
         console.print(f"-> Snapping vial activado: [cyan]{len(roads_gdf):,}[/cyan] segmentos de vía ({os.path.basename(roads_path)}).")
         try:
-            road_index = build_arterial_road_network(roads_gdf)
+            max_detour_ratio = float(macro.get("max_detour_ratio", 3.5))
+            road_index = build_arterial_road_network(roads_gdf, max_detour_ratio=max_detour_ratio)
             if road_index is not None:
-                console.print(f"-> Grafo arterial topológico construido: [green]{len(road_index.all_nodes_coords):,}[/green] nodos viales activos.")
+                console.print(f"-> Grafo arterial topológico construido: [green]{len(road_index.all_nodes_coords):,}[/green] nodos viales activos (Techo desvío: {max_detour_ratio}x).")
         except Exception as e:
             console.print(f"[yellow]-> Advertencia construyendo grafo arterial ({e}). Se aplicará modelo continuo base.[/yellow]")
             road_index = None

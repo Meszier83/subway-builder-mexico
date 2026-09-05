@@ -367,6 +367,43 @@ class TestGravity(unittest.TestCase):
         self.assertLess(pax_local, 250)
         self.assertGreater(pax_regional, 750)
 
+    def test_build_demand_grid_rejects_duplicate_poi_ids(self):
+        df_denue = pd.DataFrame([{"lon": -86.85, "lat": 21.15, "calibrated_jobs": 10.0}])
+        df_cpv = pd.DataFrame([{"lon": -86.85, "lat": 21.15, "pobtot_adj": 50.0, "pea_real": 25.0}])
+        roads_gdf = gpd.GeoDataFrame({"geometry": []}, crs="EPSG:4326")
+        duplicate_pois = [
+            {"id": "UNI_Duplicate", "loc": [-86.85, 21.15], "jobs": 1000, "radius_m": 500, "mode": "MAX"},
+            {"id": "UNI_Duplicate", "loc": [-86.86, 21.16], "jobs": 2000, "radius_m": 500, "mode": "MAX"}
+        ]
+        with self.assertRaises(ValueError) as ctx:
+            build_demand_grid(
+                df_denue=df_denue,
+                df_cpv=df_cpv,
+                special_pois=duplicate_pois,
+                roads_gdf=roads_gdf
+            )
+        self.assertIn("IDs duplicados", str(ctx.exception))
+
+    def test_build_demand_grid_preserves_exact_poi_coordinates(self):
+        df_denue = pd.DataFrame([{"lon": -86.85, "lat": 21.15, "calibrated_jobs": 10.0}])
+        df_cpv = pd.DataFrame([{"lon": -86.85, "lat": 21.15, "pobtot_adj": 50.0, "pea_real": 25.0}])
+        # Carretera a ~150 metros del POI
+        road_geom = LineString([(-86.8480, 21.0490), (-86.8480, 21.0550)])
+        roads_gdf = gpd.GeoDataFrame({"geometry": [road_geom], "highway": ["primary"]}, crs="EPSG:4326")
+        exact_loc = [-86.84688, 21.04904]
+        pois = [
+            {"id": "UNI_Exact", "loc": exact_loc, "jobs": 3400, "radius_m": 200, "mode": "BOOST"}
+        ]
+        pts, audit = build_demand_grid(
+            df_denue=df_denue,
+            df_cpv=df_cpv,
+            special_pois=pois,
+            roads_gdf=roads_gdf
+        )
+        poi_pt = next(p for p in pts if p["id"] == "UNI_Exact")
+        # Las coordenadas deben conservarse exactamente iguales a las ingresadas
+        self.assertEqual(poi_pt["location"], [round(exact_loc[0], 5), round(exact_loc[1], 5)])
+
 if __name__ == "__main__":
     unittest.main()
 
