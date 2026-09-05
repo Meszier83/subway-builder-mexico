@@ -237,5 +237,152 @@ class TestArterialRoadRouting(unittest.TestCase):
         self.assertLessEqual(road_m, 2.0 * euclid_km * 1000.0 + 50.0)
 
 
+class TestCanonicalOSRMIntegration(unittest.TestCase):
+    """Pruebas unitarias para el fallback canónico y enriquecimiento con OSRM."""
+
+    def test_canonical_driving_fallback_math(self):
+        from sb_mexico.osrm import calculate_canonical_driving_fallback
+
+        # Distancia euclidiana de 10,000 m (10 km)
+        road_m, sec = calculate_canonical_driving_fallback(10_000.0)
+        self.assertEqual(road_m, 13_000)
+        # 13,000 / (40 / 3.6) = 1170 segundos
+        self.assertEqual(sec, 1170)
+
+        # Distancia cero o ultra-corta debe respetar los pisos de seguridad
+        zero_m, zero_sec = calculate_canonical_driving_fallback(0.0)
+        self.assertEqual(zero_m, 195)  # 150 * 1.3 = 195m
+        self.assertEqual(zero_sec, 45)
+
+    def test_enrich_pops_with_osrm_mocked(self):
+        from unittest.mock import patch, MagicMock
+        from sb_mexico.osrm import enrich_pops_with_osrm
+
+        pops = [
+            {"id": "pop_001", "residenceId": "dp_1", "jobId": "dp_2", "size": 150}
+        ]
+        demand_points = [
+            {"id": "dp_1", "location": [-86.85, 21.15]},
+            {"id": "dp_2", "location": [-86.80, 21.15]}
+        ]
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "code": "Ok",
+            "routes": [{
+                "distance": 6421.0,
+                "duration": 578.0,
+                "geometry": {
+                    "coordinates": [[-86.85, 21.15], [-86.82, 21.15], [-86.80, 21.15]]
+                }
+            }]
+        }
+
+        with patch("requests.Session.get", return_value=mock_resp):
+            osrm_ok, osrm_fb = enrich_pops_with_osrm(pops, demand_points, osrm_url="http://mocked:5000")
+
+        self.assertEqual(osrm_ok, 1)
+        self.assertEqual(osrm_fb, 0)
+        self.assertEqual(pops[0]["drivingDistance"], 6421)
+        self.assertEqual(pops[0]["drivingSeconds"], 578)
+        self.assertEqual(pops[0]["drivingPath"], [[-86.85, 21.15], [-86.82, 21.15], [-86.80, 21.15]])
+
+    def test_enrich_pops_fallback_on_osrm_failure(self):
+        from unittest.mock import patch
+        from sb_mexico.osrm import enrich_pops_with_osrm
+
+        pops = [
+            {"id": "pop_001", "residenceId": "dp_1", "jobId": "dp_2", "size": 100}
+        ]
+        demand_points = [
+            {"id": "dp_1", "location": [-86.85, 21.15]},
+            {"id": "dp_2", "location": [-86.80, 21.15]}
+        ]
+
+        with patch("requests.Session.get", side_effect=Exception("Connection refused")):
+            osrm_ok, osrm_fb = enrich_pops_with_osrm(pops, demand_points, osrm_url="http://invalid:5000")
+
+        self.assertEqual(osrm_ok, 0)
+        self.assertEqual(osrm_fb, 1)
+        self.assertGreater(pops[0]["drivingDistance"], 4000)
+        self.assertGreater(pops[0]["drivingSeconds"], 300)
+        self.assertNotIn("drivingPath", pops[0])
+
+    def test_enrich_pops_consecutive_errors_fail_fast(self):
+        import requests
+        from unittest.mock import patch
+        from sb_mexico.osrm import enrich_pops_with_osrm
+
+        # 10 pares únicos con fallo de conexión
+        pops = [
+            {"id": f"pop_{i}", "residenceId": f"dp_{i}", "jobId": f"dp_{i+10}", "size": 100}
+            for i in range(10)
+        ]
+        demand_points = [
+            {"id": f"dp_{i}", "location": [-86.85 + i * 0.005, 21.15]}
+            for i in range(20)
+        ]
+
+        # Simular ConnectTimeout en cada llamada
+        call_count = 0
+        def fake_get(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise requests.exceptions.ConnectTimeout("Connection timed out")
+
+        with patch("requests.Session.get", side_effect=fake_get):
+            osrm_ok, osrm_fb = enrich_pops_with_osrm(pops, demand_points, osrm_url="http://invalid:5000")
+
+        self.assertEqual(osrm_ok, 0)
+        self.assertEqual(osrm_fb, 10)
+        # Solo debió intentar 5 llamadas antes de cortar por fail-fast
+        self.assertEqual(call_count, 5)
+        # Todos los pops deben tener drivingDistance y drivingSeconds calculados
+        for p in pops:
+            self.assertGreater(p["drivingDistance"], 0)
+            self.assertGreater(p["drivingSeconds"], 0)
+
+    def test_merge_and_sync_preserves_driving_path(self):
+        from sb_mexico.gravity import merge_identical_commutes, sync_demand_points_and_pops
+
+        coords = [[-86.85, 21.15], [-86.82, 21.15], [-86.80, 21.15]]
+        pops = [
+            {
+                "id": "pop_1",
+                "residenceId": "dp_1",
+                "jobId": "dp_2",
+                "size": 80,
+                "drivingDistance": 6400,
+                "drivingSeconds": 570,
+                "drivingPath": coords
+            },
+            {
+                "id": "pop_2",
+                "residenceId": "dp_1",
+                "jobId": "dp_2",
+                "size": 90,
+                "drivingDistance": 6400,
+                "drivingSeconds": 570,
+                "drivingPath": coords
+            }
+        ]
+
+        # 1. merge_identical_commutes debe preservar drivingPath
+        merged = merge_identical_commutes(pops, max_pop_size=200)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["size"], 170)
+        self.assertEqual(merged[0]["drivingPath"], coords)
+
+        # 2. sync_demand_points_and_pops debe preservar drivingPath
+        dps = [
+            {"id": "dp_1", "location": [-86.85, 21.15], "residents": 500, "jobs": 0, "popIds": []},
+            {"id": "dp_2", "location": [-86.80, 21.15], "residents": 0, "jobs": 500, "popIds": []}
+        ]
+        synced_dps, synced_pops = sync_demand_points_and_pops(dps, merged)
+        self.assertEqual(len(synced_pops), 1)
+        self.assertEqual(synced_pops[0]["drivingPath"], coords)
+
+
 if __name__ == "__main__":
     unittest.main()

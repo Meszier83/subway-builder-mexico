@@ -23,8 +23,8 @@ macroeconomics:
   default_growth_factor: 1.05         # Factor de proyección demográfica base (1.00 = Censo 2020 puro)
   gravity_beta: 0.12                  # Coeficiente de fricción espacial (0.10 a 0.14 recomendado)
   max_distance_km: 55.0               # Límite máximo de distancia para viajes urbanos
-  max_pop_size: 150                   # Tamaño máximo por cohorte de viaje (recomendado 150-200)
-  target_pop_size: 35                 # Tamaño objetivo de empaquetado de cohortes (evita micro-cohortes de 1 pax)
+  max_pop_size: 200                   # Tamaño máximo por cohorte de viaje (estándar nativo Subway Builder: 200)
+  target_pop_size: 180                # Tamaño objetivo de empaquetado de cohortes (150-200 pax)
 
   # Proyecciones demográficas municipales oficiales (CONAPO / INEGI):
   # Factor = (Población Proyectada CONAPO Año Actual / Población Censo CPV 2020)

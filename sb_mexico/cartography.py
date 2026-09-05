@@ -62,7 +62,7 @@ def is_wsl_available() -> Tuple[bool, str, Dict[str, bool]]:
         return True, "native", {"tippecanoe": bool(shutil.which("tippecanoe")), "depot": True}
 
     def _probe_tool(cmd: List[str]):
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=15)
 
     try:
         check_cmd = ["wsl.exe", "-d", "Ubuntu", "-e", "which", "tippecanoe"]

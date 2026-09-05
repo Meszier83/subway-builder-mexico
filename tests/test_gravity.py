@@ -9,7 +9,11 @@ from sb_mexico.gravity import (
     simulate_gravity_demand,
     sanitize_demand_points,
     calculate_commute_impedance,
-    furness_ipfp_balance
+    furness_ipfp_balance,
+    merge_identical_commutes,
+    consolidate_small_pops,
+    cluster_demand_points,
+    sync_demand_points_and_pops
 )
 
 class TestGravity(unittest.TestCase):
@@ -232,7 +236,7 @@ class TestGravity(unittest.TestCase):
         # Distancia cero
         dist_zero, sec_zero = calculate_commute_impedance(0.0)
         self.assertEqual(dist_zero, 150)
-        self.assertEqual(sec_zero, 81)
+        self.assertEqual(sec_zero, 45)
         self.assertGreaterEqual(sec_zero, 45)
 
         # Para viajes largos (5 km)
@@ -403,6 +407,93 @@ class TestGravity(unittest.TestCase):
         poi_pt = next(p for p in pts if p["id"] == "UNI_Exact")
         # Las coordenadas deben conservarse exactamente iguales a las ingresadas
         self.assertEqual(poi_pt["location"], [round(exact_loc[0], 5), round(exact_loc[1], 5)])
+
+    def test_merge_identical_commutes(self):
+        pops = [
+            {"id": "p1", "residenceId": "dp1", "jobId": "dp2", "size": 60, "drivingSeconds": 300, "drivingDistance": 4000},
+            {"id": "p2", "residenceId": "dp1", "jobId": "dp2", "size": 80, "drivingSeconds": 400, "drivingDistance": 5000},
+            {"id": "p3", "residenceId": "dp1", "jobId": "dp3", "size": 50, "drivingSeconds": 200, "drivingDistance": 3000},
+        ]
+        merged = merge_identical_commutes(pops, max_pop_size=200)
+        self.assertEqual(len(merged), 2)
+        # El par dp1 -> dp2 debe tener tamaño 140
+        m12 = next(p for p in merged if p["residenceId"] == "dp1" and p["jobId"] == "dp2")
+        self.assertEqual(m12["size"], 140)
+        # Promedio ponderado: (300*60 + 400*80) / 140 = (18000 + 32000) / 140 = 50000 / 140 ≈ 357
+        self.assertEqual(m12["drivingSeconds"], int(round(50000 / 140)))
+        # Total conservado
+        self.assertEqual(sum(p["size"] for p in merged), 190)
+
+    def test_merge_identical_commutes_chunks_exceeding_max_pop_size(self):
+        pops = [
+            {"id": "p1", "residenceId": "dp1", "jobId": "dp2", "size": 180, "drivingSeconds": 300, "drivingDistance": 4000},
+            {"id": "p2", "residenceId": "dp1", "jobId": "dp2", "size": 150, "drivingSeconds": 300, "drivingDistance": 4000},
+        ]
+        # Total = 330, con max_pop_size=200 debe partir en 200 y 130
+        merged = merge_identical_commutes(pops, max_pop_size=200)
+        self.assertEqual(len(merged), 2)
+        sizes = sorted([p["size"] for p in merged], reverse=True)
+        self.assertEqual(sizes, [200, 130])
+        self.assertEqual(sum(sizes), 330)
+
+    def test_consolidate_small_pops(self):
+        demand_points = [
+            {"id": "dp1", "location": [-86.850, 21.150], "residents": 100, "jobs": 0, "popIds": []},
+            {"id": "dp2", "location": [-86.855, 21.150], "residents": 150, "jobs": 0, "popIds": []}, # ~500m de dp1
+            {"id": "job1", "location": [-86.800, 21.100], "residents": 0, "jobs": 200, "popIds": []},
+        ]
+        pops = [
+            {"id": "p1", "residenceId": "dp1", "jobId": "job1", "size": 15, "drivingSeconds": 600, "drivingDistance": 8000},
+            {"id": "p2", "residenceId": "dp2", "jobId": "job1", "size": 80, "drivingSeconds": 650, "drivingDistance": 8500},
+        ]
+        # dp1 tiene pop de 15 (< 25) y está a ~550m (< 2000m) de dp2 con el mismo destino
+        pts, consolidated = consolidate_small_pops(demand_points, pops, max_pop_size=200)
+        self.assertEqual(len(consolidated), 1)
+        self.assertEqual(consolidated[0]["size"], 95)
+        self.assertEqual(sum(p["size"] for p in consolidated), 95)
+
+    def test_cluster_demand_points(self):
+        demand_points = [
+            {"id": "dp1", "location": [-86.8500, 21.1500], "residents": 100, "jobs": 100, "popIds": []},
+            {"id": "dp2", "location": [-86.8505, 21.1500], "residents": 50, "jobs": 50, "popIds": []}, # ~50m de dp1
+            {"id": "dest1", "location": [-86.8000, 21.1000], "residents": 0, "jobs": 200, "popIds": []},
+            {"id": "AIR_Test", "location": [-86.8700, 21.0300], "residents": 0, "jobs": 500, "popIds": [], "is_special": True},
+        ]
+        pops = [
+            {"id": "p1", "residenceId": "dp1", "jobId": "dest1", "size": 100},
+            {"id": "p2", "residenceId": "dp2", "jobId": "dest1", "size": 50},
+            {"id": "p3", "residenceId": "dp1", "jobId": "AIR_Test", "size": 50},
+        ]
+        merged_pts, updated_pops = cluster_demand_points(demand_points, pops, buffer_meters=[250, 200, 150, 125, 100])
+        # dp1 y dp2 deben fusionarse porque están a ~50m (< 200m)
+        point_ids = [p["id"] for p in merged_pts]
+        self.assertIn("AIR_Test", point_ids) # Especial preservado
+        self.assertLess(len(merged_pts), len(demand_points))
+        # Total masa conservada
+        self.assertEqual(sum(p["size"] for p in updated_pops), 200)
+
+    def test_sync_demand_points_and_pops(self):
+        demand_points = [
+            {"id": "dp1", "location": [-86.85, 21.15], "residents": 9999, "jobs": 9999, "popIds": []}, # valores display desfasados
+            {"id": "dp2", "location": [-86.80, 21.10], "residents": 9999, "jobs": 9999, "popIds": []},
+            {"id": "orphan", "location": [-86.90, 21.20], "residents": 50, "jobs": 50, "popIds": []}, # sin pops
+        ]
+        pops = [
+            {"id": "p1", "residenceId": "dp1", "jobId": "dp2", "size": 150, "drivingSeconds": 400, "drivingDistance": 6000},
+        ]
+        synced_pts, clean_pops = sync_demand_points_and_pops(demand_points, pops, remove_orphans=True)
+        # El nodo huérfano debe ser eliminado
+        self.assertEqual(len(synced_pts), 2)
+        pt1 = next(p for p in synced_pts if p["id"] == "dp1")
+        pt2 = next(p for p in synced_pts if p["id"] == "dp2")
+        # dp1 es origen de 150, trabajo 0
+        self.assertEqual(pt1["residents"], 150)
+        self.assertEqual(pt1["jobs"], 0)
+        self.assertEqual(pt1["popIds"], [clean_pops[0]["id"]])
+        # dp2 es destino de 150, residencia 0
+        self.assertEqual(pt2["residents"], 0)
+        self.assertEqual(pt2["jobs"], 150)
+        self.assertEqual(pt2["popIds"], [clean_pops[0]["id"]])
 
 if __name__ == "__main__":
     unittest.main()

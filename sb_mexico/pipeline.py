@@ -33,7 +33,19 @@ from sb_mexico.gravity import (
     sanitize_demand_points,
     assign_zones,
     build_arterial_road_network,
-    ArterialRoadIndex
+    ArterialRoadIndex,
+    merge_identical_commutes,
+    consolidate_small_pops,
+    cluster_demand_points,
+    sync_demand_points_and_pops
+)
+from sb_mexico.osrm import (
+    is_docker_available,
+    prepare_osrm_network_wsl,
+    start_osrm_daemon_wsl,
+    stop_osrm_daemon_wsl,
+    enrich_pops_with_osrm,
+    calculate_canonical_driving_fallback
 )
 from sb_mexico.cartography import build_city_map
 from sb_mexico.special_demand import (
@@ -338,18 +350,9 @@ def execute_pipeline(
     if not os.path.exists(roads_path) and os.path.exists(os.path.join(src_dir, "roads.geojson")):
         roads_path = os.path.join(src_dir, "roads.geojson")
 
-    road_index = None
     if os.path.exists(roads_path):
         roads_gdf = gpd.read_file(roads_path)
         console.print(f"-> Snapping vial activado: [cyan]{len(roads_gdf):,}[/cyan] segmentos de vía ({os.path.basename(roads_path)}).")
-        try:
-            max_detour_ratio = float(macro.get("max_detour_ratio", 3.5))
-            road_index = build_arterial_road_network(roads_gdf, max_detour_ratio=max_detour_ratio)
-            if road_index is not None:
-                console.print(f"-> Grafo arterial topológico construido: [green]{len(road_index.all_nodes_coords):,}[/green] nodos viales activos (Techo desvío: {max_detour_ratio}x).")
-        except Exception as e:
-            console.print(f"[yellow]-> Advertencia construyendo grafo arterial ({e}). Se aplicará modelo continuo base.[/yellow]")
-            road_index = None
     else:
         roads_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
         console.print("[yellow]-> roads.geojson no encontrado. La malla de demanda se posicionará en los centroides urbanos sin snapping vial.[/yellow]")
@@ -394,26 +397,44 @@ def execute_pipeline(
 
     target_pop_size = macro.get("target_pop_size")
     if target_pop_size is None:
-        target_pop_size = max(35, int(round(total_pea / 18000.0)))
-        console.print(f"-> Calibración adaptativa de cohortes: [cyan]target_pop_size = {target_pop_size}[/cyan] (PEA: {total_pea:,})")
+        target_pop_size = 180
+    max_pop_size = macro.get("max_pop_size", 200)
 
-    pops = simulate_gravity_demand(
+    console.print(f"-> Escala canónica de cohortes: [cyan]target_pop_size = {target_pop_size} | max_pop_size = {max_pop_size}[/cyan] (PEA Total: {total_pea:,})")
+
+    raw_pops = simulate_gravity_demand(
         demand_points=demand_points,
         beta=macro.get("gravity_beta", 0.12),
         max_distance_km=macro.get("max_distance_km", 55.0),
-        max_pop_size=macro.get("max_pop_size", 150),
+        max_pop_size=max_pop_size,
         target_pop_size=target_pop_size,
         seed=city_info.get("seed", 42),
         isolated_zones=isolated_zones,
         furness_iterations=macro.get("furness_iterations", 15),
         furness_tol=macro.get("furness_tol", 0.02),
-        road_index=road_index
+        road_index=None
     )
+
+    console.print(f"-> Pipeline Canónico de Consolidación y Escala Subway Builder:")
+    raw_pop_count = len(raw_pops)
+
+    # 1. Clustering espacial de puntos contiguos (Colin's method)
+    demand_points, pops = cluster_demand_points(demand_points, raw_pops)
+
+    # 2. Consolidación de micro-flujos residuales hacia nodos principales
+    demand_points, pops = consolidate_small_pops(demand_points, pops, max_pop_size=max_pop_size)
+
+    # 3. Fusión de viajes idénticos
+    pops = merge_identical_commutes(pops, max_pop_size=max_pop_size)
+
+    # 4. Sincronización 1:1 entre display (residents, jobs) y simulación real
+    demand_points, pops = sync_demand_points_and_pops(demand_points, pops, remove_orphans=True)
 
     total_viajeros = sum(p["size"] for p in pops)
 
-    console.print(f"-> Cohortes de viaje generadas: [green]{len(pops):,}[/green] pops.")
-    console.print(f"-> Total de Pasajeros Activos: [bold green]{total_viajeros:,}[/bold green] (PEA Total: {total_pea:,})")
+    console.print(f"   • Cohortes generadas: de [yellow]{raw_pop_count:,}[/yellow] a [green]{len(pops):,}[/green] pops consolidados.")
+    console.print(f"   • Nodos de demanda activos: [green]{len(demand_points):,}[/green] puntos (display 1:1 sincronizado).")
+    console.print(f"   • Total de Pasajeros Activos: [bold green]{total_viajeros:,}[/bold green] (PEA Total: {total_pea:,})")
 
     # Aserción de conservación estricta de masa
     assert total_viajeros == total_pea, f"Inconsistencia de masa: {total_viajeros} viajeros vs {total_pea} PEA"
@@ -462,9 +483,70 @@ def execute_pipeline(
         console.print(tabla_zonas)
 
     # =========================================================================
-    # 5. SANITIZACIÓN NATIVA CON DEPOT Y EXPORTACIÓN
+    # 5. ENRIQUECIMIENTO CANÓNICO DE RUTAS VIALES (OSRM)
     # =========================================================================
-    console.print(f"\n[bold yellow]5. Sanitización y Generación de Archivos[/bold yellow]")
+    console.print(f"\n[bold yellow]5. Enriquecimiento Canónico de Rutas Viales (OSRM)[/bold yellow]")
+    pbf_candidates = find_sources(["*.osm.pbf"])
+    osm_pbf = pbf_candidates[0] if pbf_candidates else None
+    docker_avail, docker_env = is_docker_available()
+
+    osrm_applied = False
+    if osm_pbf and docker_avail:
+        console.print(f"-> Docker en WSL 2 detectado ({docker_env}). Preparando red vial canónica OSRM...")
+        prep_ok, osrm_dir = prepare_osrm_network_wsl(
+            city_code=city_code,
+            osm_pbf_path=osm_pbf,
+            bbox=bbox_list,
+            force_rebuild=False
+        )
+        if prep_ok:
+            console.print(f"-> Iniciando microservicio OSRM daemon en WSL...")
+            if start_osrm_daemon_wsl(city_code=city_code, port=5000):
+                try:
+                    console.print(f"-> Consultando rutas reales para {len(pops):,} cohortes de viajeros...")
+                    osrm_ok, osrm_fb = enrich_pops_with_osrm(
+                        pops=pops,
+                        demand_points=demand_points,
+                        osrm_url="http://127.0.0.1:5000"
+                    )
+                    console.print(
+                        f"   • Rutas OSRM exactas (geometría y tiempos reales): [green]{osrm_ok:,}[/green]\n"
+                        f"   • Rutas con fallback canónico (1.3× @ 40 km/h): [yellow]{osrm_fb:,}[/yellow]"
+                    )
+                    osrm_applied = True
+                finally:
+                    stop_osrm_daemon_wsl(city_code=city_code)
+            else:
+                console.print("[yellow][WARN] No fue posible levantar el daemon OSRM. Se aplicará fallback canónico.[/yellow]")
+        else:
+            console.print("[yellow][WARN] No fue posible preparar la red OSRM en WSL. Se aplicará fallback canónico.[/yellow]")
+    else:
+        if not osm_pbf:
+            console.print("[dim]-> Archivo OSM PBF no encontrado. Aplicando fallback canónico directo.[/dim]")
+        elif not docker_avail:
+            console.print("[dim]-> Docker en WSL 2 no disponible. Aplicando fallback canónico directo.[/dim]")
+
+    if not osrm_applied:
+        console.print("-> Verificando métricas canónicas Colin de respaldo (1.3× circuidad @ 40 km/h flujo libre)...")
+        dp_locs = {p["id"]: p["location"] for p in demand_points}
+        import math
+        for p in pops:
+            if "drivingSeconds" not in p or not p.get("drivingSeconds"):
+                o_loc = dp_locs.get(p.get("residenceId"))
+                d_loc = dp_locs.get(p.get("jobId"))
+                if o_loc and d_loc:
+                    cos_lat = math.cos(math.radians((o_loc[1] + d_loc[1]) / 2.0))
+                    dx_m = (d_loc[0] - o_loc[0]) * 111_320.0 * cos_lat
+                    dy_m = (d_loc[1] - o_loc[1]) * 110_574.0
+                    euclid_m = math.hypot(dx_m, dy_m)
+                    fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
+                    p["drivingDistance"] = fb_dist
+                    p["drivingSeconds"] = fb_sec
+
+    # =========================================================================
+    # 6. SANITIZACIÓN NATIVA CON DEPOT Y EXPORTACIÓN
+    # =========================================================================
+    console.print(f"\n[bold yellow]6. Sanitización y Generación de Archivos[/bold yellow]")
 
     # Cálculo del Baricentro Urbano Ponderado por Actividad Humana (Cámara)
     total_mass = sum(p["residents"] + 1.5 * p["jobs"] for p in demand_points)
@@ -549,7 +631,7 @@ def execute_pipeline(
         save_special_demand_points(sp_doc, sp_out_path)
 
     # =========================================================================
-    # 6. EMPAQUETADO EN ARCHIVO ZIP FINAL
+    # 7. EMPAQUETADO EN ARCHIVO ZIP FINAL
     # =========================================================================
     zip_name = f"{city_code}.zip"
     zip_path = os.path.join(out_dir, zip_name)
@@ -601,3 +683,20 @@ def execute_pipeline(
     ))
 
     return zip_path
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Subway Builder México Pipeline")
+    parser.add_argument("config", help="Ruta al archivo YAML de la ciudad")
+    parser.add_argument("--skip-map", action="store_true", help="Omitir compilación cartográfica")
+    parser.add_argument("--output-dir", default=".", help="Directorio de salida")
+    parser.add_argument("--data-dir", default=None, help="Directorio de datos del proyecto")
+    args = parser.parse_args()
+
+    execute_pipeline(
+        config_path=args.config,
+        skip_map=args.skip_map,
+        output_dir=args.output_dir,
+        data_dir=args.data_dir
+    )

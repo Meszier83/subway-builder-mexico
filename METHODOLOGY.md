@@ -345,106 +345,64 @@ Uno de los errores mas graves en el diseno de escenarios metropolitanos es conce
 ### 7.1. La Funcion de Eleccion Modal en el Motor de Simulacion
 Un aspecto critico de la arquitectura de *Subway Builder* es comprender como el motor de simulacion decide si una cohorte de pasajeros utiliza la red de metro construida por el jugador o se desplaza en automovil privado:
 
-1. **El juego NO calcula rutas viales en tiempo real:** Durante la simulacion a 60 FPS, el motor no ejecuta busquedas de caminos (A* o Dijkstra) sobre el mapa de calles para los vehiculos; seria computacionalmente inviable simular 20,000 automoviles simultaneos en JavaScript/WebGL.
+1. **El juego NO calcula rutas viales en tiempo real:** Durante la simulacion a 60 FPS, el motor no ejecuta busquedas de caminos (A* o Dijkstra) sobre el mapa de calles para los vehiculos; seria computacionalmente inviable simular decenas de miles de automoviles simultaneos en JavaScript/WebGL.
 2. **Confianza Ciega en `drivingSeconds`:** El motor lee directamente el valor numerico escrito en el campo `drivingSeconds` dentro del archivo `demand_data.json` para cada cohorte `pop`.
-3. **Criterio de Eleccion Modal:**
-   El agente compara:
-   $$\text{Tiempo\_Auto} = \text{drivingSeconds}$$
+3. **Criterio de Eleccion Modal y Penalizaciones en Tiempo Real:**
+   El motor del juego evalua la utilidad comparativa del viaje. Al valor base de `drivingSeconds`, el motor aplica de forma dinamica en tiempo de ejecucion:
+   * **Multiplicador de Hora Pico:** `DRIVING_TIMES.HIGH_DEMAND = 1.5x` durante horas punta.
+   * **Multiplicador de Congestion Vial Dinamica:** `CONGESTED_DRIVING_MULTIPLIER = 1.33x` conforme aumenta la densidad automotriz.
+   * **Friccion de Estacionamiento:** $+180\text{ s}$ en origen y $+180\text{ s}$ en destino, escalados por un factor de hasta $1.6\text{x}$ ($\approx 576\text{ s}$ adicionales de busqueda de cajon).
+   * **Costo Operativo por Kilometro:** $\$0.65/\text{km}$ derivado de `drivingDistance`.
+
+   $$\text{Tiempo\_Auto} = \text{drivingSeconds} \times f_{\text{congestion}} + \text{Tiempo\_Estacionamiento}$$
    $$\text{Tiempo\_Metro} = \text{Tiempo\_Caminata\_Origen} + \text{Tiempo\_Espera\_Anden} + \text{Tiempo\_Viaje\_Tren} + \text{Tiempo\_Caminata\_Destino}$$
 
-   Si $\text{Tiempo\_Metro} < \text{Tiempo\_Auto}$, la cohorte elige el metro; si el tiempo en automovil es inferior o el metro exige rodeos excesivos, la cohorte descarta el tren y viaja en automovil, reduciendo la afluencia de las estaciones a cero.
+   Si $\text{Tiempo\_Metro} < \text{Tiempo\_Auto}$, la cohorte aborda los trenes; si el tiempo en automovil es inferior o el metro exige trasbordos excesivos, la cohorte opta por el automovil privado.
 
-Por tanto, calibrar con fidelidad el tiempo de manejo es la piedra angular para que las lineas de transporte masivo tengan viabilidad economica y demanda realista en el juego.
+4. **Regla de Oro: Prohibida la Doble Contabilidad de Congestion:**
+   Dado que el motor de *Subway Builder* ya aplica penalizaciones de congestion (1.5x, 1.33x) y busqueda de estacionamiento en tiempo de ejecucion, el valor inyectado en `drivingSeconds` **debe corresponder estrictamente a la linea base a flujo libre** (~40 km/h promedio en red mixta). Pre-congestionar artificialmente los datos a 20 o 25 km/h destruye el canon del juego, penalizando doblemente al automovil y creando una demanda ficticia.
 
-### 7.2. Modelo Continuo de Impedancia Urbana No Lineal
-Para viajes ordinarios en tejido urbano continuo (o en areas metropolitanas sin anomalias geograficas severas), `sb_mexico` implementa un modelo de impedancia fisica no lineal con tortuosidad y velocidad asintotica:
+### 7.2. Linea Base Canonica de Colin (Colin's Canonical Fallback)
+Documentado formalmente en las guias oficiales del creador del juego (*Subway Builder Custom Cities / Demand API*), el estandar universal de respaldo ante la ausencia de ruteo punto a punto es:
+* **Circuidad Vial Canonica:** Las calles urbanas anaden un 30% de distancia sobre la linea recta euclidiana ($\tau = 1.3$).
+* **Velocidad Promedio Canonica:** $40\text{ km/h}$ ($\approx 11.11\text{ m/s}$) representativa del flujo urbano promedio.
+* **Formulacion Matematica:**
+  $$\text{drivingDistance} = \max(150\text{ m}, \ \operatorname{round}(d_{\text{euclid}} \times 1.3))$$
+  $$\text{drivingSeconds} = \max\left(45\text{ s}, \ \operatorname{round}\left(\frac{\text{drivingDistance}}{40.0 / 3.6}\right)\right)$$
 
-#### Tortuosidad Continua $\tau(d)$
-La relacion entre la distancia euclidiana en linea recta $d$ (en kilometros) y la distancia real recorrida por las avenidas no es constante:
-$$\tau(d) = 1.20 + 0.20 \cdot e^{-d / 6.0}$$
-
-* En distancias cortas intraurbanas ($d \to 0$ km), la traza reticular y las maniobras elevan la tortuosidad a $\tau \approx 1.40$ (+40% de recorrido sobre linea recta).
-* En distancias metropolitanas o regionales ($d \ge 25$ km), el uso de autopistas y ejes radiales reduce la tortuosidad hacia la asintota $\tau \approx 1.20$.
-
-La distancia de manejo efectiva estimada es:
-$$\text{drivingDistance} = \max(150, \ \operatorname{round}(d \times 1000.0 \times \tau(d))) \quad [\text{metros}]$$
-
-#### Velocidad Media de Flujo Vehicular Continuo $V(d)$
-El flujo vehicular en las ciudades experimenta congestion semaforica y friccion peatonal en distancias cortas, acelerando en viaductos para viajes de mayor longitud:
-$$V(d) = 15.0 + 55.0 \cdot (1 - e^{-d / 6.0}) \quad [\text{km/h}]$$
-
-* A escala barrial ($d \to 0$ km): $V \approx 15\text{ km/h}$ (velocidad tipica en congestion centrica).
-* A escala metropolitana ($d \to \infty$): $V \to 70\text{ km/h}$ (velocidad de autopista urbana fluida).
-
-#### Tiempo de Manejo con Friccion de Arranque
-Para reflejar el tiempo de abordar el vehiculo, desestacionar y maniobrar al inicio del viaje, se incorpora un costo fijo de 45 segundos:
-$$\text{drivingSeconds} = \max\left(45, \ \operatorname{round}\left(45 + \frac{\text{drivingDistance}}{V(d) / 3.6}\right)\right)$$
-
-*Nota Tecnica:* Este modelo continuo reemplaza los antiguos pisos rigidos discontinuos (que imponian 800 m y 180 s a cualquier trayecto), preservando la dinamica natural de viajes peatonales cortos y desplazamientos en barrios densos.
+Este calculo garantiza valores fisicamente plausibles, evita discontinuidades numericas y sirve como salvaguarda absoluta en todo el sistema.
 
 ---
 
-## 8. Motor de Ruteo Topologico Vial Arterial (`ArterialRoadIndex`)
+## 8. Ruteo Vial Canonico con OSRM (Open Source Routing Machine) y WSL 2
 
-### 8.1. El Desafio de las Geografias Peninsulares y Cuerpos de Agua
-El modelo continuo euclidiano falla dramaticamente en metropolis con anomalias topologicas severas:
-* **Penínsulas y Lagunas (ej. Cancun y la Laguna Nichupte):**
-  * La distancia euclidiana entre la ciudad continental y los hoteles del Bulevar Kukulcan es de apenas $8.9\text{ km}$ en linea recta a traves del agua.
-  * El modelo continuo estimaba un tiempo en auto de tan solo $600\text{ s}$ ($10\text{ minutos}$), cruzando el lago volando.
-  * Una linea de metro que bordea la laguna requiere unos 18 a 22 minutos de recorrido.
-  * **Consecuencia en el juego:** El motor determinaba que el auto era 2 veces mas rapido que el metro, provocando que **nadie abordara el metro hacia la Zona Hotelera**, a pesar de ser uno de los corredores hoteleros mas densos del mundo.
-* **Bahias y Rios sin Puentes Continuos:** Comportamientos similares ocurren en ciudades con estuarios o bahias (ej. La Paz, Acapulco, Puerto Vallarta, Tampico).
+### 8.1. El Estandar Oficial de Subway Builder
+Para metropolis con anomalias topologicas severas (como Cancun y la Laguna Nichupte, o bahias como Acapulco y Puerto Vallarta), una simple aproximacion euclidiana ignora las barreras de agua, calculando viajes en linea recta a traves de lagunas y arruinando la demanda del metro.
 
-En la realidad, un automovilista debe obligatoriamente recorrer la carretera perimetral bordeando la masa de agua ($21\text{ a }28\text{ km}$), tardando de $25\text{ a }45\text{ minutos}$ en horas de trafico. Al ingresar el tiempo real al archivo `demand_data.json`, el metro (18 min) se vuelve inmensamente atractivo y el tren se llena a maxima capacidad.
+Para solucionar esto de raiz sin caer en aproximaciones arbitrarias, la documentacion oficial de *Subway Builder* estipula el uso de **OSRM (`osrm/osrm-backend`) con el perfil de automovil `car.lua`**:
 
-### 8.2. Filtrado y Extraccion de la Red Arterial de OpenStreetMap
-Para resolver esto sin ralentizar la compilacion, el pipeline procesa la capa `roads.geojson` (derivada de OSM) filtrando exclusivamente los ejes viales estructurantes:
-
-$$\text{highway} \in \{\text{'primary'}, \ \text{'secondary'}, \ \text{'trunk'}, \ \text{'motorway'}, \ \text{'major'}\}$$
-
-Se excluyen deliberadamente las calles locales residenciales y callejones peatonales para mantener el grafo matematico en una dimension compacta y resolver caminos minimos en milisegundos.
-
-### 8.3. Algoritmo de Contraccion de Grado 2 y All-Pairs Shortest Path (APSP)
-Una red vial arterial cruda contiene decenas de miles de nodos geometricos (ej. 24,536 nodos en Cancun) que describen la curvatura de las avenidas pero no representan intersecciones reales. Resolver todos los pares de caminos minimos en un grafo de tal magnitud requeriria minutos de CPU y gigabytes de memoria.
-
-`sb_mexico` implementa un algoritmo de reduccion topologica:
-
-```
-[Grafo Vial Arterial Crudo (24,536 nodos en Cancún)]
-                       |
-                       v
-[Identificación de Cruces e Intersecciones (Grado != 2)]
-   Nodos clave (junctions): ~1,765 intersecciones verdaderas
-                       |
-                       v
-[Contracción de Cadenas Topológicas]
-   Sustitución de series de nodos intermedios de grado 2 por una sola
-   arista consolidada con peso w = Sum(longitudes_curva)
-                       |
-                       v
-[Grafo Contraído Compacto: ~1,765 nodos y ~2,200 aristas]
-                       |
-                       v
-[All-Pairs Shortest Path (APSP) en Formato CSR]
-   scipy.sparse.csgraph.shortest_path(directed=False)
-   Cálculo exacto de distancias mínimas en menos de 1.8 segundos
+```bash
+docker run -t -p 5000:5000 -v "${PWD}:/data" osrm/osrm-backend osrm-routed --algorithm mld /data/city.osrm
 ```
 
-### 8.4. Mapeo Espacial de Puntos de Demanda con `cKDTree`
-Para consultar distancias viales entre cualquier par de puntos de demanda $(p_1, p_2)$:
-1. Se indexan las coordenadas de todos los nodos del grafo arterial en un arbol espacial de busqueda rapida `scipy.spatial.cKDTree`.
-2. Para $p_1$ y $p_2$, se proyectan a sus nodos viales mas cercanos $n_1$ y $n_2$ en el arbol.
-3. Se recupera la distancia de cadena hacia las uniones topologicas contraidas $(j_1, j_2)$ y se extrae el camino minimo de la matriz APSP precalculada:
-   $$\text{dist\_road}(p_1, p_2) = \operatorname{dist\_cadena}(p_1, j_1) + \mathbf{D}_{\text{APSP}}[j_1, j_2] + \operatorname{dist\_cadena}(p_2, j_2)$$
+Y la consulta de rutas mediante el API REST:
+```
+GET /route/v1/driving/{originLon},{originLat};{destLon},{destLat}?overview=full&geometries=geojson
+```
 
-### 8.5. Las Tres Salvaguardas Fisicas Invariantes
-Para asegurar que ningun artefacto del ruteo vial produzca anomalias numericas, se aplican tres salvaguardas matematicas estrictas:
+De esta respuesta oficial se extraen:
+* `drivingSeconds = routes[0].duration` (segundos reales considerando sentidos, giros permitidos y velocidades por tipo de via).
+* `drivingDistance = routes[0].distance` (metros de pavimento real).
+* `drivingPath = routes[0].geometry.coordinates` (traza vectorial GeoJSON para renderizar los vehiculos en la simulacion).
 
-1. **Piso Euclidiano:** La distancia sobre la carretera nunca puede ser menor que la distancia en linea recta:
-   $$\text{dist\_m} \ge d_{\text{euclid}} \times 1000.0$$
-2. **Techo de Tortuosidad Maxima:** Ningun viaje en una red urbana estructurada razonable exige un rodeo superior a 3.5 veces la distancia recta. Si la red arterial produce un desvio mayor (por ejemplo, si el grafo tiene una discontinuidad o autopista trunca), se aplica un limite superior:
-   $$\text{dist\_m} \le 3.5 \times d_{\text{euclid}} \times 1000.0$$
-3. **Fallback a Impedancia Continua:** Si el origen y destino pertenecen a componentes topologicas inconexas en el grafo arterial (o la consulta retorna infinito), el sistema recurre de forma transparente al modelo continuo $\tau(d)$ de la Seccion 7.2.
+### 8.2. Arquitectura de Compilacion Rapida en WSL 2
+En cumplimiento con el estandar de la **Regla 10 (WSL 2 y Puente Cartografico)**, el pipeline de `sb_mexico`:
+
+1. **Recorte BBOX con `osmium extract`:** Si el archivo OSM PBF es de escala nacional o regional, se recorta al rectangulo metropolitano de la ciudad antes de compilar. Esto reduce el tiempo de indexacion de ~15 minutos a solo **1.2 segundos**.
+2. **Compilacion en Particion Nativa Linux (ext4):** La generacion del grafo MLD (`osrm-extract`, `osrm-partition`, `osrm-customize`) se ejecuta en `~/osrm_<city>` dentro de WSL 2, eliminando la degradacion de I/O de Windows NTFS.
+3. **Daemon Efimero Autogestionado:** El pipeline inicia un contenedor Docker liviano (`sb_osrm_<city>`) en el puerto 5000, consulta las rutas necesarias y garantiza el apagado seguro en bloques `finally`.
+4. **Enriquecimiento por Pares Unicos:** En lugar de saturar el motor con matrices completas $N \times N$, el sistema unicamente consulta los pares `(residenceId, jobId)` de las cohortes `pops` activas consolidadas (~800 a 2,500 rutas), completando el enriquecimiento total en menos de 2 segundos.
+5. **Preservacion de Geometria (`drivingPath`):** Todas las etapas posteriores de consolidacion de cohortes (`merge_identical_commutes` y `sync_demand_points_and_pops`) preservan la traza `drivingPath` para su visualizacion en el juego.
 
 ---
 

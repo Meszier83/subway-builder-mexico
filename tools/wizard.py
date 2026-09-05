@@ -223,8 +223,8 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         f'  default_growth_factor: {float(macro_cfg.get("default_growth_factor", 1.05))}',
         f'  gravity_beta: {float(macro_cfg.get("gravity_beta", 0.12))}',
         f'  max_distance_km: {float(macro_cfg.get("max_distance_km", 50.0))}',
-        f'  max_pop_size: {int(macro_cfg.get("max_pop_size", 150))}',
-        f'  target_pop_size: {int(macro_cfg.get("target_pop_size", 35))}',
+        f'  max_pop_size: {int(macro_cfg.get("max_pop_size", 200))}',
+        f'  target_pop_size: {int(macro_cfg.get("target_pop_size", 180))}',
         f'  furness_iterations: {int(macro_cfg.get("furness_iterations", 15))}',
         f'  furness_tol: {float(macro_cfg.get("furness_tol", 0.02))}',
         ""

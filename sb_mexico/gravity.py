@@ -300,23 +300,22 @@ def build_demand_grid(
     return demand_points, poi_audit
 
 
+CANONICAL_SPEED_KMH = 40.0
+CANONICAL_CIRCUITY = 1.3
+
+
 def calculate_commute_impedance(d_km: float) -> Tuple[int, int]:
     """
-    Calcula distancia y tiempo de manejo con modelo de congestión urbana continuo no lineal.
-    - Tortuosidad continua: tau(d) = 1.20 + 0.20 * exp(-d / 6.0) (de 1.40 urbano a 1.20 autopista).
-    - Distancia real estimada: max(150, int(d * 1000.0 * tau(d))).
-    - Curva de velocidad suave: V(d) = 15.0 + 55.0 * (1 - exp(-d / 6.0)) km/h.
-    - Tiempo de manejo: max(45, int(45 + dist_m / (V(d) / 3.6))).
-    Elimina pisos rígidos artificiales (antes 800m y 180s) preservando viajes peatonales/cortos.
+    Calcula distancia y tiempo de manejo usando el estándar canónico oficial de Subway Builder:
+    - Circuidad vial canónica: distancia euclidiana x 1.3
+    - Velocidad canónica a flujo libre: 40 km/h (~11.11 m/s)
+    - Tiempo de manejo: max(45, int(round(dist_m / (40.0 / 3.6))))
+    Documentado en Subway Builder Custom Cities / Demand Modification API.
     """
     d = max(0.0, float(d_km))
-    tau = 1.20 + 0.20 * np.exp(-d / 6.0)
-    dist_m = max(150, int(d * 1000.0 * tau))
-
-    speed_kmh = 15.0 + 55.0 * (1.0 - np.exp(-d / 6.0))
-    speed_ms = speed_kmh / 3.6
-    driving_seconds = max(45, int(45 + dist_m / speed_ms))
-
+    dist_m = max(150, int(round(d * 1000.0 * CANONICAL_CIRCUITY)))
+    speed_ms = CANONICAL_SPEED_KMH / 3.6
+    driving_seconds = max(45, int(round(dist_m / speed_ms)))
     return dist_m, driving_seconds
 
 
@@ -431,15 +430,9 @@ class ArterialRoadIndex:
         # Salvaguarda 2: Techo de Desvío Acotado (dist_road <= detour_ceiling * dist_euclid)
         road_m = min(road_m, detour_ceiling * euclid_m)
 
-        # Velocidad de congestión urbana con factor de desvío
-        d_km = road_m / 1000.0
-        detour_ratio = road_m / max(1.0, euclid_m)
-        base_speed = 15.0 + 55.0 * (1.0 - math.exp(-d_km / 6.0))
-        speed_factor = 1.0 / math.sqrt(max(1.0, detour_ratio))
-        effective_speed_kmh = max(15.0, base_speed * speed_factor)
-        speed_ms = effective_speed_kmh / 3.6
-
-        driving_seconds = max(45, int(45 + road_m / speed_ms))
+        # Velocidad canónica oficial de Subway Builder (40 km/h promedio a flujo libre)
+        speed_ms = CANONICAL_SPEED_KMH / 3.6
+        driving_seconds = max(45, int(round(road_m / speed_ms)))
         return int(round(road_m)), driving_seconds
 
 
@@ -712,8 +705,8 @@ def simulate_gravity_demand(
     demand_points: List[Dict],
     beta: float = 0.12,
     max_distance_km: float = 55.0,
-    max_pop_size: int = 150,
-    target_pop_size: int = 35,
+    max_pop_size: int = 200,
+    target_pop_size: int = 180,
     seed: int = 42,
     isolated_zones: Optional[List[Dict]] = None,
     furness_iterations: int = 15,
@@ -988,6 +981,347 @@ def simulate_gravity_demand(
                     pax_count -= chunk
 
     return pops
+
+
+def merge_identical_commutes(pops: List[Dict], max_pop_size: int = 200) -> List[Dict]:
+    """
+    Agrupa y fusiona cohortes con los mismos nodos de origen y destino exactos (residenceId, jobId).
+    Si la suma de personas supera max_pop_size, genera trozos ordenados de hasta max_pop_size.
+    Calcula distancias y tiempos de manejo ponderados por tamaño de cohorte.
+    """
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for p in pops:
+        key = (p["residenceId"], p["jobId"])
+        groups[key].append(p)
+
+    merged_pops = []
+    pop_counter = 1
+    for (res_id, job_id), pop_list in groups.items():
+        total_size = sum(p["size"] for p in pop_list)
+        if total_size <= 0:
+            continue
+
+        weights = [p["size"] for p in pop_list]
+        tot_w = sum(weights)
+        if tot_w > 0:
+            avg_sec = int(round(sum(p.get("drivingSeconds", 0) * w for p, w in zip(pop_list, weights)) / tot_w))
+            avg_dist = int(round(sum(p.get("drivingDistance", 0) * w for p, w in zip(pop_list, weights)) / tot_w))
+        else:
+            avg_sec = pop_list[0].get("drivingSeconds", 0)
+            avg_dist = pop_list[0].get("drivingDistance", 0)
+
+        path = next((p["drivingPath"] for p in pop_list if "drivingPath" in p and p["drivingPath"]), None)
+        rem = total_size
+        while rem > 0:
+            sz = min(rem, max_pop_size)
+            item = {
+                "id": f"pop_{pop_counter:06d}",
+                "size": sz,
+                "residenceId": res_id,
+                "jobId": job_id,
+                "drivingSeconds": avg_sec,
+                "drivingDistance": avg_dist
+            }
+            if path is not None:
+                item["drivingPath"] = path
+            merged_pops.append(item)
+            pop_counter += 1
+            rem -= sz
+
+    return merged_pops
+
+
+def consolidate_small_pops(
+    demand_points: List[Dict],
+    pops: List[Dict],
+    max_pop_size: int = 200,
+    consolidate_max_sizes: Optional[List[int]] = None,
+    consolidate_distances: Optional[List[float]] = None
+) -> Tuple[List[Dict], List[Dict]]:
+    """
+    Consolida micro-flujos residuales por debajo de umbrales en cohortes más grandes
+    dentro de un radio espacial de vecindad, portando el algoritmo canónico de Subway Builder (depot).
+    
+    Paso 1: Para un mismo empleo (jobId), fusiona orígenes residenciales cercanos (< distance_m)
+            que tengan pocos viajeros (< max_size).
+    Paso 2: Para una misma residencia (residenceId), fusiona destinos de empleo cercanos
+            que tengan pocos viajeros.
+    Protege los POIs especiales para que no se desplacen ni pierdan cuota.
+    """
+    if not pops or not demand_points:
+        return demand_points, pops
+
+    if consolidate_max_sizes is None:
+        consolidate_max_sizes = [25, 10, 5, 2]
+    if consolidate_distances is None:
+        consolidate_distances = [2000.0, 4000.0, 8000.0, 16000.0]
+
+    from collections import defaultdict
+    coords_by_id = {p["id"]: p["location"] for p in demand_points}
+    special_ids = {p["id"] for p in demand_points if p.get("is_special", False)}
+
+    current_pops = [dict(p) for p in pops]
+
+    for max_sz, max_dist in zip(consolidate_max_sizes, consolidate_distances):
+        # Paso A: Consolidar orígenes para un mismo trabajo (jobId)
+        job_groups = defaultdict(list)
+        for idx, p in enumerate(current_pops):
+            if p["size"] > 0 and p["jobId"] not in special_ids and p["residenceId"] not in special_ids:
+                job_groups[p["jobId"]].append(idx)
+
+        for job_id, p_indices in job_groups.items():
+            if len(p_indices) < 2:
+                continue
+
+            p_indices.sort(key=lambda idx: current_pops[idx]["size"])
+
+            for i in range(len(p_indices)):
+                pi = p_indices[i]
+                pop_i = current_pops[pi]
+                if pop_i["size"] <= 0 or pop_i["size"] >= max_sz:
+                    continue
+
+                loc1 = coords_by_id.get(pop_i["residenceId"])
+                if not loc1:
+                    continue
+
+                for j in range(i + 1, len(p_indices)):
+                    pj = p_indices[j]
+                    pop_j = current_pops[pj]
+                    if pop_j["size"] <= 0 or pop_j["size"] >= max_pop_size:
+                        continue
+
+                    loc2 = coords_by_id.get(pop_j["residenceId"])
+                    if not loc2:
+                        continue
+
+                    cos_lat = math.cos(math.radians((loc1[1] + loc2[1]) / 2.0))
+                    dist_m = math.hypot((loc1[0] - loc2[0]) * 111320.0 * cos_lat, (loc1[1] - loc2[1]) * 110574.0)
+
+                    if dist_m <= max_dist:
+                        transfer = min(pop_i["size"], max_pop_size - pop_j["size"])
+                        if transfer > 0:
+                            w_tot = pop_j["size"] + transfer
+                            pop_j["drivingSeconds"] = int(round((pop_j.get("drivingSeconds", 0) * pop_j["size"] + pop_i.get("drivingSeconds", 0) * transfer) / w_tot))
+                            pop_j["drivingDistance"] = int(round((pop_j.get("drivingDistance", 0) * pop_j["size"] + pop_i.get("drivingDistance", 0) * transfer) / w_tot))
+                            pop_j["size"] += transfer
+                            pop_i["size"] -= transfer
+
+                        if pop_i["size"] <= 0:
+                            break
+
+        # Paso B: Consolidar destinos para una misma residencia (residenceId)
+        res_groups = defaultdict(list)
+        for idx, p in enumerate(current_pops):
+            if p["size"] > 0 and p["residenceId"] not in special_ids and p["jobId"] not in special_ids:
+                res_groups[p["residenceId"]].append(idx)
+
+        for res_id, p_indices in res_groups.items():
+            if len(p_indices) < 2:
+                continue
+
+            p_indices.sort(key=lambda idx: current_pops[idx]["size"])
+
+            for i in range(len(p_indices)):
+                pi = p_indices[i]
+                pop_i = current_pops[pi]
+                if pop_i["size"] <= 0 or pop_i["size"] >= max_sz:
+                    continue
+
+                loc1 = coords_by_id.get(pop_i["jobId"])
+                if not loc1:
+                    continue
+
+                for j in range(i + 1, len(p_indices)):
+                    pj = p_indices[j]
+                    pop_j = current_pops[pj]
+                    if pop_j["size"] <= 0 or pop_j["size"] >= max_pop_size:
+                        continue
+
+                    loc2 = coords_by_id.get(pop_j["jobId"])
+                    if not loc2:
+                        continue
+
+                    cos_lat = math.cos(math.radians((loc1[1] + loc2[1]) / 2.0))
+                    dist_m = math.hypot((loc1[0] - loc2[0]) * 111320.0 * cos_lat, (loc1[1] - loc2[1]) * 110574.0)
+
+                    if dist_m <= max_dist:
+                        transfer = min(pop_i["size"], max_pop_size - pop_j["size"])
+                        if transfer > 0:
+                            w_tot = pop_j["size"] + transfer
+                            pop_j["drivingSeconds"] = int(round((pop_j.get("drivingSeconds", 0) * pop_j["size"] + pop_i.get("drivingSeconds", 0) * transfer) / w_tot))
+                            pop_j["drivingDistance"] = int(round((pop_j.get("drivingDistance", 0) * pop_j["size"] + pop_i.get("drivingDistance", 0) * transfer) / w_tot))
+                            pop_j["size"] += transfer
+                            pop_i["size"] -= transfer
+
+                        if pop_i["size"] <= 0:
+                            break
+
+    active_pops = [p for p in current_pops if p["size"] > 0]
+    return demand_points, active_pops
+
+
+def cluster_demand_points(
+    demand_points: List[Dict],
+    pops: List[Dict],
+    max_pop_threshold: Optional[List[float]] = None,
+    buffer_meters: Optional[List[float]] = None
+) -> Tuple[List[Dict], List[Dict]]:
+    """
+    Agrupa y fusiona espacialmente puntos de demanda contiguos según el método de clustering
+    oficial de Subway Builder (Colin's method), evitando nodos redundantes a menos de 100-250m.
+    Protege 100% de los POIs especiales (aeropuertos, universidades, estadios).
+    """
+    if not demand_points or not pops:
+        return demand_points, pops
+
+    if max_pop_threshold is None:
+        max_pop_threshold = [200, 500, 5000, 15000, float('inf')]
+    if buffer_meters is None:
+        buffer_meters = [250, 200, 150, 125, 100]
+
+    special_pts = [p for p in demand_points if p.get("is_special", False)]
+    regular_pts = [p for p in demand_points if not p.get("is_special", False)]
+
+    if not regular_pts:
+        return demand_points, pops
+
+    res_by_id = {p["id"]: sum(pop["size"] for pop in pops if pop["residenceId"] == p["id"]) for p in regular_pts}
+    jobs_by_id = {p["id"]: sum(pop["size"] for pop in pops if pop["jobId"] == p["id"]) for p in regular_pts}
+    sizes = np.array([res_by_id[p["id"]] + jobs_by_id[p["id"]] for p in regular_pts], dtype=np.float64)
+
+    isort = np.argsort(sizes)[::-1]
+    sorted_pts = [regular_pts[i] for i in isort]
+    sorted_sizes = sizes[isort]
+
+    unique_centers = []
+    unique_sizes = []
+    unique_ids = []
+    point_mapping = {}
+
+    for i, pt in enumerate(sorted_pts):
+        pt_sz = sorted_sizes[i]
+        pt_loc = pt["location"]
+
+        buf = buffer_meters[-1]
+        for th, b in zip(max_pop_threshold, buffer_meters):
+            if pt_sz <= th:
+                buf = b
+                break
+
+        cos_lat = math.cos(math.radians(pt_loc[1]))
+
+        merged_to = None
+        for c_idx, c_loc in enumerate(unique_centers):
+            dist_m = math.hypot(
+                (pt_loc[0] - c_loc[0]) * 111320.0 * cos_lat,
+                (pt_loc[1] - c_loc[1]) * 110574.0
+            )
+            if dist_m <= buf:
+                merged_to = c_idx
+                break
+
+        if merged_to is None:
+            new_idx = len(unique_centers)
+            unique_centers.append(list(pt_loc))
+            unique_sizes.append(pt_sz)
+            unique_ids.append(pt["id"])
+            point_mapping[pt["id"]] = pt["id"]
+        else:
+            target_id = unique_ids[merged_to]
+            point_mapping[pt["id"]] = target_id
+            cur_sz = unique_sizes[merged_to]
+            new_sz = cur_sz + pt_sz
+            if new_sz > 0:
+                unique_centers[merged_to][0] = (unique_centers[merged_to][0] * cur_sz + pt_loc[0] * pt_sz) / new_sz
+                unique_centers[merged_to][1] = (unique_centers[merged_to][1] * cur_sz + pt_loc[1] * pt_sz) / new_sz
+            unique_sizes[merged_to] = new_sz
+
+    updated_pops = []
+    for p in pops:
+        new_p = dict(p)
+        orig_r = new_p["residenceId"]
+        orig_j = new_p["jobId"]
+
+        if orig_r in point_mapping:
+            new_p["residenceId"] = point_mapping[orig_r]
+        if orig_j in point_mapping:
+            new_p["jobId"] = point_mapping[orig_j]
+
+        updated_pops.append(new_p)
+
+    merged_pts = []
+    for c_id, c_loc in zip(unique_ids, unique_centers):
+        merged_pts.append({
+            "id": c_id,
+            "location": [round(c_loc[0], 5), round(c_loc[1], 5)],
+            "jobs": 0,
+            "residents": 0,
+            "popIds": []
+        })
+
+    merged_pts.extend(special_pts)
+    return merged_pts, updated_pops
+
+
+def sync_demand_points_and_pops(
+    demand_points: List[Dict],
+    pops: List[Dict],
+    remove_orphans: bool = True
+) -> Tuple[List[Dict], List[Dict]]:
+    """
+    Sincroniza estrictamente los valores de display (residents, jobs) y referencias (popIds)
+    de cada demand_point con la suma real de los pops que viajan a través de él.
+    Garantiza que la simulación de Subway Builder y la visualización de burbujas coincidan 1:1.
+    Elimina nodos huérfanos que no tienen flujos activos (a menos que sean POIs especiales).
+    """
+    from collections import defaultdict
+    res_by_id = defaultdict(int)
+    jobs_by_id = defaultdict(int)
+    pop_ids_by_point = defaultdict(list)
+
+    clean_pops = []
+    for idx, p in enumerate(pops, start=1):
+        if p["size"] <= 0:
+            continue
+        pid = f"pop_{idx:06d}"
+        pop_dict = {
+            "id": pid,
+            "size": int(p["size"]),
+            "residenceId": str(p["residenceId"]),
+            "jobId": str(p["jobId"]),
+            "drivingSeconds": int(p.get("drivingSeconds", 180)),
+            "drivingDistance": int(p.get("drivingDistance", 5000))
+        }
+        if "drivingPath" in p and p["drivingPath"]:
+            pop_dict["drivingPath"] = p["drivingPath"]
+        clean_pops.append(pop_dict)
+        res_by_id[pop_dict["residenceId"]] += pop_dict["size"]
+        jobs_by_id[pop_dict["jobId"]] += pop_dict["size"]
+        pop_ids_by_point[pop_dict["residenceId"]].append(pid)
+        pop_ids_by_point[pop_dict["jobId"]].append(pid)
+
+    synced_points = []
+    for pt in demand_points:
+        pid = pt["id"]
+        r_total = res_by_id[pid]
+        j_total = jobs_by_id[pid]
+        is_sp = bool(pt.get("is_special", False))
+
+        if remove_orphans and r_total == 0 and j_total == 0 and not is_sp:
+            continue
+
+        p_copy = dict(pt)
+        p_copy["residents"] = r_total
+        if is_sp and j_total == 0 and pt.get("jobs", 0) > 0:
+            p_copy["jobs"] = int(pt["jobs"])
+        else:
+            p_copy["jobs"] = j_total
+        p_copy["popIds"] = list(dict.fromkeys(pop_ids_by_point[pid]))
+        synced_points.append(p_copy)
+
+    return synced_points, clean_pops
 
 
 def sanitize_demand_points(demand_points: List[Dict]) -> List[Dict]:

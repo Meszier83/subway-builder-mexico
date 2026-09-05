@@ -63,5 +63,19 @@ Al trabajar en este repositorio, siempre debes seguir estos principios técnicos
 - **Compilación en Disco Nativo ext4:** La compilación de teselas debe ocurrir en la partición nativa de Linux (`~/build_<city>`) y los archivos finales transferirse a `dist/<city>/`, evitando cuellos de botella de I/O en NTFS.
 - **Auto-recuperación y Streaming:** Las llamadas a `wsl.exe` deben manejar auto-recuperación ante errores transitorios (`E_UNEXPECTED` con `wsl --shutdown`) y transmitir la telemetría en vivo línea por línea al Wizard.
 
+### 11. Canon Oficial de Ruteo Vial y Tiempos de Manejo (OSRM vs Runtime)
+- **Primacía del Canon Oficial:** El canon y la arquitectura del motor original de Subway Builder son definitivos y superiores a cualquier heurística propia. Nunca inventar motores de ruteo internos ni curvas sintéticas si existe el estándar documentado por el autor.
+- **Línea Base a Flujo Libre (~40 km/h):** Los valores inyectados en `demand_data.json` (`drivingSeconds`, `drivingDistance`) deben reflejar condiciones de flujo libre promedio (~40 km/h). Está estrictamente prohibido pre-congestionar los tiempos en la generación de datos (ej. reducir a 20–25 km/h), ya que el motor del juego ya aplica en tiempo de ejecución multiplicadores de congestión dinámica (`CONGESTED_DRIVING_MULTIPLIER = 1.33x`), hora pico (`DRIVING_TIMES.HIGH_DEMAND = 1.5x`), búsqueda de estacionamiento (+180s origen / +180s destino) y costos de operación ($0.65/km).
+- **Ruteo Canónico OSRM con `car.lua`:** El enriquecimiento de cohortes (`pops`) debe ejecutarse mediante OSRM (`osrm/osrm-backend:latest`) con perfil estándar de automóvil (`car.lua`) en WSL 2, inyectando `drivingDistance` (metros), `drivingSeconds` (segundos redondeados) y `drivingPath` (geometría GeoJSON completa).
+- **Fórmula Canónica de Respaldo (Colin):** Si un par carece de conectividad vial física (ej. conurbaciones insulares como Isla Mujeres) o el entorno carece de Docker, se debe aplicar exclusivamente la fórmula canónica de respaldo de Colin:
+  $$\text{road\_m} = \max(150,\, \text{round}(\text{distancia\_euclidiana} \times 1.3))$$
+  $$\text{driving\_seconds} = \max\left(45,\, \text{round}\left(\frac{\text{road\_m}}{40 / 3.6}\right)\right)$$
+
+### 12. Arquitectura de Microservicios y Resiliencia en WSL 2 (Keep-Alive, Idle Standby y Fail-Fast)
+- **Supervisor Persistente contra WSL 2 Idle Standby:** Al invocar contenedores o daemons de soporte en WSL 2 desde scripts en Windows, nunca desacoplarlos con `docker run -d` y cerrar el proceso `wsl.exe`. Windows pone en suspensión la máquina virtual WSL 2 si no detecta handles de proceso activos, enviando `SIGTERM (signal 15)` tras ~15–20 segundos. El script debe mantener el handle abierto mediante `subprocess.Popen(["wsl.exe", ...])` durante toda la fase de consultas y terminarlo limpiamente en un bloque `finally`.
+- **Renovación de Sockets Keep-Alive (`max=512`):** El microservicio OSRM limita cada conexión a 512 peticiones (`Keep-Alive: max=512`). Las consultas masivas deben dirigirse a `http://127.0.0.1:5000` (evitando demoras de DNS/IPv6) y utilizar `urllib3.util.Retry(total=2, backoff_factor=0.05)` para renovar sockets de forma transparente.
+- **Fail-Fast ante Caídas de Servicio:** Los bucles de enriquecimiento deben monitorear fallos consecutivos de red. Si se alcanzan 5 errores consecutivos de conexión, el sistema debe abortar inmediatamente las consultas HTTP y aplicar el fallback canónico en memoria al resto de la lista, evitando bloqueos acumulativos de timeout en Windows ($N \times 4.12\text{s}$).
+
+
 
 
