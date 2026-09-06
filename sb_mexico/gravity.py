@@ -13,7 +13,7 @@ import math
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-from typing import List, Dict, Tuple, Optional, Union
+from typing import List, Dict, Tuple, Optional, Union, Any
 from shapely.geometry import Point
 from shapely.strtree import STRtree
 from shapely.ops import nearest_points
@@ -1340,3 +1340,95 @@ def sanitize_demand_points(demand_points: List[Dict]) -> List[Dict]:
             "popIds": list(p.get("popIds", []))
         })
     return clean_points
+
+
+MODAL_PRESETS: Dict[str, Dict[str, Any]] = {
+    "canonical": {
+        "name": "Flujo Libre (Oficial Colin)",
+        "traffic_speed_kmh": 40.0,
+        "motorization_rate": 1.0
+    },
+    "moderate_traffic": {
+        "name": "Tráfico Moderado",
+        "traffic_speed_kmh": 28.0,
+        "motorization_rate": 0.55
+    },
+    "cdmx_peak": {
+        "name": "Megaciudad Saturada",
+        "traffic_speed_kmh": 18.0,
+        "motorization_rate": 0.35
+    },
+    "captive_transit": {
+        "name": "Transporte Cautivo",
+        "traffic_speed_kmh": 24.0,
+        "motorization_rate": 0.20
+    },
+    "custom": {
+        "name": "Personalizado"
+    }
+}
+
+
+def apply_modal_competitiveness_experiment(
+    pops: List[Dict[str, Any]],
+    modal_config: Optional[Dict[str, Any]] = None
+) -> List[Dict[str, Any]]:
+    """
+    Aplica el Laboratorio Experimental de Competitividad Modal (Auto vs. Metro).
+    Transforma drivingSeconds mediante Impedancia Alternativa Ponderada:
+      T_auto = T_base * (40.0 / V_trafico)
+      T_colectivo = T_auto * 2.0 + 300 s
+      drivingSeconds = round(P_auto * T_auto + (1 - P_auto) * T_colectivo)
+
+    Si modal_config es None o enabled es False, retorna pops sin alteración alguna.
+    """
+    if not modal_config or not modal_config.get("enabled", False):
+        return pops
+
+    preset = str(modal_config.get("preset", "custom")).strip().lower()
+    preset_data = MODAL_PRESETS.get(preset, {})
+
+    raw_speed = modal_config.get("traffic_speed_kmh")
+    if raw_speed is None and "traffic_speed_kmh" in preset_data:
+        raw_speed = preset_data["traffic_speed_kmh"]
+    try:
+        traffic_speed_kmh = float(raw_speed if raw_speed is not None else 22.0)
+    except (ValueError, TypeError):
+        traffic_speed_kmh = 22.0
+
+    raw_motor = modal_config.get("motorization_rate")
+    if raw_motor is None and "motorization_rate" in preset_data:
+        raw_motor = preset_data["motorization_rate"]
+    try:
+        motorization_rate = float(raw_motor if raw_motor is not None else 0.40)
+    except (ValueError, TypeError):
+        motorization_rate = 0.40
+
+    # Salvaguardas de rango físico
+    traffic_speed_kmh = max(10.0, min(60.0, traffic_speed_kmh))
+    motorization_rate = max(0.05, min(1.0, motorization_rate))
+
+    # Factor de escala de velocidad automotriz respecto a línea base
+    speed_factor = CANONICAL_SPEED_KMH / traffic_speed_kmh
+    speed_ms = traffic_speed_kmh / 3.6
+
+    for p in pops:
+        base_sec = float(p.get("drivingSeconds", 0))
+        dist_m = float(p.get("drivingDistance", 0))
+
+        if base_sec > 0:
+            t_auto = max(45.0, base_sec * speed_factor)
+        elif dist_m > 0:
+            t_auto = max(45.0, dist_m / speed_ms)
+        else:
+            t_auto = 45.0
+
+        # Fricción de transporte público de superficie (paradas frecuentes + espera)
+        t_colectivo = t_auto * 2.0 + 300.0
+
+        # Impedancia alternativa ponderada
+        t_effective = motorization_rate * t_auto + (1.0 - motorization_rate) * t_colectivo
+        p["drivingSeconds"] = max(45, int(round(t_effective)))
+
+    return pops
+

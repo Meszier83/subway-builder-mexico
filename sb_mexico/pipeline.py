@@ -37,7 +37,8 @@ from sb_mexico.gravity import (
     merge_identical_commutes,
     consolidate_small_pops,
     cluster_demand_points,
-    sync_demand_points_and_pops
+    sync_demand_points_and_pops,
+    apply_modal_competitiveness_experiment
 )
 from sb_mexico.osrm import (
     is_docker_available,
@@ -358,6 +359,12 @@ def execute_pipeline(
         console.print("[yellow]-> roads.geojson no encontrado. La malla de demanda se posicionará en los centroides urbanos sin snapping vial.[/yellow]")
 
     grid_size = city_info.get("grid_size", 0.0025)
+    raw_seed = city_info.get("seed", macro.get("seed", 42))
+    try:
+        seed = int(raw_seed)
+    except (ValueError, TypeError):
+        seed = 42
+
     demand_points, poi_audit = build_demand_grid(
         df_denue=df_denue,
         df_cpv=df_cpv,
@@ -366,7 +373,7 @@ def execute_pipeline(
         grid_size=grid_size,
         min_residents=city_info.get("min_residents", 10),
         min_jobs=city_info.get("min_jobs", 3),
-        seed=city_info.get("seed", 42)
+        seed=seed
     )
 
     console.print(f"-> Nodos de demanda consolidados: [green]{len(demand_points):,}[/green]")
@@ -400,7 +407,7 @@ def execute_pipeline(
         target_pop_size = 180
     max_pop_size = macro.get("max_pop_size", 200)
 
-    console.print(f"-> Escala canónica de cohortes: [cyan]target_pop_size = {target_pop_size} | max_pop_size = {max_pop_size}[/cyan] (PEA Total: {total_pea:,})")
+    console.print(f"-> Escala canónica de cohortes: [cyan]target_pop_size = {target_pop_size} | max_pop_size = {max_pop_size} | seed = {seed}[/cyan] (PEA Total: {total_pea:,})")
 
     raw_pops = simulate_gravity_demand(
         demand_points=demand_points,
@@ -408,7 +415,7 @@ def execute_pipeline(
         max_distance_km=macro.get("max_distance_km", 55.0),
         max_pop_size=max_pop_size,
         target_pop_size=target_pop_size,
-        seed=city_info.get("seed", 42),
+        seed=seed,
         isolated_zones=isolated_zones,
         furness_iterations=macro.get("furness_iterations", 15),
         furness_tol=macro.get("furness_tol", 0.02),
@@ -542,6 +549,22 @@ def execute_pipeline(
                     fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
                     p["drivingDistance"] = fb_dist
                     p["drivingSeconds"] = fb_sec
+
+    # =========================================================================
+    # 5.1. LABORATORIO EXPERIMENTAL: COMPETITIVIDAD MODAL (AUTO VS. METRO)
+    # =========================================================================
+    modal_exp_cfg = macro.get("modal_experiment") or cfg.get("modal_experiment")
+    if modal_exp_cfg and modal_exp_cfg.get("enabled"):
+        preset_name = modal_exp_cfg.get("preset", "custom")
+        apply_modal_competitiveness_experiment(pops, modal_exp_cfg)
+        v_speed = modal_exp_cfg.get("traffic_speed_kmh", 22.0)
+        p_motor = modal_exp_cfg.get("motorization_rate", 0.40)
+        console.print(f"\n[bold magenta]• Laboratorio Experimental de Competitividad Modal Activo:[/bold magenta]")
+        console.print(
+            f"   [magenta]↳ Preset: [bold]{preset_name}[/bold] | "
+            f"Velocidad Tráfico: [bold]{v_speed} km/h[/bold] | "
+            f"Tasa Motorización: [bold]{int(round(float(p_motor)*100))}%[/bold][/magenta]"
+        )
 
     # =========================================================================
     # 6. SANITIZACIÓN NATIVA CON DEPOT Y EXPORTACIÓN

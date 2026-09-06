@@ -138,6 +138,14 @@ def load_city_data(rel_or_abs_path: str) -> Dict[str, Any]:
         data["city"] = {}
     if not isinstance(data.get("macroeconomics"), dict):
         data["macroeconomics"] = {}
+    macro = data["macroeconomics"]
+    if "modal_experiment" not in macro or not isinstance(macro["modal_experiment"], dict):
+        macro["modal_experiment"] = {
+            "enabled": False,
+            "preset": "canonical",
+            "traffic_speed_kmh": 40.0,
+            "motorization_rate": 1.0
+        }
     if not isinstance(data.get("pois"), list):
         data["pois"] = []
     if not isinstance(data.get("places"), list):
@@ -190,6 +198,19 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         "# ==============================================================================",
         "",
         "city:",
+    ]
+
+    seed_val = city_cfg.get("seed")
+    if seed_val is None and macro_cfg.get("seed") is not None:
+        seed_val = macro_cfg.get("seed")
+
+    if seed_val is not None and str(seed_val).strip() != "":
+        try:
+            lines.append(f'  seed: {int(seed_val)}')
+        except (ValueError, TypeError):
+            pass
+
+    lines.extend([
         f'  code: "{city_cfg.get("code", "XXX")}"',
         f'  name: "{city_cfg.get("name", "Nueva Ciudad")}"',
         f'  description: "{city_cfg.get("description", "")}"',
@@ -203,7 +224,7 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         f'  building_simplification: {float(city_cfg.get("building_simplification", 0.2))}',
         f'  include_ocean: {"true" if city_cfg.get("include_ocean") else "false"}',
         ""
-    ]
+    ])
 
     if data_dir_cfg:
         lines.append(f'data_dir: "{data_dir_cfg}"')
@@ -229,6 +250,17 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         f'  furness_tol: {float(macro_cfg.get("furness_tol", 0.02))}',
         ""
     ])
+
+    modal_exp = macro_cfg.get("modal_experiment")
+    if isinstance(modal_exp, dict):
+        is_en = "true" if modal_exp.get("enabled") else "false"
+        lines.append("  # Laboratorio Experimental: Competitividad Modal (Auto vs. Metro)")
+        lines.append("  modal_experiment:")
+        lines.append(f'    enabled: {is_en}')
+        lines.append(f'    preset: "{modal_exp.get("preset", "canonical")}"')
+        lines.append(f'    traffic_speed_kmh: {float(modal_exp.get("traffic_speed_kmh", 22.0))}')
+        lines.append(f'    motorization_rate: {float(modal_exp.get("motorization_rate", 0.40))}')
+        lines.append("")
 
     growth_factors = macro_cfg.get("growth_factors", {})
     if isinstance(growth_factors, dict) and growth_factors:
@@ -333,6 +365,7 @@ def create_new_project(name: str, code: str, creator: str = "Creador", data_dir:
 
     initial_data = {
         "city": {
+            "seed": 42,
             "code": clean_code,
             "name": name.strip(),
             "description": f"Zona Metropolitana de {name.strip()}",
@@ -899,7 +932,8 @@ def detect_macro_parameters(city_file: str) -> Dict[str, Any]:
             "til_1_state": round(float(til_1), 4),
             "gravity_beta": 0.120,
             "max_distance_km": 50.0,
-            "max_pop_size": 150
+            "max_pop_size": 150,
+            "seed": 42
         }
     }
 
@@ -999,6 +1033,15 @@ def validate_city_configuration(city_file: str) -> Dict[str, Any]:
             warnings.append(f"max_distance_km inusual: {max_dist} km. El estándar metropolitano es 40 a 70 km.")
     except Exception:
         errors.append("max_distance_km debe ser un valor numérico.")
+
+    seed_cand = city_cfg.get("seed", macro_cfg.get("seed"))
+    if seed_cand is not None and str(seed_cand).strip() != "":
+        try:
+            s_val = int(seed_cand)
+            if s_val < 0:
+                warnings.append(f"La semilla ('seed: {s_val}') es negativa. Se recomienda usar enteros no negativos.")
+        except Exception:
+            errors.append("La semilla aleatoria ('seed') debe ser un número entero.")
 
     # 3. Validación de Zonas Aisladas (isolated_zones)
     isolated_zones = cdata.get("isolated_zones", city_cfg.get("isolated_zones", []))

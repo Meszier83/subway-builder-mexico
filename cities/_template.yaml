@@ -26,6 +26,15 @@ macroeconomics:
   max_pop_size: 200                   # Tamaño máximo por cohorte de viaje (estándar nativo Subway Builder: 200)
   target_pop_size: 180                # Tamaño objetivo de empaquetado de cohortes (150-200 pax)
 
+  # --- MÓDULO EXPERIMENTAL (Opcional): Competitividad Modal (Auto vs. Metro) ---
+  # Simula congestión vial urbana y usuarios cautivos de transporte colectivo.
+  # Por defecto false para respetar el estándar canónico oficial a flujo libre (40 km/h).
+  modal_experiment:
+    enabled: false                    # true para activar la simulación de tráfico y baja motorización
+    preset: "custom"                  # canonical, moderate_traffic, cdmx_peak, captive_transit, custom
+    traffic_speed_kmh: 22.0           # Velocidad promedio del auto (15 a 45 km/h)
+    motorization_rate: 0.40           # Tasa de hogares con auto (0.15 a 0.85; el resto usa colectivo lento)
+
   # Proyecciones demográficas municipales oficiales (CONAPO / INEGI):
   # Factor = (Población Proyectada CONAPO Año Actual / Población Censo CPV 2020)
   # Claves en formato EEMMM (Entidad 2 dígitos + Municipio 3 dígitos)

@@ -69,6 +69,31 @@ class TestWizard(unittest.TestCase):
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
+    def test_save_full_city_data_preserves_seed(self):
+        tmp_path = os.path.join(os.path.dirname(__file__), "tmp_test_seed_city.yaml")
+        saved_path = None
+        try:
+            city_dict = {
+                "city": {
+                    "code": "TEST",
+                    "name": "Ciudad Test",
+                    "seed": 837123921,
+                    "bbox": [-87.0, 21.0, -86.7, 21.3]
+                },
+                "macroeconomics": {}
+            }
+            saved_path = save_full_city_data(tmp_path, city_dict)
+            with open(saved_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            self.assertIn("seed: 837123921", content)
+            reloaded = load_city_data(saved_path)
+            self.assertEqual(reloaded["city"]["seed"], 837123921)
+        finally:
+            if saved_path and os.path.exists(saved_path):
+                os.remove(saved_path)
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
     def test_inspect_data_files_cancun(self):
         report = inspect_data_files(city_name="Cancun", city_code="CUN", city_file="cities/cancun.yaml")
         self.assertIn("denue", report)
