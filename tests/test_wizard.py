@@ -402,17 +402,38 @@ class TestWizard(unittest.TestCase):
                 os.remove(tmp_city)
 
     def test_detect_macro_parameters(self):
-        """Verifica la detección y restablecimiento de parámetros macroeconómicos oficiales."""
+        """Verifica la detección y restablecimiento de parámetros macroeconómicos oficiales (niveles 1, 2 y 4)."""
         from tools.wizard import detect_macro_parameters
-        res = detect_macro_parameters("cities/cancun.yaml")
-        self.assertEqual(res["status"], "ok")
-        self.assertIn("parameters", res)
-        p = res["parameters"]
-        self.assertAlmostEqual(p["tasa_pea"], 0.62, places=2)
-        self.assertAlmostEqual(p["til_1_state"], 0.45, places=2)
-        self.assertAlmostEqual(p["gravity_beta"], 0.120, places=3)
-        self.assertEqual(p["max_distance_km"], 50.0)
-        self.assertEqual(p["max_pop_size"], 150)
+        # Nivel 2: Cancún (sin archivo ENOE -> Censo CPV + Catálogo Estatal QRoo)
+        res_cun = detect_macro_parameters("cities/cancun.yaml")
+        self.assertEqual(res_cun["status"], "ok")
+        self.assertEqual(res_cun["method"], "census_hybrid")
+        self.assertEqual(res_cun["cve_ent"], "23")
+        self.assertIn("parameters", res_cun)
+        p_cun = res_cun["parameters"]
+        self.assertGreater(p_cun["tasa_pea"], 0.65)
+        self.assertAlmostEqual(p_cun["til_1_state"], 0.455, places=2)
+        self.assertAlmostEqual(p_cun["gravity_beta"], 0.120, places=3)
+        self.assertEqual(p_cun["max_distance_km"], 50.0)
+        self.assertEqual(p_cun["max_pop_size"], 150)
+
+        # Nivel 1: Mérida (con archivo ENOE real en data/merida)
+        if os.path.exists("cities/merida.yaml"):
+            res_mid = detect_macro_parameters("cities/merida.yaml")
+            self.assertEqual(res_mid["status"], "ok")
+            self.assertEqual(res_mid["method"], "enoe_file")
+            self.assertTrue(res_mid["has_enoe_file"])
+            p_mid = res_mid["parameters"]
+            self.assertAlmostEqual(p_mid["tasa_pea"], 0.6414, places=3)
+            self.assertAlmostEqual(p_mid["til_1_state"], 0.5914, places=3)
+
+        # Nivel 4: Proyecto inexistente sin archivos (fallback puro)
+        res_dummy = detect_macro_parameters("cities/no_existe.yaml")
+        self.assertEqual(res_dummy["status"], "ok")
+        self.assertEqual(res_dummy["method"], "default")
+        p_dummy = res_dummy["parameters"]
+        self.assertEqual(p_dummy["tasa_pea"], 0.62)
+        self.assertEqual(p_dummy["til_1_state"], 0.45)
 
 if __name__ == '__main__':
     unittest.main()

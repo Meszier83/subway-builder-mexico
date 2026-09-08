@@ -556,7 +556,7 @@
             <input type="file" id="manualFileInput" multiple class="hidden" onchange="handleFileSelect(event)">
             <i data-lucide="file-up" class="w-12 h-12 text-metro-pink mb-3"></i>
             <span class="text-sm font-bold text-stone-900 mb-1">Arrastra archivos aquí o haz clic para examinar</span>
-            <span class="text-xs text-stone-500 text-center max-w-sm">Formatos soportados: .csv, .zip, .osm.pbf, .geojson</span>
+            <span class="text-xs text-stone-500 text-center max-w-sm">Formatos soportados: .csv, .xls, .xlsx, .zip, .osm.pbf, .geojson</span>
           </div>
 
           <!-- Barra de Progreso de Subida -->
@@ -586,18 +586,30 @@
     <!-- --------------------------------------------------------------------- -->
     <section id="stepView-3" class="step-view hidden absolute inset-0 p-6 flex flex-col md:flex-row gap-6 overflow-y-auto w-full h-full">
       <div class="w-full md:w-1/2 bg-metro-card border border-metro-border rounded-xl p-5 shadow-xl flex flex-col space-y-4">
-        <div class="border-b border-metro-border pb-3 flex justify-between items-center">
+        <div class="border-b border-metro-border pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
             <h2 class="text-base font-bold text-stone-900 flex items-center space-x-2">
               <i data-lucide="sliders" class="w-5 h-5 text-metro-orange"></i>
               <span>Parámetros Macroeconómicos (ENOE / Gravitatorio)</span>
             </h2>
-            <p class="text-xs text-stone-600 mt-1">Calibra las tasas de empleo, informalidad y alcance de los viajes metropolitanos.</p>
+            <div class="flex items-center space-x-2 mt-1">
+              <p class="text-xs text-stone-600">Calibra las tasas de empleo, informalidad y alcance de los viajes metropolitanos.</p>
+            </div>
+            <div id="macroSourceIndicator" class="hidden mt-1.5 inline-flex items-center space-x-1.5 text-[11px] font-mono font-medium px-2 py-0.5 rounded-md bg-stone-100 border border-stone-200 text-stone-700">
+              <i data-lucide="info" class="w-3 h-3 text-stone-500"></i>
+              <span id="macroSourceText"></span>
+            </div>
           </div>
-          <button onclick="resetMacroeconomicParameters()" id="btnResetMacro" class="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold rounded-lg flex items-center space-x-1.5 transition shadow-xs" title="Restablecer o auto-detectar según la ENOE de INEGI">
-            <i data-lucide="rotate-ccw" class="w-3.5 h-3.5 text-amber-700"></i>
-            <span>Restablecer Oficiales</span>
-          </button>
+          <div class="flex items-center space-x-2 shrink-0">
+            <a href="https://www.inegi.org.mx/programas/enoe/15ymas/#tabulados" target="_blank" class="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 border border-stone-300 text-stone-700 hover:text-stone-900 text-xs font-bold rounded-lg flex items-center space-x-1 transition shadow-xs" title="Descargar tabulados oficiales de la ENOE en INEGI">
+              <span>Descargar ENOE</span>
+              <i data-lucide="external-link" class="w-3 h-3"></i>
+            </a>
+            <button onclick="resetMacroeconomicParameters()" id="btnResetMacro" class="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold rounded-lg flex items-center space-x-1.5 transition shadow-xs" title="Restablecer o auto-detectar según la ENOE de INEGI o Censo CPV">
+              <i data-lucide="rotate-ccw" class="w-3.5 h-3.5 text-amber-700"></i>
+              <span>Restablecer Oficiales</span>
+            </button>
+          </div>
         </div>
 
         <div class="space-y-4 text-xs">
@@ -982,12 +994,29 @@
           </div>
 
           <!-- Radio de Captura -->
-          <div class="space-y-1.5">
+          <div class="space-y-1.5 bg-stone-50 p-2.5 rounded-lg border border-stone-200">
             <div class="flex justify-between items-center">
-              <label class="text-[10px] font-bold uppercase tracking-wider text-stone-500">Radio de Absorción DENUE</label>
-              <span id="editPoiRadiusDisplay" class="font-mono text-xs font-bold text-stone-900">750 m</span>
+              <label for="editPoiRadiusNum" class="text-[10px] font-bold uppercase tracking-wider text-stone-600 flex items-center space-x-1">
+                <i data-lucide="disc" class="w-3 h-3 text-metro-orange"></i>
+                <span>Radio de Absorción DENUE</span>
+              </label>
+              <div class="flex items-center space-x-1">
+                <input type="number" id="editPoiRadiusNum" min="50" max="5000" step="50" value="750"
+                  oninput="onPoiRadiusNumberInput(this.value)"
+                  class="w-20 font-mono text-xs font-bold text-right bg-white border border-stone-300 rounded px-1.5 py-0.5 text-stone-900 focus:border-metro-orange focus:outline-none">
+                <span class="text-xs font-mono font-bold text-stone-500">m</span>
+              </div>
             </div>
-            <input type="range" id="editPoiRadius" min="100" max="3000" step="50" value="750" oninput="onPoiRadiusSliderChanged(this.value)" class="w-full accent-metro-orange h-1.5 bg-stone-200 rounded-lg cursor-pointer">
+            <div class="flex items-center space-x-2 pt-0.5">
+              <span class="text-[10px] font-mono text-stone-500 shrink-0">100m</span>
+              <input type="range" id="editPoiRadius" min="100" max="4000" step="50" value="750"
+                oninput="onPoiRadiusSlider(this.value)"
+                class="w-full accent-metro-orange h-1.5 bg-stone-200 rounded-lg cursor-pointer">
+              <span class="text-[10px] font-mono text-stone-500 shrink-0">4000m</span>
+            </div>
+            <p class="text-[9px] text-stone-500 leading-tight">
+              Área de consolidación: los comercios DENUE en el radio se concentran en este POI y se retiran de la cuadrícula circundante.
+            </p>
           </div>
 
           <div class="grid grid-cols-2 gap-2">
@@ -1023,19 +1052,19 @@
             <!-- Mini Contadores en Grid 2x2 -->
             <div class="grid grid-cols-2 gap-2 text-xs font-mono">
               <div class="bg-white p-2 rounded-lg border border-stone-200">
-                <span class="text-[10px] text-stone-500 uppercase font-sans block">Empleos DENUE</span>
-                <strong id="statAbsorbedJobs" class="text-sm text-stone-900">0</strong>
+                <span class="text-[10px] text-stone-500 uppercase font-sans block truncate" title="Empleos de negocios DENUE absorbidos hacia el POI">Empleos DENUE</span>
+                <strong id="statAbsorbedJobs" class="text-sm text-blue-700 font-bold">0</strong>
               </div>
               <div class="bg-white p-2 rounded-lg border border-stone-200">
-                <span class="text-[10px] text-stone-500 uppercase font-sans block">Población Censal</span>
-                <strong id="statAbsorbedPop" class="text-sm text-stone-900">0</strong>
+                <span class="text-[10px] text-stone-500 uppercase font-sans block truncate" title="Población censal residencial en el entorno (referencial; los POIs NO absorben población, solo son destinos de viaje)">Pob. Entorno (Censo)</span>
+                <strong id="statAbsorbedPop" class="text-sm text-stone-700">0</strong>
               </div>
               <div class="bg-white p-2 rounded-lg border border-stone-200">
-                <span class="text-[10px] text-stone-500 uppercase font-sans block">Nodos en Radio</span>
+                <span class="text-[10px] text-stone-500 uppercase font-sans block truncate" title="Celdas de la cuadrícula urbana dentro del radio de absorción">Celdas en Radio</span>
                 <strong id="statAbsorbedNodes" class="text-sm text-stone-900">0</strong>
               </div>
               <div class="bg-white p-2 rounded-lg border border-stone-200">
-                <span class="text-[10px] text-stone-500 uppercase font-sans block">Empleos Finales</span>
+                <span class="text-[10px] text-stone-500 uppercase font-sans block truncate" title="Empleos finales inyectados en demand_data.json tras aplicar el modo">Empleos Finales</span>
                 <strong id="statFinalJobs" class="text-sm text-emerald-800 font-bold">0</strong>
               </div>
             </div>
@@ -1473,6 +1502,18 @@
           </div>
           <p class="text-stone-700">Extracto OSM para toda la República Mexicana.</p>
           <p class="text-stone-500 font-mono text-[11px]">Archivo esperado: <code>mexico-latest.osm.pbf</code>.</p>
+        </div>
+
+        <!-- 6. ENOE -->
+        <div class="bg-stone-50 p-3.5 rounded-xl border border-stone-200 space-y-1">
+          <div class="flex justify-between items-center">
+            <span class="font-bold text-metro-orange">6. Indicadores Estratégicos ENOE (INEGI)</span>
+            <a href="https://www.inegi.org.mx/programas/enoe/15ymas/#tabulados" target="_blank" class="text-[11px] bg-orange-100 text-orange-800 hover:bg-orange-200 px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
+              <span>Abrir ENOE Tabulados</span> <i data-lucide="external-link" class="w-3 h-3"></i>
+            </a>
+          </div>
+          <p class="text-stone-700">Tabulados trimestrales de indicadores estratégicos por entidad federativa (Tasa PEA e Informalidad TIL1).</p>
+          <p class="text-stone-500 font-mono text-[11px]">Archivos soportados: <code>*trim*.csv</code>, <code>*enoe*.csv</code> o <code>*trim*.xls</code>.</p>
         </div>
 
         <!-- Zonas Metropolitanas Multi-Estado -->
@@ -3084,6 +3125,7 @@
           { key: 'cpv', label: 'Censo CPV 2020 (Manzanas RESAGEBURB)', icon: 'users', desc: '*RESAGEBURB*.csv' },
           { key: 'ce2024', label: 'Censos Económicos 2024 / H001A', icon: 'file-text', desc: '*SAIC*.csv o *tr_ce*.csv' },
           { key: 'conapo', label: 'Proyecciones Demográficas CONAPO', icon: 'trending-up', desc: '*pobproy*.csv, *conapo*.csv o data-*.csv' },
+          { key: 'enoe', label: 'ENOE (Indicadores Laborales e Informalidad)', icon: 'activity', desc: '*trim*.csv, *enoe*.csv o *trim*.xls', optional: true },
           { key: 'osm', label: 'Red Vial OpenStreetMap (PBF / GeoJSON)', icon: 'map-pin', desc: '*.osm.pbf o roads.geojson' }
         ];
 
@@ -3141,9 +3183,9 @@
                 </div>
               </div>
               <span class="px-2.5 py-1 rounded text-[10px] font-bold font-mono shrink-0 ${
-                isOk ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' : 'bg-stone-100 text-stone-600 border border-stone-300'
+                isOk ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' : (s.optional ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-stone-100 text-stone-600 border border-stone-300')
               }">
-                ${isOk ? (count > 1 ? `${count} ARCHIVOS &check;` : 'DETECTADO &check;') : 'PENDIENTE'}
+                ${isOk ? (count > 1 ? `${count} ARCHIVOS &check;` : 'DETECTADO &check;') : (s.optional ? 'OPCIONAL (INFERIDO)' : 'PENDIENTE')}
               </span>
             </div>
             ${filesDetailHtml}
@@ -3272,8 +3314,15 @@
             if (seedInput) seedInput.value = p.seed;
           }
 
+          const ind = document.getElementById('macroSourceIndicator');
+          const txt = document.getElementById('macroSourceText');
+          if (ind && txt && data.source) {
+            ind.classList.remove('hidden');
+            txt.innerText = data.source;
+          }
+
           triggerAutoSave();
-          showToast(`Parámetros macroeconómicos restablecidos: ${data.source}`, "success");
+          showToast(`Parámetros macroeconómicos: ${data.source}`, data.method === 'enoe_file' ? "success" : "info");
         } else {
           showToast("No se pudieron obtener parámetros oficiales", "error");
         }
@@ -3848,8 +3897,7 @@
       document.getElementById('editPoiNameEs').value = "";
       document.getElementById('editPoiNameEn').value = "";
       document.getElementById('editPoiJobs').value = 25000;
-      document.getElementById('editPoiRadius').value = 2500;
-      document.getElementById('editPoiRadiusDisplay').innerText = "2500 m";
+      setPoiRadiusValue(2500);
       document.getElementById('editPoiMode').value = "MAX";
       document.getElementById('btnDeleteEditorPoi').classList.add('hidden');
 
@@ -3891,8 +3939,7 @@
       document.getElementById('editPoiNameEs').value = typeof poi.name === 'object' ? (poi.name.es || "") : "";
       document.getElementById('editPoiNameEn').value = typeof poi.name === 'object' ? (poi.name.en || "") : "";
       document.getElementById('editPoiJobs').value = poi.jobs || 5000;
-      document.getElementById('editPoiRadius').value = poi.radius_m || 750;
-      document.getElementById('editPoiRadiusDisplay').innerText = `${poi.radius_m || 750} m`;
+      setPoiRadiusValue(poi.radius_m || 750);
       document.getElementById('editPoiMode').value = poi.mode || "MAX";
       document.getElementById('editPoiLon').value = poi.loc ? poi.loc[0].toFixed(5) : 0;
       document.getElementById('editPoiLat').value = poi.loc ? poi.loc[1].toFixed(5) : 0;
@@ -3925,8 +3972,7 @@
       }
 
       if (meta.defaultRadius) {
-        document.getElementById('editPoiRadius').value = meta.defaultRadius;
-        document.getElementById('editPoiRadiusDisplay').innerText = `${meta.defaultRadius} m`;
+        setPoiRadiusValue(meta.defaultRadius);
       }
       if (meta.defaultJobs) {
         document.getElementById('editPoiJobs').value = meta.defaultJobs;
@@ -3987,15 +4033,45 @@
       updatePoiPreviewFromForm();
     }
 
-    function onPoiRadiusSlider(val) {
-      document.getElementById('editPoiRadiusDisplay').innerText = `${val} m`;
+    function setPoiRadiusValue(val, sourceInput) {
+      let numVal = parseInt(val);
+      if (isNaN(numVal) || numVal < 50) numVal = 50;
+      if (numVal > 10000) numVal = 10000;
+
+      const sliderEl = document.getElementById('editPoiRadius');
+      const numEl = document.getElementById('editPoiRadiusNum');
+      const displayEl = document.getElementById('editPoiRadiusDisplay');
+
+      if (sliderEl && sourceInput !== 'slider') {
+        sliderEl.value = Math.min(4000, Math.max(100, numVal));
+      }
+      if (numEl && sourceInput !== 'number') {
+        numEl.value = numVal;
+      }
+      if (displayEl) {
+        displayEl.innerText = `${numVal} m`;
+      }
+
       updatePoiPreviewFromForm();
+    }
+
+    function onPoiRadiusSlider(val) {
+      setPoiRadiusValue(val, 'slider');
+    }
+
+    // Compatibilidad retroactiva para cualquier evento enlazado
+    function onPoiRadiusSliderChanged(val) {
+      setPoiRadiusValue(val, 'slider');
+    }
+
+    function onPoiRadiusNumberInput(val) {
+      setPoiRadiusValue(val, 'number');
     }
 
     function updatePoiPreviewFromForm() {
       const lon = parseFloat(document.getElementById('editPoiLon').value);
       const lat = parseFloat(document.getElementById('editPoiLat').value);
-      const radius = parseInt(document.getElementById('editPoiRadius').value) || 750;
+      const radius = parseInt(document.getElementById('editPoiRadiusNum')?.value || document.getElementById('editPoiRadius').value) || 750;
       const jobsManual = parseInt(document.getElementById('editPoiJobs').value) || 0;
       const mode = document.getElementById('editPoiMode').value;
       const cat = document.getElementById('editPoiCategory').value;
@@ -4044,19 +4120,21 @@
       let finalJobs = jobsManual;
       let diagnosis = "";
 
-      if (mode === "MAX") {
+      if (!densityPoints || densityPoints.length === 0) {
+        diagnosis = "⚠️ Sin datos DENUE precargados en memoria. Si aún no descargas datos en el Paso 2, la absorción real se calculará al compilar con los datos de data/.";
+      } else if (mode === "MAX") {
         finalJobs = Math.max(jobsManual, absorbedJobs);
         if (absorbedJobs >= jobsManual && jobsManual > 0) {
           diagnosis = `Piso DENUE alcanzado: los ${absorbedJobs.toLocaleString()} empleos locales superan la cuota manual de ${jobsManual.toLocaleString()}.`;
         } else {
-          diagnosis = `Cuota manual fijada (${jobsManual.toLocaleString()} empleos): absorbe ${absorbedJobs.toLocaleString()} locales del DENUE e inyecta ${(jobsManual - absorbedJobs).toLocaleString()} exógenos.`;
+          diagnosis = `Cuota manual fijada (${jobsManual.toLocaleString()} empleos): absorbe y consolida ${absorbedJobs.toLocaleString()} locales del DENUE e inyecta ${(jobsManual - absorbedJobs).toLocaleString()} exógenos.`;
         }
       } else if (mode === "BOOST") {
         finalJobs = jobsManual + absorbedJobs;
-        diagnosis = `Suma exógena: +${absorbedJobs.toLocaleString()} empleos DENUE sumados sobre la cuota base de ${jobsManual.toLocaleString()}.`;
+        diagnosis = `Suma exógena: +${absorbedJobs.toLocaleString()} empleos DENUE sumados sobre la cuota base de ${jobsManual.toLocaleString()} (Total: ${finalJobs.toLocaleString()}).`;
       } else if (mode === "REPLACE") {
         finalJobs = jobsManual;
-        diagnosis = `Sobrescritura forzada: cuota fija de ${jobsManual.toLocaleString()} empleos (reemplaza el DENUE local).`;
+        diagnosis = `Sobrescritura forzada: cuota fija de ${jobsManual.toLocaleString()} empleos (sustituye y retira ${absorbedJobs.toLocaleString()} empleos DENUE locales).`;
       }
 
       const elAbsJobs = document.getElementById('statAbsorbedJobs');
@@ -4185,7 +4263,7 @@
       const enName = document.getElementById('editPoiNameEn').value.trim();
       const pMode = document.getElementById('editPoiMode').value;
       const pJobs = parseInt(document.getElementById('editPoiJobs').value) || 5000;
-      const pRad = parseInt(document.getElementById('editPoiRadius').value) || 750;
+      const pRad = parseInt(document.getElementById('editPoiRadiusNum')?.value || document.getElementById('editPoiRadius')?.value) || 750;
       const lon = parseFloat(document.getElementById('editPoiLon').value);
       const lat = parseFloat(document.getElementById('editPoiLat').value);
 
@@ -4851,8 +4929,7 @@
       document.getElementById('editPoiNameEs').value = "Cluster Comercial";
       document.getElementById('editPoiLon').value = center.lng.toFixed(5);
       document.getElementById('editPoiLat').value = center.lat.toFixed(5);
-      document.getElementById('editPoiRadius').value = suggestedRadius;
-      document.getElementById('editPoiRadiusDisplay').innerText = `${suggestedRadius} m`;
+      setPoiRadiusValue(suggestedRadius);
       document.getElementById('editPoiJobs').value = suggestedJobs;
 
       clearAreaSelection();

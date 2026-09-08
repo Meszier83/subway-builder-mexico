@@ -590,7 +590,11 @@ def inspect_data_files(city_name: str = "", city_code: str = "", city_file: str 
     cpv = find_files(["*RESAGEBURB*.csv", "*resageburb*.csv", "*censo*.csv", "*cpv*.csv"])
     ce2024 = find_files(["*SAIC*.csv", "*saic*.csv", "*exporta*.csv", "*tr_ce*.csv", "*ce2024*.csv", "*ce_2024*.csv", "*ce*.csv"])
     conapo = find_files(["*pobproy*.csv", "*quinq*.csv", "*pob_proy*.csv", "*conapo*.csv", "data-*.csv", "*proyeccion*.csv"])
-    enoe = find_files(["*enoe*.csv", "*ENOE*.csv", "*trim*.csv", "*2024_trim*.csv", "*2025_trim*.csv", "*2026_trim*.csv"])
+    enoe = find_files([
+        "*enoe*.csv", "*ENOE*.csv", "*trim*.csv", "*2024_trim*.csv", "*2025_trim*.csv", "*2026_trim*.csv",
+        "*enoe*.xls", "*ENOE*.xls", "*trim*.xls", "*2024_trim*.xls", "*2025_trim*.xls", "*2026_trim*.xls",
+        "*enoe*.xlsx", "*ENOE*.xlsx", "*trim*.xlsx"
+    ])
 
     # Para OSM: buscar en la carpeta del proyecto, y solo si falta, verificar extracto nacional en data/
     osm = find_files(["*.osm.pbf", "*.osm", "roads.geojson"])
@@ -882,10 +886,14 @@ def calculate_conapo_factors(city_file: str) -> Dict[str, Any]:
 def detect_macro_parameters(city_file: str) -> Dict[str, Any]:
     """
     Detecta o restablece los parámetros macroeconómicos oficiales (ENOE / Modelo Gravitatorio):
-    1. Si existe un archivo ENOE en la carpeta del proyecto, extrae Tasa PEA y TIL1 reales.
-    2. Si no existe, provee los valores estándar oficiales del modelo para la entidad (62.0% PEA, 45.0% TIL1, etc.).
+    1. Nivel 1: Si existe archivo ENOE (CSV o XLS/XLSX) en la carpeta del proyecto, extrae Tasa PEA y TIL1 reales.
+    2. Nivel 2: Si no hay ENOE pero existe Censo CPV (RESAGEBURB), calcula la Tasa PEA real de los municipios
+       del BBOX y consulta la TIL1 en el catálogo oficial estatal de INEGI (2024).
+    3. Nivel 3: Si se identifica la entidad, usa las referencias oficiales estatales de la ENOE.
+    4. Nivel 4: Valores estándar de respaldo (0.62 PEA, 0.45 TIL1).
     """
     target_dir = None
+    cdata = {}
     if city_file:
         try:
             cdata = load_city_data(city_file)
@@ -901,31 +909,110 @@ def detect_macro_parameters(city_file: str) -> Dict[str, Any]:
             pass
 
     enoe_files = []
+    cpv_files = []
     if target_dir and os.path.exists(target_dir):
         enoe_candidates = (
             glob.glob(os.path.join(target_dir, "*enoe*.csv")) +
             glob.glob(os.path.join(target_dir, "*ENOE*.csv")) +
-            glob.glob(os.path.join(target_dir, "*trim*.csv"))
+            glob.glob(os.path.join(target_dir, "*trim*.csv")) +
+            glob.glob(os.path.join(target_dir, "*enoe*.xls")) +
+            glob.glob(os.path.join(target_dir, "*ENOE*.xls")) +
+            glob.glob(os.path.join(target_dir, "*trim*.xls")) +
+            glob.glob(os.path.join(target_dir, "*enoe*.xlsx")) +
+            glob.glob(os.path.join(target_dir, "*trim*.xlsx"))
         )
         enoe_files = sorted(list(dict.fromkeys(os.path.normpath(f) for f in enoe_candidates if os.path.isfile(f))))
 
-    tasa_pea = 0.62
-    til_1 = 0.45
-    source_msg = "Valores estándar oficiales (ENOE Estatal / INEGI)"
+        cpv_candidates = (
+            glob.glob(os.path.join(target_dir, "*RESAGEBURB*.csv")) +
+            glob.glob(os.path.join(target_dir, "*resageburb*.csv")) +
+            glob.glob(os.path.join(target_dir, "*censo*.csv"))
+        )
+        cpv_files = sorted(list(dict.fromkeys(os.path.normpath(f) for f in cpv_candidates if os.path.isfile(f))))
 
+    # Identificar claves municipales del proyecto si existen
+    target_muns = []
+    cve_ent = None
+    growth_factors = cdata.get("macroeconomics", {}).get("growth_factors", {})
+    if not growth_factors:
+        growth_factors = cdata.get("growth_factors", {})
+    if growth_factors:
+        target_muns = [str(k).strip() for k in growth_factors.keys()]
+        for m in target_muns:
+            if len(m) == 5 and m[:2].isdigit():
+                cve_ent = m[:2]
+                break
+
+    # Si cve_ent aún no se detecta, inferir por nombres de archivo en target_dir
+    if not cve_ent and target_dir and os.path.exists(target_dir):
+        for f in os.listdir(target_dir):
+            m = re.search(r'(?:RESAGEBURB_|denue_inegi_)(\d{2})', f)
+            if m:
+                cve_ent = m.group(1)
+                break
+
+    from sb_mexico.inegi import parse_enoe_indicators, calculate_cpv_pea_rate, STATE_MACRO_BENCHMARKS
+
+    tasa_pea = None
+    til_1 = None
+    source_msg = ""
+    method = "default"
+
+    # Nivel 1: Archivo ENOE en la carpeta
     if enoe_files:
         try:
-            from sb_mexico.inegi import parse_enoe_indicators
             enoe_res = parse_enoe_indicators(enoe_files[0])
-            tasa_pea = enoe_res.get("tasa_pea", 0.62)
-            til_1 = enoe_res.get("til_1", 0.45)
-            source_msg = f"Detectado automáticamente desde archivo ENOE ({os.path.basename(enoe_files[0])})"
+            tasa_pea = enoe_res.get("tasa_pea")
+            til_1 = enoe_res.get("til_1")
+            fn = os.path.basename(enoe_files[0])
+            source_msg = f"Detectado automáticamente desde archivo ENOE ({fn})"
+            method = "enoe_file"
         except Exception as e:
-            source_msg = f"Error al parsear ENOE ({e}), usando referencia oficial INEGI"
+            source_msg = f"Error al parsear ENOE ({e})"
+
+    # Nivel 2: Inferencia híbrida Censo CPV (PEA) + Catálogo Estatal (TIL1)
+    if tasa_pea is None and cpv_files:
+        try:
+            pea_cpv = calculate_cpv_pea_rate(cpv_files[0], target_cve_muns=target_muns)
+            if pea_cpv is not None:
+                tasa_pea = pea_cpv
+                state_info = STATE_MACRO_BENCHMARKS.get(cve_ent or "")
+                if state_info and til_1 is None:
+                    til_1 = state_info["til_1"]
+                    source_msg = f"Calculado desde Censo CPV 2020 (PEA: {tasa_pea:.2%}) y catálogo oficial de {state_info['nombre']} (TIL1: {til_1:.2%})"
+                    method = "census_hybrid"
+                else:
+                    source_msg = f"Calculado desde Censo CPV 2020 (PEA: {tasa_pea:.2%})"
+                    method = "census_pea"
+        except Exception:
+            pass
+
+    # Nivel 3: Catálogo Estatal de referencia si falta TIL1 o PEA
+    state_info = STATE_MACRO_BENCHMARKS.get(cve_ent or "")
+    if state_info:
+        if tasa_pea is None:
+            tasa_pea = state_info["tasa_pea"]
+        if til_1 is None:
+            til_1 = state_info["til_1"]
+        if not source_msg:
+            source_msg = f"Referencia oficial ENOE estatal para {state_info['nombre']} (cve {cve_ent})"
+            method = "state_benchmark"
+    elif til_1 is None:
+        til_1 = 0.45
+
+    if tasa_pea is None:
+        tasa_pea = 0.62
+    if til_1 is None:
+        til_1 = 0.45
+    if not source_msg:
+        source_msg = "Valores estándar de referencia base (sin archivos locales)"
+        method = "default"
 
     return {
         "status": "ok",
         "source": source_msg,
+        "method": method,
+        "cve_ent": cve_ent,
         "has_enoe_file": bool(enoe_files),
         "parameters": {
             "tasa_pea": round(float(tasa_pea), 4),

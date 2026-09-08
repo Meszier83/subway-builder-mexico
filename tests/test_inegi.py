@@ -6,7 +6,9 @@ from sb_mexico.inegi import (
     format_cve_mun,
     parse_enoe_indicators,
     calibrate_denue_employment,
-    load_cpv_demography
+    load_cpv_demography,
+    calculate_cpv_pea_rate,
+    STATE_MACRO_BENCHMARKS
 )
 
 class TestInegi(unittest.TestCase):
@@ -130,5 +132,53 @@ class TestInegi(unittest.TestCase):
         finally:
             os.remove(tmp_name)
 
+    def test_parse_enoe_indicators_latin1(self):
+        with tempfile.NamedTemporaryFile(mode='wb', suffix='.csv', delete=False) as f:
+            # Archivo codificado en latin-1 con acento en participación
+            content = '"Indicador","2024-T1"\n"Tasa de participaci\xf3n","64,14"\n"Tasa de informalidad laboral 1 (TIL1)","59,14"\n'
+            f.write(content.encode('latin1'))
+            tmp_name = f.name
+        try:
+            data = parse_enoe_indicators(tmp_name)
+            self.assertAlmostEqual(data["tasa_pea"], 0.6414, places=4)
+            self.assertAlmostEqual(data["til_1"], 0.5914, places=4)
+        finally:
+            os.remove(tmp_name)
+
+    def test_calculate_cpv_pea_rate(self):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as f:
+            f.write('ENTIDAD,NOM_ENT,MUN,NOM_MUN,LOC,NOM_LOC,AGEB,MZA,POBTOT,P_15YMAS,PEA\n')
+            f.write('31,Yucatán,000,Total de la entidad,0000,Total,0000,000,200000,100000,65000\n')
+            f.write('31,Yucatán,050,Mérida,0000,Total del municipio,0000,000,100000,80000,56000\n')
+            f.write('31,Yucatán,041,Kanasín,0000,Total del municipio,0000,000,50000,20000,14000\n')
+            tmp_name = f.name
+        try:
+            # Mérida solo (56000 / 80000 = 0.70)
+            rate_mid = calculate_cpv_pea_rate(tmp_name, ['31050'])
+            self.assertAlmostEqual(rate_mid, 0.70, places=4)
+
+            # Zona metropolitana Mérida + Kanasín: (56000 + 14000) / (80000 + 20000) = 70000 / 100000 = 0.70
+            rate_metro = calculate_cpv_pea_rate(tmp_name, ['31050', '31041'])
+            self.assertAlmostEqual(rate_metro, 0.70, places=4)
+
+            # Todo el estado
+            rate_all = calculate_cpv_pea_rate(tmp_name)
+            self.assertAlmostEqual(rate_all, 0.70, places=4)
+        finally:
+            os.remove(tmp_name)
+
+    def test_state_macro_benchmarks_coverage(self):
+        self.assertEqual(len(STATE_MACRO_BENCHMARKS), 32)
+        for i in range(1, 33):
+            cve = f"{i:02d}"
+            self.assertIn(cve, STATE_MACRO_BENCHMARKS)
+            bm = STATE_MACRO_BENCHMARKS[cve]
+            self.assertIn("nombre", bm)
+            self.assertGreater(bm["tasa_pea"], 0.40)
+            self.assertLess(bm["tasa_pea"], 0.85)
+            self.assertGreater(bm["til_1"], 0.20)
+            self.assertLess(bm["til_1"], 0.90)
+
 if __name__ == "__main__":
     unittest.main()
+

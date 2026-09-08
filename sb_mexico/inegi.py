@@ -11,7 +11,7 @@ import glob
 import math
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Tuple, Optional, Union
+from typing import Dict, List, Tuple, Optional, Union, Any
 
 # Estratos de personal ocupado en el DENUE y sus medias geométricas
 DENUE_ESTRATOS = {
@@ -75,11 +75,47 @@ def format_cve_mun(cve_mun_raw, cve_ent_raw=None) -> str:
         return "-1"
 
 
+STATE_MACRO_BENCHMARKS: Dict[str, Dict[str, Any]] = {
+    "01": {"nombre": "Aguascalientes", "tasa_pea": 0.628, "til_1": 0.395},
+    "02": {"nombre": "Baja California", "tasa_pea": 0.645, "til_1": 0.375},
+    "03": {"nombre": "Baja California Sur", "tasa_pea": 0.682, "til_1": 0.380},
+    "04": {"nombre": "Campeche", "tasa_pea": 0.625, "til_1": 0.620},
+    "05": {"nombre": "Coahuila", "tasa_pea": 0.620, "til_1": 0.355},
+    "06": {"nombre": "Colima", "tasa_pea": 0.665, "til_1": 0.505},
+    "07": {"nombre": "Chiapas", "tasa_pea": 0.565, "til_1": 0.765},
+    "08": {"nombre": "Chihuahua", "tasa_pea": 0.635, "til_1": 0.345},
+    "09": {"nombre": "Ciudad de México", "tasa_pea": 0.615, "til_1": 0.465},
+    "10": {"nombre": "Durango", "tasa_pea": 0.605, "til_1": 0.505},
+    "11": {"nombre": "Guanajuato", "tasa_pea": 0.615, "til_1": 0.535},
+    "12": {"nombre": "Guerrero", "tasa_pea": 0.605, "til_1": 0.775},
+    "13": {"nombre": "Hidalgo", "tasa_pea": 0.635, "til_1": 0.715},
+    "14": {"nombre": "Jalisco", "tasa_pea": 0.635, "til_1": 0.470},
+    "15": {"nombre": "México", "tasa_pea": 0.605, "til_1": 0.560},
+    "16": {"nombre": "Michoacán", "tasa_pea": 0.615, "til_1": 0.675},
+    "17": {"nombre": "Morelos", "tasa_pea": 0.615, "til_1": 0.655},
+    "18": {"nombre": "Nayarit", "tasa_pea": 0.655, "til_1": 0.615},
+    "19": {"nombre": "Nuevo León", "tasa_pea": 0.625, "til_1": 0.360},
+    "20": {"nombre": "Oaxaca", "tasa_pea": 0.625, "til_1": 0.805},
+    "21": {"nombre": "Puebla", "tasa_pea": 0.635, "til_1": 0.695},
+    "22": {"nombre": "Querétaro", "tasa_pea": 0.625, "til_1": 0.425},
+    "23": {"nombre": "Quintana Roo", "tasa_pea": 0.665, "til_1": 0.455},
+    "24": {"nombre": "San Luis Potosí", "tasa_pea": 0.615, "til_1": 0.555},
+    "25": {"nombre": "Sinaloa", "tasa_pea": 0.615, "til_1": 0.485},
+    "26": {"nombre": "Sonora", "tasa_pea": 0.625, "til_1": 0.415},
+    "27": {"nombre": "Tabasco", "tasa_pea": 0.605, "til_1": 0.615},
+    "28": {"nombre": "Tamaulipas", "tasa_pea": 0.615, "til_1": 0.425},
+    "29": {"nombre": "Tlaxcala", "tasa_pea": 0.645, "til_1": 0.705},
+    "30": {"nombre": "Veracruz", "tasa_pea": 0.585, "til_1": 0.675},
+    "31": {"nombre": "Yucatán", "tasa_pea": 0.645, "til_1": 0.585},
+    "32": {"nombre": "Zacatecas", "tasa_pea": 0.595, "til_1": 0.595},
+}
+
+
 def parse_enoe_indicators(enoe_path: str) -> Dict[str, float]:
     """
-    Parsea el archivo CSV de Indicadores Estratégicos de la ENOE para una entidad.
+    Parsea el archivo (CSV o XLS/XLSX) de Indicadores Estratégicos de la ENOE para una entidad.
     Extrae la Tasa de Participación Laboral (Tasa PEA) y la Tasa de Informalidad Laboral 1 (TIL1).
-    Maneja separadores de coma o punto decimal y celdas entrecomilladas.
+    Maneja separadores de coma o punto decimal y múltiples codificaciones.
     """
     if not os.path.exists(enoe_path):
         raise FileNotFoundError(f"Archivo ENOE no encontrado: {enoe_path}")
@@ -87,39 +123,148 @@ def parse_enoe_indicators(enoe_path: str) -> Dict[str, float]:
     tasa_pea = None
     til_1 = None
 
-    with open(enoe_path, mode='r', encoding='utf-8-sig', errors='ignore') as f:
-        reader = csv.reader(f)
-        for row in reader:
-            if not row:
+    # Caso 1: Archivo Excel .xls o .xlsx
+    lower_path = enoe_path.lower()
+    if lower_path.endswith(('.xls', '.xlsx')):
+        try:
+            import xlrd
+            wb = xlrd.open_workbook(enoe_path)
+            sheet = wb.sheet_by_index(0)
+            for r in range(sheet.nrows):
+                row_vals = [sheet.cell_value(r, c) for c in range(sheet.ncols)]
+                row_str = " ".join(str(v) for v in row_vals).lower()
+                if ("tasa de participaci" in row_str or "participacion" in row_str) and tasa_pea is None:
+                    for v in row_vals:
+                        try:
+                            num = float(v)
+                            if 30.0 <= num <= 90.0:
+                                tasa_pea = round(num / 100.0, 4)
+                                break
+                        except (ValueError, TypeError):
+                            continue
+                if ("informalidad laboral 1" in row_str or "til1" in row_str) and til_1 is None:
+                    for v in row_vals:
+                        try:
+                            num = float(v)
+                            if 10.0 <= num <= 90.0:
+                                til_1 = round(num / 100.0, 4)
+                                break
+                        except (ValueError, TypeError):
+                            continue
+        except Exception:
+            pass
+
+    # Caso 2: Archivo CSV (o respaldo si XLS no arrojó ambos valores)
+    if tasa_pea is None or til_1 is None:
+        encodings = ['utf-8-sig', 'utf-8', 'latin1', 'cp1252']
+        for enc in encodings:
+            try:
+                with open(enoe_path, mode='r', encoding=enc, errors='ignore') as f:
+                    reader = csv.reader(f)
+                    for row in reader:
+                        if not row:
+                            continue
+                        row_str = " ".join(row).lower()
+                        # Buscar Tasa de participación (tolerante a acentos y codificación)
+                        if ("tasa de participaci" in row_str or "participacion" in row_str) and tasa_pea is None:
+                            for val in row:
+                                clean_val = str(val).strip().replace(',', '.')
+                                try:
+                                    v = float(clean_val)
+                                    if 30.0 <= v <= 90.0:
+                                        tasa_pea = round(v / 100.0, 4)
+                                        break
+                                except ValueError:
+                                    continue
+                        # Buscar TIL1
+                        if ("informalidad laboral 1" in row_str or "til1" in row_str) and til_1 is None:
+                            for val in row:
+                                clean_val = str(val).strip().replace(',', '.')
+                                try:
+                                    v = float(clean_val)
+                                    if 10.0 <= v <= 90.0:
+                                        til_1 = round(v / 100.0, 4)
+                                        break
+                                except ValueError:
+                                    continue
+                if tasa_pea is not None and til_1 is not None:
+                    break
+            except Exception:
                 continue
-            row_str = " ".join(row)
-            # Buscar Tasa de participación
-            if "Tasa de participación" in row_str:
-                for val in row:
-                    clean_val = val.strip().replace(',', '.')
-                    try:
-                        v = float(clean_val)
-                        if 30.0 <= v <= 90.0:  # Rango lógico de participación %
-                            tasa_pea = v / 100.0
-                            break
-                    except ValueError:
-                        continue
-            # Buscar TIL1
-            if "Tasa de informalidad laboral 1" in row_str or "TIL1" in row_str:
-                for val in row:
-                    clean_val = val.strip().replace(',', '.')
-                    try:
-                        v = float(clean_val)
-                        if 10.0 <= v <= 90.0:  # Rango lógico de informalidad %
-                            til_1 = v / 100.0
-                            break
-                    except ValueError:
-                        continue
 
     return {
         "tasa_pea": tasa_pea if tasa_pea is not None else 0.62,
         "til_1": til_1 if til_1 is not None else 0.45
     }
+
+
+def calculate_cpv_pea_rate(cpv_path: str, target_cve_muns: Optional[List[str]] = None) -> Optional[float]:
+    """
+    Calcula la Tasa PEA real (PEA / P_15YMAS) a partir del archivo RESAGEBURB del Censo CPV 2020.
+    Si se especifican target_cve_muns, filtra los registros municipales correspondientes al BBOX.
+    Si target_cve_muns es None, calcula la tasa estatal ponderada.
+    """
+    if not os.path.exists(cpv_path):
+        return None
+
+    total_pea = 0.0
+    total_p15 = 0.0
+
+    mun_set = set()
+    if target_cve_muns:
+        for m in target_cve_muns:
+            s = str(m).strip()
+            mun_set.add(s)
+            if len(s) == 5:
+                mun_set.add(s[2:])  # Código de 3 dígitos del municipio
+
+    for enc in ['utf-8-sig', 'utf-8', 'latin1', 'cp1252']:
+        try:
+            with open(cpv_path, mode='r', encoding=enc, errors='ignore') as f:
+                reader = csv.reader(f)
+                header = next(reader, None)
+                if not header:
+                    continue
+                clean_header = [str(c).strip().replace('"', '') for c in header]
+                if 'MUN' not in clean_header or 'PEA' not in clean_header or 'P_15YMAS' not in clean_header:
+                    continue
+
+                mun_idx = clean_header.index('MUN')
+                loc_idx = clean_header.index('LOC') if 'LOC' in clean_header else -1
+                pea_idx = clean_header.index('PEA')
+                p15_idx = clean_header.index('P_15YMAS')
+                ent_idx = clean_header.index('ENTIDAD') if 'ENTIDAD' in clean_header else 0
+
+                for row in reader:
+                    if not row or len(row) <= max(pea_idx, p15_idx):
+                        continue
+                    mun = row[mun_idx].strip()
+                    loc = row[loc_idx].strip() if loc_idx >= 0 else ""
+                    ent = row[ent_idx].strip()
+
+                    # El registro municipal oficial tiene LOC = '0000'
+                    if loc == '0000':
+                        # Si no hay filtro de municipios, excluir '000' para no duplicar el total estatal con los municipios
+                        if not mun_set and (mun == '000' or mun == '0'):
+                            continue
+                        cve_5 = f"{int(ent):02d}{int(mun):03d}" if ent.isdigit() and mun.isdigit() else mun
+                        if not mun_set or mun in mun_set or cve_5 in mun_set:
+                            try:
+                                pea_val = float(str(row[pea_idx]).replace(',', '').strip())
+                                p15_val = float(str(row[p15_idx]).replace(',', '').strip())
+                                if p15_val > 0:
+                                    total_pea += pea_val
+                                    total_p15 += p15_val
+                            except (ValueError, TypeError):
+                                pass
+
+                if total_p15 > 0:
+                    return round(total_pea / total_p15, 4)
+        except Exception:
+            continue
+
+    return None
+
 
 
 def parse_ce2024_municipal(ce_path: str) -> Dict[str, Dict]:
