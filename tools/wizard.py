@@ -920,6 +920,7 @@ def calculate_conapo_factors(city_file: str) -> Dict[str, Any]:
         factors_list.append({
             "cve_mun": cve_5,
             "name": nom_mun,
+            "ano": proj_year,
             "pob_2020": int(pob_2020) if pob_2020 > 0 else None,
             "pob_conapo": int(pob_proj) if pob_proj > 0 else None,
             "factor": calc_factor,

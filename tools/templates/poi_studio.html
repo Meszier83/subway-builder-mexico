@@ -18,19 +18,21 @@
             --border-color: rgba(255, 255, 255, 0.1);
             --text-main: #f8fafc;
             --text-muted: #94a3b8;
-            --accent-cyan: #38bdf8;
-            --accent-green: #4ade80;
+            --accent-cyan: #D95F18;
+            --accent-orange: #D95F18;
+            --accent-pink: #C80068;
+            --accent-green: #15803D;
             --accent-amber: #fbbf24;
             --accent-purple: #c084fc;
             --accent-red: #f87171;
-            --accent-blue: #60a5fa;
+            --accent-blue: #0284c7;
             --shadow-lg: 0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body, html { height: 100%; width: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg-main); color: var(--text-main); overflow: hidden; }
+        body, html { height: 100%; width: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg-main); color: var(--text-main); overflow: hidden; display: flex; flex-direction: column; }
 
-        #app-container { display: flex; height: 100vh; width: 100vw; position: relative; }
+        #app-container { display: flex; flex: 1; height: calc(100vh - 36px); width: 100vw; position: relative; }
         #map { flex: 1; height: 100%; background: #0f172a; z-index: 1; }
 
         /* Sidebar Styling */
@@ -710,6 +712,17 @@
     </style>
 </head>
 <body>
+    <!-- Banner de Unificación con Subway Builder México Wizard -->
+    <div id="unification-banner" style="background: #181615; border-bottom: 2px solid #D95F18; color: #F7F5F0; padding: 7px 16px; display: flex; align-items: center; justify-content: space-between; font-size: 11px; z-index: 10000; flex-shrink: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="background: #D95F18; color: #ffffff; padding: 2px 7px; border-radius: 4px; font-weight: 800; font-size: 10px; letter-spacing: 0.5px;">WIZARD UNIFICADO</span>
+            <span style="color: #D8D1C5;">POI Studio se encuentra ahora integrado directamente en el Wizard (Paso 4) con soporte de Zonas Aisladas, Afluencia, Taxonomías y Proyecciones CONAPO.</span>
+        </div>
+        <a href="http://127.0.0.1:8080/#step-4" target="_blank" style="background: #D95F18; color: #ffffff; padding: 4px 12px; border-radius: 6px; font-weight: 700; font-size: 11px; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; transition: background 0.2s;" onmouseover="this.style.background='#ea580c'" onmouseout="this.style.background='#D95F18'">
+            <span>Abrir en Wizard (Puerto 8080)</span>
+            <i class="fa-solid fa-arrow-up-right-from-square"></i>
+        </a>
+    </div>
     <div id="app-container">
         <!-- Sidebar -->
         <div id="sidebar">

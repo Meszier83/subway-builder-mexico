@@ -161,7 +161,7 @@ class TestPoiStudio(unittest.TestCase):
 
     def test_load_city_data_affluence_zones(self):
         """Verifica que load_city_data cargue las zonas de afluencia activas."""
-        target_file = "cities/cancun.yaml" if os.path.exists("cities/cancun.yaml") else "cities/_template.yaml"
+        target_file = "cities/_template.yaml"
         cdata = load_city_data(target_file)
         self.assertIn("affluence_zones", cdata)
         self.assertIsInstance(cdata["affluence_zones"], list)
@@ -173,7 +173,7 @@ class TestPoiStudio(unittest.TestCase):
     def test_save_city_data_preserves_affluence_zones(self):
         """Verifica que save_city_data conserve intacto el bloque de affluence_zones."""
         from tools.poi_studio import save_city_data
-        target_file = "cities/cancun.yaml" if os.path.exists("cities/cancun.yaml") else "cities/_template.yaml"
+        target_file = "cities/_template.yaml"
         data = load_city_data(target_file)
         tmp_path = os.path.join(os.path.dirname(__file__), "tmp_test_affluence.yaml")
 

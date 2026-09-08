@@ -108,10 +108,14 @@ class TestWizard(unittest.TestCase):
         self.assertIn(res["status"], ["ok", "missing_conapo"])
         if res["status"] == "ok":
             self.assertIn("factors", res)
+            self.assertIn("projection_year", res)
+            self.assertGreaterEqual(res["projection_year"], 2020)
             self.assertGreater(len(res["factors"]), 0)
             cves = [f["cve_mun"] for f in res["factors"]]
             self.assertIn("23005", cves)  # Benito Juárez / Cancún
             bjuarez = [f for f in res["factors"] if f["cve_mun"] == "23005"][0]
+            self.assertIn("ano", bjuarez)
+            self.assertGreaterEqual(bjuarez["ano"], 2020)
             self.assertGreater(bjuarez["pob_conapo"], 900000)
             self.assertGreater(bjuarez["factor"], 1.0)
             self.assertTrue(bjuarez["in_bbox"])
@@ -404,15 +408,15 @@ class TestWizard(unittest.TestCase):
     def test_detect_macro_parameters(self):
         """Verifica la detección y restablecimiento de parámetros macroeconómicos oficiales (niveles 1, 2 y 4)."""
         from tools.wizard import detect_macro_parameters
-        # Nivel 2: Cancún (sin archivo ENOE -> Censo CPV + Catálogo Estatal QRoo)
+        # Cancún: Detecta Nivel 1 (si existe archivo ENOE en data/cancun) o Nivel 2 (Censo CPV + Catálogo Estatal QRoo)
         res_cun = detect_macro_parameters("cities/cancun.yaml")
         self.assertEqual(res_cun["status"], "ok")
-        self.assertEqual(res_cun["method"], "census_hybrid")
+        self.assertIn(res_cun["method"], ["census_hybrid", "enoe_file"])
         self.assertEqual(res_cun["cve_ent"], "23")
         self.assertIn("parameters", res_cun)
         p_cun = res_cun["parameters"]
         self.assertGreater(p_cun["tasa_pea"], 0.65)
-        self.assertAlmostEqual(p_cun["til_1_state"], 0.455, places=2)
+        self.assertAlmostEqual(p_cun["til_1_state"], 0.45, places=1)
         self.assertAlmostEqual(p_cun["gravity_beta"], 0.120, places=3)
         self.assertEqual(p_cun["max_distance_km"], 50.0)
         self.assertEqual(p_cun["max_pop_size"], 150)

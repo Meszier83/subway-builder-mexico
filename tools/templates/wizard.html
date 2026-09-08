@@ -63,14 +63,17 @@
       color: #181615;
     }
     
-    .text-white:not(button, button *, .btn-accent, .bg-metro-orange *, .bg-metro-green *, .bg-emerald-600 *, .bg-emerald-700 *, .badge-colored *, .bg-rose-500 *, .bg-rose-600 *, .bg-amber-500 *, .bg-amber-600 *, .bg-blue-600 *, .bg-blue-700 *, .bg-purple-600 *, .bg-stone-800 *, .bg-stone-900 *) {
+    .text-white:not(button, button *, .btn-accent, .bg-metro-orange *, .bg-metro-green *, .bg-emerald-600 *, .bg-emerald-700 *, .badge-colored *, .bg-rose-500 *, .bg-rose-600 *, .bg-amber-500 *, .bg-amber-600 *, .bg-blue-600 *, .bg-blue-700 *, .bg-purple-600 *, .bg-stone-800 *, .bg-stone-900 *, [class*="bg-black"] *, [class*="bg-gray-8"] *, [class*="bg-gray-9"] *) {
       color: #181615 !important;
     }
 
-    .text-gray-100, .text-gray-200, .text-gray-300 {
+    .text-gray-100:not([class*="bg-black"] *, [class*="bg-gray-8"] *, [class*="bg-gray-9"] *, [class*="bg-stone-8"] *, [class*="bg-stone-9"] *, .terminal-scroll, .terminal-scroll *),
+    .text-gray-200:not([class*="bg-black"] *, [class*="bg-gray-8"] *, [class*="bg-gray-9"] *, [class*="bg-stone-8"] *, [class*="bg-stone-9"] *, .terminal-scroll, .terminal-scroll *),
+    .text-gray-300:not([class*="bg-black"] *, [class*="bg-gray-8"] *, [class*="bg-gray-9"] *, [class*="bg-stone-8"] *, [class*="bg-stone-9"] *, .terminal-scroll, .terminal-scroll *) {
       color: #181615;
     }
-    .text-gray-400, .text-gray-500 {
+    .text-gray-400:not([class*="bg-black"] *, [class*="bg-gray-8"] *, [class*="bg-gray-9"] *, [class*="bg-stone-8"] *, [class*="bg-stone-9"] *, .terminal-scroll, .terminal-scroll *),
+    .text-gray-500:not([class*="bg-black"] *, [class*="bg-gray-8"] *, [class*="bg-gray-9"] *, [class*="bg-stone-8"] *, [class*="bg-stone-9"] *, .terminal-scroll, .terminal-scroll *) {
       color: #524B42;
     }
 
@@ -222,7 +225,7 @@
   </style>
 </head>
 
-<body class="bg-metro-dark text-metro-text font-sans h-screen flex flex-col overflow-hidden select-none">
+<body class="bg-metro-dark text-metro-text font-sans h-screen flex flex-col overflow-hidden">
 
   <!-- ========================================================================= -->
   <!-- 1. HEADER PRINCIPAL (Identidad Lance Wyman / Metro CDMX) -->
@@ -291,43 +294,43 @@
     <div class="flex items-center space-x-2 w-full max-w-5xl mx-auto justify-between">
       
       <!-- Paso 1 -->
-      <button onclick="goToStep(1)" id="stepTab-1" class="step-tab flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-bold transition text-metro-orange bg-metro-orange/10 border border-metro-orange/30">
-        <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono bg-metro-orange text-white">1</span>
+      <button onclick="goToStep(1)" id="stepTab-1" class="step-tab flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition text-white bg-metro-orange shadow-sm border border-transparent">
+        <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono font-bold bg-white text-metro-orange">1</span>
         <span>Delimitación & BBOX</span>
       </button>
       <div class="h-0.5 w-6 bg-metro-border"></div>
 
       <!-- Paso 2 -->
-      <button onclick="goToStep(2)" id="stepTab-2" class="step-tab flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-bold transition text-gray-400 hover:text-gray-200">
-        <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono bg-gray-700 text-gray-300">2</span>
+      <button onclick="goToStep(2)" id="stepTab-2" class="step-tab flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition text-stone-700 hover:text-stone-950 bg-stone-100 hover:bg-stone-200 border border-stone-300/80">
+        <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono font-bold bg-stone-300 text-stone-700">2</span>
         <span>Fuentes de Datos</span>
       </button>
       <div class="h-0.5 w-6 bg-metro-border"></div>
 
       <!-- Paso 3 -->
-      <button onclick="goToStep(3)" id="stepTab-3" class="step-tab flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-bold transition text-gray-400 hover:text-gray-200">
-        <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono bg-gray-700 text-gray-300">3</span>
+      <button onclick="goToStep(3)" id="stepTab-3" class="step-tab flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition text-stone-700 hover:text-stone-950 bg-stone-100 hover:bg-stone-200 border border-stone-300/80">
+        <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono font-bold bg-stone-300 text-stone-700">3</span>
         <span>Macroeconomía</span>
       </button>
       <div class="h-0.5 w-6 bg-metro-border"></div>
 
       <!-- Paso 4 -->
-      <button onclick="goToStep(4)" id="stepTab-4" class="step-tab flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-bold transition text-gray-400 hover:text-gray-200">
-        <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono bg-gray-700 text-gray-300">4</span>
+      <button onclick="goToStep(4)" id="stepTab-4" class="step-tab flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition text-stone-700 hover:text-stone-950 bg-stone-100 hover:bg-stone-200 border border-stone-300/80">
+        <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono font-bold bg-stone-300 text-stone-700">4</span>
         <span>POI Studio</span>
       </button>
       <div class="h-0.5 w-6 bg-metro-border"></div>
 
       <!-- Paso 5 -->
-      <button onclick="goToStep(5)" id="stepTab-5" class="step-tab flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-bold transition text-gray-400 hover:text-gray-200">
-        <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono bg-gray-700 text-gray-300">5</span>
+      <button onclick="goToStep(5)" id="stepTab-5" class="step-tab flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition text-stone-700 hover:text-stone-950 bg-stone-100 hover:bg-stone-200 border border-stone-300/80">
+        <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono font-bold bg-stone-300 text-stone-700">5</span>
         <span>Compilación</span>
       </button>
       <div class="h-0.5 w-6 bg-metro-border"></div>
 
       <!-- Paso 6 -->
-      <button onclick="goToStep(6)" id="stepTab-6" class="step-tab flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-bold transition text-gray-400 hover:text-gray-200">
-        <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono bg-gray-700 text-gray-300">6</span>
+      <button onclick="goToStep(6)" id="stepTab-6" class="step-tab flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition text-stone-700 hover:text-stone-950 bg-stone-100 hover:bg-stone-200 border border-stone-300/80">
+        <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono font-bold bg-stone-300 text-stone-700">6</span>
         <span>Visor & Exportación</span>
       </button>
 
@@ -344,64 +347,71 @@
     <!-- --------------------------------------------------------------------- -->
     <section id="stepView-1" class="step-view absolute inset-0 flex p-4 gap-4 overflow-hidden w-full h-full">
       <!-- Barra Lateral Colapsable -->
-      <div id="sidebar-1" class="w-96 bg-metro-card border border-metro-border rounded-xl p-5 flex flex-col shrink-0 space-y-4 overflow-y-auto shadow-xl transition-all duration-300 relative z-20">
-        <div class="border-b border-metro-border pb-3 flex justify-between items-start">
+      <!-- Sidebar de Configuración -->
+      <div id="sidebar-1" class="w-96 bg-white border border-stone-200 rounded-xl p-5 flex flex-col shrink-0 space-y-4 overflow-y-auto shadow-xl transition-all duration-300 relative z-20">
+        <div class="border-b border-stone-200 pb-3 flex justify-between items-start">
           <div>
-            <h2 class="text-base font-bold text-white flex items-center space-x-2">
+            <h2 class="text-base font-bold text-stone-900 flex items-center space-x-2">
               <i data-lucide="map" class="w-5 h-5 text-metro-orange"></i>
               <span>Delimitación Urbana</span>
             </h2>
-            <p class="text-xs text-gray-400 mt-1">Configura el Bounding Box y parámetros cartográficos.</p>
+            <p class="text-xs text-stone-500 mt-1">Configura el Bounding Box y parámetros cartográficos.</p>
           </div>
-          <button onclick="toggleSidebar(1)" title="Ocultar panel lateral" class="text-gray-400 hover:text-white p-1 hover:bg-metro-border rounded transition">
+          <button onclick="toggleSidebar(1)" title="Ocultar panel lateral" class="text-stone-400 hover:text-stone-800 p-1 hover:bg-stone-100 rounded transition">
             <i data-lucide="panel-left-close" class="w-4 h-4"></i>
           </button>
         </div>
 
         <div class="space-y-3 text-xs">
           <div>
-            <label class="block text-gray-400 font-semibold mb-1">Nombre Oficial de la Ciudad</label>
-            <input type="text" id="cfg_city_name" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white focus:border-metro-orange focus:outline-none" placeholder="Cancún y Riviera Norte">
+            <label class="block text-stone-700 font-semibold mb-1">Nombre Oficial de la Ciudad</label>
+            <input type="text" id="cfg_city_name" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-metro-orange focus:outline-none" placeholder="Cancún y Riviera Norte">
           </div>
 
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="block text-gray-400 font-semibold mb-1">Código ISO / IATA</label>
-              <input type="text" id="cfg_city_code" maxlength="4" class="w-full uppercase font-mono bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white focus:border-metro-orange focus:outline-none" placeholder="CUN">
+              <label class="block text-stone-700 font-semibold mb-1">Código ISO / IATA</label>
+              <input type="text" id="cfg_city_code" maxlength="4" class="w-full uppercase font-mono bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-metro-orange focus:outline-none" placeholder="CUN">
             </div>
             <div>
-              <label class="block text-gray-400 font-semibold mb-1">Creador / Autor</label>
-              <input type="text" id="cfg_city_creator" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white focus:border-metro-orange focus:outline-none" placeholder="Keppler">
+              <label class="block text-stone-700 font-semibold mb-1">Creador / Autor</label>
+              <input type="text" id="cfg_city_creator" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-metro-orange focus:outline-none" placeholder="Keppler">
             </div>
           </div>
 
           <div>
-            <label class="block text-gray-400 font-semibold mb-1">Descripción Breve (&lt; 80 car.)</label>
-            <input type="text" id="cfg_city_desc" maxlength="80" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white focus:border-metro-orange focus:outline-none" placeholder="Zona Metropolitana y Corredor Turístico">
+            <label class="block text-stone-700 font-semibold mb-1">Descripción Breve (&lt; 80 car.)</label>
+            <input type="text" id="cfg_city_desc" maxlength="80" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-metro-orange focus:outline-none" placeholder="Zona Metropolitana y Corredor Turístico">
           </div>
 
           <!-- Coordenadas BBOX -->
-          <div class="bg-metro-panel p-3 rounded-lg border border-metro-border space-y-2">
+          <div class="bg-stone-50 p-3.5 rounded-xl border border-stone-200 space-y-2.5">
             <div class="flex items-center justify-between">
-              <span class="font-bold text-gray-300">Bounding Box [W, S, E, N]</span>
-              <button onclick="fitMapToBbox()" class="text-[11px] text-metro-orange hover:underline">Centrar Mapa</button>
+              <span class="font-bold text-stone-800 text-xs flex items-center space-x-1.5">
+                <i data-lucide="scan" class="w-3.5 h-3.5 text-metro-orange"></i>
+                <span>Bounding Box Metropolitano</span>
+              </span>
+              <button onclick="fitMapToBbox()" class="text-[11px] text-metro-orange font-bold hover:underline flex items-center space-x-1">
+                <i data-lucide="crosshair" class="w-3 h-3"></i>
+                <span>Centrar Mapa</span>
+              </button>
             </div>
             <div class="grid grid-cols-2 gap-2 font-mono text-[11px]">
               <div>
-                <span class="text-gray-500">Min Lon (Oeste):</span>
-                <input type="number" step="0.001" id="cfg_bbox_0" onchange="updateBboxFromInputs()" class="w-full bg-metro-card border border-metro-border rounded px-2 py-1 text-white">
+                <span class="text-stone-500">Min Lon (Oeste):</span>
+                <input type="number" step="0.001" id="cfg_bbox_0" onchange="updateBboxFromInputs()" class="w-full bg-white border border-stone-300 rounded px-2 py-1 text-stone-900 font-bold">
               </div>
               <div>
-                <span class="text-gray-500">Min Lat (Sur):</span>
-                <input type="number" step="0.001" id="cfg_bbox_1" onchange="updateBboxFromInputs()" class="w-full bg-metro-card border border-metro-border rounded px-2 py-1 text-white">
+                <span class="text-stone-500">Min Lat (Sur):</span>
+                <input type="number" step="0.001" id="cfg_bbox_1" onchange="updateBboxFromInputs()" class="w-full bg-white border border-stone-300 rounded px-2 py-1 text-stone-900 font-bold">
               </div>
               <div>
-                <span class="text-gray-500">Max Lon (Este):</span>
-                <input type="number" step="0.001" id="cfg_bbox_2" onchange="updateBboxFromInputs()" class="w-full bg-metro-card border border-metro-border rounded px-2 py-1 text-white">
+                <span class="text-stone-500">Max Lon (Este):</span>
+                <input type="number" step="0.001" id="cfg_bbox_2" onchange="updateBboxFromInputs()" class="w-full bg-white border border-stone-300 rounded px-2 py-1 text-stone-900 font-bold">
               </div>
               <div>
-                <span class="text-gray-500">Max Lat (Norte):</span>
-                <input type="number" step="0.001" id="cfg_bbox_3" onchange="updateBboxFromInputs()" class="w-full bg-metro-card border border-metro-border rounded px-2 py-1 text-white">
+                <span class="text-stone-500">Max Lat (Norte):</span>
+                <input type="number" step="0.001" id="cfg_bbox_3" onchange="updateBboxFromInputs()" class="w-full bg-white border border-stone-300 rounded px-2 py-1 text-stone-900 font-bold">
               </div>
             </div>
           </div>
@@ -409,37 +419,37 @@
           <!-- Parámetros de Malla y Filtros -->
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="block text-gray-400 font-semibold mb-1">Malla Espacial</label>
-              <select id="cfg_grid_size" class="w-full bg-metro-panel border border-metro-border rounded-lg px-2 py-2 text-white">
+              <label class="block text-stone-700 font-semibold mb-1">Malla Espacial</label>
+              <select id="cfg_grid_size" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-2 text-stone-900 font-medium">
                 <option value="0.0018">Fina (~180m)</option>
                 <option value="0.0025" selected>Estándar (~250m)</option>
                 <option value="0.0035">Amplia (~380m)</option>
               </select>
             </div>
             <div>
-              <label class="block text-gray-400 font-semibold mb-1">Zoom Inicial</label>
-              <input type="number" step="0.5" id="cfg_initial_zoom" value="11.5" class="w-full bg-metro-panel border border-metro-border rounded-lg px-3 py-2 text-white">
+              <label class="block text-stone-700 font-semibold mb-1">Zoom Inicial</label>
+              <input type="number" step="0.5" id="cfg_initial_zoom" value="11.5" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium">
             </div>
           </div>
 
-          <div class="flex items-center justify-between pt-2 border-t border-metro-border">
-            <span class="text-gray-300 font-semibold">Incluir Océano / Costera</span>
+          <div class="flex items-center justify-between pt-2 border-t border-stone-200">
+            <span class="text-stone-700 font-semibold">Incluir Océano / Costera</span>
             <input type="checkbox" id="cfg_include_ocean" class="w-4 h-4 accent-metro-orange rounded">
           </div>
 
           <!-- Zonas Topológicas Aisladas (Islas / Cuencas) -->
-          <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border space-y-2.5">
+          <div class="bg-stone-50 p-3.5 rounded-xl border border-stone-200 space-y-2.5">
             <div class="flex items-center justify-between">
               <div class="flex items-center space-x-1.5">
-                <i data-lucide="shield-alert" class="w-4 h-4 text-cyan-400"></i>
-                <span class="font-bold text-gray-200">Zonas Aisladas (Islas)</span>
+                <i data-lucide="shield-alert" class="w-4 h-4 text-cyan-600"></i>
+                <span class="font-bold text-stone-800">Zonas Aisladas (Islas)</span>
               </div>
-              <span id="isolatedZonesBadge" class="text-[10px] bg-cyan-950/70 border border-cyan-500/40 text-cyan-300 px-2 py-0.5 rounded-full font-bold">0 zonas</span>
+              <span id="isolatedZonesBadge" class="text-[10px] bg-cyan-100 border border-cyan-300 text-cyan-800 px-2 py-0.5 rounded-full font-bold">0 zonas</span>
             </div>
-            <p class="text-[11px] text-gray-400 leading-tight">
+            <p class="text-[11px] text-stone-500 leading-tight">
               Contén la demanda de islas o cuencas para eliminar viajes automovilísticos cruzando el mar.
             </p>
-            <button type="button" onclick="startDrawingIsolatedZone()" id="btnDrawIsolatedZone" class="w-full bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/40 text-cyan-300 text-xs font-bold py-1.5 px-2.5 rounded-lg flex items-center justify-center space-x-1.5 transition shadow">
+            <button type="button" onclick="startDrawingIsolatedZone()" id="btnDrawIsolatedZone" class="w-full bg-cyan-50 hover:bg-cyan-100 border border-cyan-300 text-cyan-800 text-xs font-bold py-1.5 px-2.5 rounded-lg flex items-center justify-center space-x-1.5 transition shadow-2xs">
               <i data-lucide="box-select" class="w-3.5 h-3.5"></i>
               <span>+ Trazar Zona Aislada</span>
             </button>
@@ -528,6 +538,20 @@
 
           <div class="space-y-3" id="dataStatusList">
             <!-- Renderizado dinámico -->
+          </div>
+
+          <!-- Contenedor de Archivos Excluidos / Desvinculados -->
+          <div id="dataExclusionsContainer" class="hidden mt-4 pt-4 border-t border-stone-200 space-y-2.5">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-stone-700 flex items-center space-x-1.5">
+                <i data-lucide="eye-off" class="w-4 h-4 text-stone-500"></i>
+                <span>Archivos Desvinculados / Excluidos</span>
+              </span>
+              <span class="text-[11px] text-stone-500">Omitidos en compilación</span>
+            </div>
+            <div id="dataExclusionsList" class="space-y-1.5 text-xs">
+              <!-- Renderizado dinámico -->
+            </div>
           </div>
         </div>
 
@@ -817,6 +841,7 @@
               <tr>
                 <th class="p-2.5">Clave</th>
                 <th class="p-2.5">Municipio</th>
+                <th class="p-2.5 text-center">Año Proy.</th>
                 <th class="p-2.5">Pob. 2020</th>
                 <th class="p-2.5">Pob. Proy.</th>
                 <th class="p-2.5">Factor</th>
@@ -1464,7 +1489,7 @@
 
         <!-- Botón de Descarga -->
         <div class="pt-4 mt-auto space-y-2">
-          <button onclick="downloadCityPackage()" class="w-full bg-metro-green hover:bg-emerald-600 text-white font-bold py-3 rounded-lg flex items-center justify-center space-x-2 shadow-lg transition">
+          <button id="btnDownloadZip" onclick="downloadCityPackage()" class="w-full bg-metro-green hover:bg-emerald-600 text-white font-bold py-3 rounded-lg flex items-center justify-center space-x-2 shadow-lg transition">
             <i data-lucide="download" class="w-5 h-5"></i>
             <span>Descargar Paquete (.zip)</span>
           </button>
@@ -1482,6 +1507,30 @@
       <!-- Mapa Visor Final Contenido -->
       <div class="flex-1 h-full bg-metro-card border border-metro-border rounded-xl overflow-hidden relative shadow-xl z-0">
         <div id="mapDemand" class="w-full h-full"></div>
+
+        <!-- Estado Vacío Cuando No Está Compilado -->
+        <div id="demandEmptyState" class="hidden absolute inset-0 z-[1000] bg-stone-900/60 backdrop-blur-xs flex items-center justify-center p-6">
+          <div class="bg-white border border-stone-200 rounded-2xl p-6 max-w-md w-full shadow-2xl text-center space-y-4">
+            <div class="w-12 h-12 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto">
+              <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-stone-900">Demanda Aún No Compilada</h3>
+              <p class="text-xs text-stone-600 mt-1.5 leading-relaxed">
+                Este proyecto aún no cuenta con un archivo <code class="bg-stone-100 px-1 py-0.5 rounded text-stone-800 font-mono text-[11px]">demand_data.json</code> en su carpeta de compilación. Para visualizar los puntos de demanda o descargar el paquete <code class="bg-stone-100 px-1 py-0.5 rounded text-stone-800 font-mono text-[11px]">.zip</code>, inicia la compilación en el Paso 5.
+              </p>
+            </div>
+            <div class="flex flex-col sm:flex-row gap-2 pt-2">
+              <button onclick="goToStep(5)" class="flex-1 px-4 py-2.5 bg-metro-green hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition shadow flex items-center justify-center space-x-1.5">
+                <i data-lucide="play" class="w-4 h-4"></i>
+                <span>Ir a Compilar (Paso 5)</span>
+              </button>
+              <button onclick="dismissDemandEmptyState()" class="px-3 py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-semibold rounded-lg transition">
+                Explorar Mapa
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -1868,6 +1917,65 @@
     </div>
   </div>
 
+  <!-- Modal Agregar Factor Demográfico Municipal (CONAPO) -->
+  <div id="modalAddGrowthFactor" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white border border-stone-200 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center border-b border-stone-200 pb-3">
+        <div>
+          <h3 class="text-base font-bold text-stone-900 flex items-center space-x-2">
+            <i data-lucide="trending-up" class="w-5 h-5 text-metro-green"></i>
+            <span>Factor de Proyección Demográfica</span>
+          </h3>
+          <p class="text-xs text-stone-500 mt-0.5">Añade o calibra el factor de crecimiento para un municipio metropolitano.</p>
+        </div>
+        <button onclick="closeAddGrowthFactorModal()" class="text-stone-400 hover:text-stone-800 p-1.5 rounded-lg hover:bg-stone-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-3.5 text-xs">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-stone-700 font-semibold mb-1">Clave INEGI (cve_mun)</label>
+            <input type="text" id="gf_code" maxlength="5" class="w-full bg-stone-50 font-mono border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-bold focus:border-metro-green focus:outline-none" placeholder="ej. 23005">
+            <span class="text-[10px] text-stone-500 mt-0.5 block">5 dígitos (Estado + Mun.)</span>
+          </div>
+          <div>
+            <label class="block text-stone-700 font-semibold mb-1">Año de Proyección</label>
+            <input type="number" id="gf_ano" min="2020" max="2035" value="2026" class="w-full bg-white font-mono border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-metro-green focus:outline-none">
+            <span class="text-[10px] text-stone-500 mt-0.5 block">Horizonte CONAPO</span>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-stone-700 font-semibold mb-1">Nombre del Municipio / Referencia</label>
+          <input type="text" id="gf_name" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-metro-green focus:outline-none" placeholder="ej. Benito Juárez">
+        </div>
+
+        <div class="p-3 bg-stone-50 rounded-xl border border-stone-200">
+          <div class="flex justify-between items-center mb-1">
+            <label class="text-stone-700 font-semibold">Factor de Crecimiento Municipal</label>
+            <strong id="gf_val_display" class="font-mono text-emerald-700 font-bold">1.05x</strong>
+          </div>
+          <div class="flex items-center space-x-3">
+            <input type="number" id="gf_factor" step="0.01" min="0.5" max="3.0" value="1.05" oninput="document.getElementById('gf_val_display').innerText = parseFloat(this.value || 1.0).toFixed(2) + 'x'" class="w-28 bg-white border border-stone-300 rounded-lg px-3 py-1.5 font-mono text-stone-900 font-bold text-center focus:border-metro-green focus:outline-none">
+            <span class="text-[11px] text-stone-500">Población proyectada respecto al Censo 2020</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end space-x-2 pt-3 border-t border-stone-200">
+        <button onclick="closeAddGrowthFactorModal()" class="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-semibold rounded-lg transition">
+          Cancelar
+        </button>
+        <button onclick="saveCustomGrowthFactor()" class="px-5 py-2 bg-metro-green hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition shadow-xs flex items-center space-x-1.5">
+          <i data-lucide="check" class="w-4 h-4"></i>
+          <span>Guardar Factor</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- ========================================================================= -->
   <!-- SISTEMA REACTIVO JAVASCRIPT & ESTADO DEL WIZARD -->
   <!-- ========================================================================= -->
@@ -2168,6 +2276,25 @@
       }
     }
 
+    async function relinkDataFile(filename) {
+      try {
+        const res = await fetch('/api/data/relink', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file: currentCityFile, filename })
+        });
+        const json = await res.json();
+        if (json.status === 'ok') {
+          showToast(`Archivo '${filename}' restaurado exitosamente`, "success");
+          await refreshDataStatus(false);
+        } else {
+          showToast(json.error || "No se pudo restaurar el archivo", "error");
+        }
+      } catch (e) {
+        showToast(e.message, "error");
+      }
+    }
+
     // -------------------------------------------------------------------------
     // COLAPSO / EXPANSIÓN DE BARRAS LATERALES
     // -------------------------------------------------------------------------
@@ -2239,7 +2366,11 @@
           .then(data => {
             if (data.status === 'ok') {
               window.conapoMetadata = window.conapoMetadata || {};
-              data.factors.forEach(f => { window.conapoMetadata[f.cve_mun] = f; });
+              window.conapoYear = data.projection_year;
+              data.factors.forEach(f => {
+                f.ano = f.ano || data.projection_year;
+                window.conapoMetadata[f.cve_mun] = f;
+              });
               if (document.getElementById('conapoSubtitleLabel')) {
                 document.getElementById('conapoSubtitleLabel').innerText = `Factores de sincronización intercensal Pob_${data.projection_year || 2025} / Pob_2020 (${data.conapo_file || 'CONAPO'}).`;
               }
@@ -2292,7 +2423,8 @@
         zoomSnap: 0.5,             // Pasos limpios y precisos
         zoomDelta: 1,              // Avance rápido con botones
         wheelPxPerZoomLevel: 50,   // Rápido y directo al girar la rueda del ratón
-        wheelDebounceTime: 10      // Respuesta instantánea sin retrasos
+        wheelDebounceTime: 10,     // Respuesta instantánea sin retrasos
+        preferCanvas: true         // Motor HTML5 2D Canvas de alto rendimiento
       };
 
       // 1. Mapa BBOX
@@ -4122,6 +4254,32 @@
           `;
           container.appendChild(card);
         });
+
+        // Renderizar exclusiones si existen
+        const exCont = document.getElementById('dataExclusionsContainer');
+        const exList = document.getElementById('dataExclusionsList');
+        if (exCont && exList) {
+          const exclusions = status.exclusions || [];
+          if (exclusions.length > 0) {
+            exCont.classList.remove('hidden');
+            exList.innerHTML = exclusions.map(ex => `
+              <div class="flex items-center justify-between bg-stone-50 border border-stone-200 px-3 py-2 rounded-lg text-xs">
+                <div class="flex items-center space-x-2 truncate mr-2">
+                  <span class="w-2 h-2 rounded-full bg-stone-400 shrink-0"></span>
+                  <span class="truncate text-stone-600 font-mono line-through font-semibold">${ex}</span>
+                </div>
+                <button onclick="relinkDataFile('${ex}')" class="px-2 py-1 bg-white hover:bg-stone-100 border border-stone-300 text-emerald-700 hover:text-emerald-800 rounded font-semibold text-[11px] flex items-center space-x-1 transition shadow-2xs shrink-0" title="Volver a incluir este archivo en la compilación">
+                  <i data-lucide="undo-2" class="w-3.5 h-3.5"></i>
+                  <span>Restaurar</span>
+                </button>
+              </div>
+            `).join('');
+          } else {
+            exCont.classList.add('hidden');
+            exList.innerHTML = '';
+          }
+        }
+
         lucide.createIcons();
         if (isManual) {
           showToast("Fuentes de datos actualizadas", "success");
@@ -4154,6 +4312,7 @@
     }
 
     async function uploadFiles(files) {
+      if (!files || files.length === 0) return;
       const progressCont = document.getElementById('uploadProgressContainer');
       const progressBar = document.getElementById('uploadProgressBar');
       const progressPercent = document.getElementById('uploadPercent');
@@ -4165,44 +4324,66 @@
       const code = cityData.city ? (cityData.city.code || "") : "";
       const uploadUrl = `/api/upload?file=${encodeURIComponent(currentCityFile)}&city=${encodeURIComponent(code)}`;
 
-      for (let file of files) {
-        fileNameLabel.innerText = `Subiendo ${file.name}...`;
-        const formData = new FormData();
-        formData.append("file", file);
+      const totalFiles = files.length;
+      let successCount = 0;
+
+      for (let i = 0; i < totalFiles; i++) {
+        const file = files[i];
+        fileNameLabel.innerText = `Subiendo (${i + 1}/${totalFiles}): ${file.name}...`;
+        progressBar.style.width = "0%";
+        progressPercent.innerText = "0%";
 
         try {
-          const xhr = new XMLHttpRequest();
-          xhr.open("POST", uploadUrl, true);
+          await new Promise((resolve) => {
+            const formData = new FormData();
+            formData.append("file", file);
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", uploadUrl, true);
 
-          xhr.upload.onprogress = (e) => {
-            if (e.lengthComputable) {
-              const p = Math.round((e.loaded / e.total) * 100);
-              progressBar.style.width = p + "%";
-              progressPercent.innerText = p + "%";
-            }
-          };
+            xhr.upload.onprogress = (e) => {
+              if (e.lengthComputable) {
+                const p = Math.round((e.loaded / e.total) * 100);
+                progressBar.style.width = p + "%";
+                progressPercent.innerText = p + "%";
+              }
+            };
 
-          xhr.onload = () => {
-            if (xhr.status === 200) {
-              const resp = JSON.parse(xhr.responseText || '{}');
-              const targetFolder = resp.target_dir ? `${resp.target_dir}/` : 'data/';
-              showToast(`Archivo '${file.name}' guardado en ${targetFolder}`, "success");
-              const li = document.createElement('li');
-              li.className = "text-emerald-400 flex items-center space-x-1";
-              li.innerHTML = `<span>&check;</span> <span>${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB) &rarr; ${targetFolder}</span>`;
-              if (uploadedList.querySelector('li.italic')) uploadedList.innerHTML = '';
-              uploadedList.appendChild(li);
-              refreshDataStatus();
-            } else {
-              showToast(`Error al subir ${file.name}`, "error");
-            }
-          };
-          xhr.send(formData);
+            xhr.onload = () => {
+              if (xhr.status === 200) {
+                const resp = JSON.parse(xhr.responseText || '{}');
+                const targetFolder = resp.target_dir ? `${resp.target_dir}/` : 'data/';
+                showToast(`Archivo '${file.name}' guardado en ${targetFolder}`, "success");
+                const li = document.createElement('li');
+                li.className = "text-emerald-700 flex items-center space-x-1 font-medium";
+                li.innerHTML = `<span>&check;</span> <span>${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB) &rarr; ${targetFolder}</span>`;
+                if (uploadedList.querySelector('li.italic')) uploadedList.innerHTML = '';
+                uploadedList.appendChild(li);
+                successCount++;
+              } else {
+                showToast(`Error al subir ${file.name}`, "error");
+              }
+              resolve();
+            };
+
+            xhr.onerror = () => {
+              showToast(`Error de red al subir ${file.name}`, "error");
+              resolve();
+            };
+
+            xhr.send(formData);
+          });
         } catch (err) {
-          showToast(`Error de red: ${err.message}`, "error");
+          console.error(`Error en subida de ${file.name}:`, err);
         }
       }
-      setTimeout(() => progressCont.classList.add('hidden'), 2000);
+
+      if (successCount > 0) {
+        await refreshDataStatus(false);
+      }
+      fileNameLabel.innerText = `Carga finalizada (${successCount}/${totalFiles} archivos)`;
+      progressBar.style.width = "100%";
+      progressPercent.innerText = "100%";
+      setTimeout(() => progressCont.classList.add('hidden'), 2500);
     }
 
     // -------------------------------------------------------------------------
@@ -4404,6 +4585,7 @@
           cityData.macroeconomics.growth_factors = {};
 
           data.factors.forEach(f => {
+            f.ano = f.ano || data.projection_year;
             window.conapoMetadata[f.cve_mun] = f;
             cityData.macroeconomics.growth_factors[f.cve_mun] = f.factor;
           });
@@ -4430,9 +4612,9 @@
       if (entries.length === 0) {
         const emptyTr = document.createElement('tr');
         emptyTr.innerHTML = `
-          <td colspan="6" class="p-6 text-center text-gray-400">
+          <td colspan="7" class="p-6 text-center text-stone-500">
             <span>No hay factores de proyección asignados.</span>
-            <button onclick="autoCalculateConapo()" class="text-emerald-400 hover:text-emerald-300 font-bold underline ml-1.5">Sincronizar automáticamente con CONAPO</button>
+            <button onclick="autoCalculateConapo()" class="text-emerald-600 hover:text-emerald-700 font-bold underline ml-1.5">Sincronizar automáticamente con CONAPO</button>
           </td>
         `;
         tbody.appendChild(emptyTr);
@@ -4443,21 +4625,23 @@
       entries.forEach(([code, val]) => {
         const meta = (window.conapoMetadata && window.conapoMetadata[code]) || {};
         const munName = meta.name || `Municipio ${code}`;
+        const anoStr = meta.ano || window.conapoYear || (window.conapoMetadata && window.conapoMetadata.projection_year) || 2024;
         const pob2020Str = meta.pob_2020 ? Number(meta.pob_2020).toLocaleString() : "-";
         const pobProjStr = meta.pob_conapo ? Number(meta.pob_conapo).toLocaleString() : "-";
 
         const tr = document.createElement('tr');
         tr.className = "hover:bg-metro-panel/50 transition";
         tr.innerHTML = `
-          <td class="p-2.5 font-bold text-white font-mono">${code}</td>
-          <td class="p-2.5 text-gray-200 font-sans">${munName}</td>
-          <td class="p-2.5 text-gray-400 font-mono">${pob2020Str}</td>
-          <td class="p-2.5 text-emerald-400 font-mono font-bold">${pobProjStr}</td>
+          <td class="p-2.5 font-bold text-stone-900 font-mono">${code}</td>
+          <td class="p-2.5 text-stone-800 font-sans">${munName}</td>
+          <td class="p-2.5 text-stone-600 font-mono text-center font-bold">${anoStr}</td>
+          <td class="p-2.5 text-stone-600 font-mono">${pob2020Str}</td>
+          <td class="p-2.5 text-emerald-700 font-mono font-bold">${pobProjStr}</td>
           <td class="p-2.5">
-            <input type="number" step="0.01" value="${val}" onchange="updateGrowthFactor('${code}', this.value)" class="bg-metro-card border border-metro-border rounded px-2 py-1 text-white w-20 font-mono text-center">
+            <input type="number" step="0.01" value="${val}" onchange="updateGrowthFactor('${code}', this.value)" class="bg-white border border-stone-300 rounded px-2 py-1 text-stone-900 w-20 font-mono text-center">
           </td>
           <td class="p-2.5 text-right">
-            <button onclick="deleteGrowthFactor('${code}')" class="text-rose-400 hover:text-rose-300 p-1 rounded hover:bg-rose-950/30 transition" title="Eliminar factor">
+            <button onclick="deleteGrowthFactor('${code}')" class="text-rose-600 hover:text-rose-700 p-1 rounded hover:bg-rose-50 transition" title="Eliminar factor">
               <i data-lucide="trash-2" class="w-4 h-4"></i>
             </button>
           </td>
@@ -4467,14 +4651,54 @@
       lucide.createIcons();
     }
 
-    function addGrowthFactorRow() {
-      const code = prompt("Ingresa la clave de municipio (ej. 23005):", "23005");
-      if (code) {
-        if (!cityData.macroeconomics.growth_factors) cityData.macroeconomics.growth_factors = {};
-        cityData.macroeconomics.growth_factors[code] = 1.05;
-        renderGrowthFactorsTable();
-        triggerAutoSave();
+    function openAddGrowthFactorModal() {
+      document.getElementById('gf_code').value = '';
+      document.getElementById('gf_name').value = '';
+      document.getElementById('gf_factor').value = '1.05';
+      document.getElementById('gf_val_display').innerText = '1.05x';
+      const defAno = window.conapoYear || (window.conapoMetadata && window.conapoMetadata.projection_year) || 2026;
+      document.getElementById('gf_ano').value = defAno;
+      document.getElementById('modalAddGrowthFactor').classList.remove('hidden');
+      setTimeout(() => document.getElementById('gf_code').focus(), 50);
+      lucide.createIcons();
+    }
+
+    function closeAddGrowthFactorModal() {
+      const modal = document.getElementById('modalAddGrowthFactor');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function saveCustomGrowthFactor() {
+      const code = document.getElementById('gf_code').value.trim();
+      const name = document.getElementById('gf_name').value.trim();
+      const factorVal = parseFloat(document.getElementById('gf_factor').value);
+      const anoVal = parseInt(document.getElementById('gf_ano').value) || 2026;
+
+      if (!code || code.length < 4 || isNaN(factorVal) || factorVal <= 0) {
+        showToast("Por favor ingresa una clave municipal válida de 4 o 5 dígitos y un factor positivo.", "warning");
+        return;
       }
+
+      if (!cityData.macroeconomics) cityData.macroeconomics = {};
+      if (!cityData.macroeconomics.growth_factors) cityData.macroeconomics.growth_factors = {};
+      cityData.macroeconomics.growth_factors[code] = factorVal;
+
+      if (!window.conapoMetadata) window.conapoMetadata = {};
+      window.conapoMetadata[code] = {
+        name: name || `Municipio ${code}`,
+        ano: anoVal,
+        pob_2020: null,
+        pob_conapo: null
+      };
+
+      renderGrowthFactorsTable();
+      triggerAutoSave();
+      closeAddGrowthFactorModal();
+      showToast(`Factor para ${name || code} agregado exitosamente`, "success");
+    }
+
+    function addGrowthFactorRow() {
+      openAddGrowthFactorModal();
     }
     function updateGrowthFactor(code, val) {
       cityData.macroeconomics.growth_factors[code] = parseFloat(val);
@@ -5324,7 +5548,11 @@
 
       // Atajos con modificador Ctrl / Cmd
       if (isCtrlOrMeta) {
-        if (key === 'c') {
+        if (key === 's') {
+          e.preventDefault();
+          saveCurrentCity(false);
+          return;
+        } else if (key === 'c') {
           if (isEditableTextInput(document.activeElement)) {
             const input = document.activeElement;
             if (input.selectionStart !== input.selectionEnd) {
@@ -5352,6 +5580,36 @@
           }
         }
         return;
+      }
+
+      // Tecla Escape para cerrar modales o cancelar modos de dibujo / selección
+      if (key === 'escape') {
+        if (typeof isDrawingIsolated !== 'undefined' && isDrawingIsolated) {
+          cancelDrawingIsolatedZone();
+          return;
+        }
+        if (typeof isDrawingAffluence !== 'undefined' && isDrawingAffluence) {
+          cancelDrawingAffluenceZone();
+          return;
+        }
+        if (typeof isPickingLocation !== 'undefined' && isPickingLocation) {
+          isPickingLocation = false;
+          if (mapPoi) mapPoi.getContainer().style.cursor = '';
+          showToast("Selección de ubicación cancelada", "info");
+          return;
+        }
+        const modalIds = ['modalProjects', 'modalDataSources', 'modalChangeDataDir', 'modalIsolatedZone', 'modalAffluenceZone', 'modalAddGrowthFactor'];
+        for (const mid of modalIds) {
+          const m = document.getElementById(mid);
+          if (m && !m.classList.contains('hidden')) {
+            if (mid === 'modalProjects') {
+              if (currentCityFile) closeProjectsModal();
+            } else {
+              m.classList.add('hidden');
+            }
+            return;
+          }
+        }
       }
 
       // Teclas directas: Supr / Delete para eliminar POI seleccionado
@@ -5611,9 +5869,11 @@
             document.getElementById('btnToggleDensityJobs')?.classList.remove('bg-rose-500/30', 'border-rose-500');
           } else {
             densityLayers.jobs = L.layerGroup();
+            const poiDensityCanvas = L.canvas({ padding: 0.5 });
             densityPoints.filter(p => p.jobs > 0).forEach(p => {
               const r = Math.min(18, Math.max(3.5, Math.sqrt(p.jobs) * 0.45));
               const circle = L.circleMarker([p.location[1], p.location[0]], {
+                renderer: poiDensityCanvas,
                 radius: r,
                 color: '#e11d48',
                 weight: 1.5,
@@ -6300,8 +6560,8 @@
 
             const btnDl = document.getElementById('btnDownloadZipStep5');
             if (btnDl) {
-              const zipName = (currentCityData && currentCityData.city && currentCityData.city.code) 
-                ? `${currentCityData.city.code}.zip` 
+              const zipName = (cityData && cityData.city && cityData.city.code) 
+                ? `${cityData.city.code}.zip` 
                 : `${currentCityFile.replace(/.*\//, '').replace('.yaml', '')}.zip`;
               btnDl.href = `/api/download?file=${encodeURIComponent(zipName)}`;
               btnDl.classList.remove('hidden');
@@ -6316,7 +6576,9 @@
             showToast("¡Compilación finalizada! Ya puedes descargar tu archivo .zip.", "success");
             lucide.createIcons();
           }
-        } catch (err) {}
+        } catch (err) {
+          console.error("Error al procesar mensaje SSE:", err);
+        }
       };
     }
 
@@ -6397,11 +6659,36 @@
     // -------------------------------------------------------------------------
     // PASO 6: VISOR DE DEMANDA Y EMPAQUETADO
     // -------------------------------------------------------------------------
+    let isDemandCompiled = false;
+
+    function dismissDemandEmptyState() {
+      const el = document.getElementById('demandEmptyState');
+      if (el) el.classList.add('hidden');
+    }
+
     async function loadDemandDataPreview() {
       try {
         const res = await fetch(`/api/demand-preview?file=${encodeURIComponent(currentCityFile)}`);
         const data = await res.json();
         const points = data.points || [];
+        const isNotCompiled = !data || data.metadata?.status === 'not_compiled' || points.length === 0;
+        isDemandCompiled = !isNotCompiled;
+
+        const emptyStateEl = document.getElementById('demandEmptyState');
+        const btnDownload = document.getElementById('btnDownloadZip');
+        if (isNotCompiled) {
+          if (emptyStateEl) emptyStateEl.classList.remove('hidden');
+          if (btnDownload) {
+            btnDownload.classList.add('opacity-50', 'cursor-not-allowed');
+            btnDownload.setAttribute('title', 'Debes compilar el proyecto en el Paso 5 antes de descargar');
+          }
+        } else {
+          if (emptyStateEl) emptyStateEl.classList.add('hidden');
+          if (btnDownload) {
+            btnDownload.classList.remove('opacity-50', 'cursor-not-allowed');
+            btnDownload.removeAttribute('title');
+          }
+        }
 
         document.getElementById('metricDemandPoints').innerText = points.length.toLocaleString();
 
@@ -6412,6 +6699,8 @@
         demandLayers.jobs.clearLayers();
         demandLayers.pois.clearLayers();
 
+        const demandCanvas = L.canvas({ padding: 0.5 });
+
         points.forEach(pt => {
           const latLng = [pt.location[1], pt.location[0]];
           totalResidents += (pt.residents || 0);
@@ -6419,6 +6708,7 @@
 
           if (pt.residents > 0) {
             const resCircle = L.circleMarker(latLng, {
+              renderer: demandCanvas,
               radius: Math.min(8, Math.max(3, Math.sqrt(pt.residents) * 0.8)),
               color: '#0284c7',
               fillColor: '#38bdf8',
@@ -6441,6 +6731,7 @@
           }
           if (pt.jobs > 0) {
             const jobCircle = L.circleMarker(latLng, {
+              renderer: demandCanvas,
               radius: Math.min(8, Math.max(3, Math.sqrt(pt.jobs) * 0.8)),
               color: '#e11d48',
               fillColor: '#f43f5e',
@@ -6472,6 +6763,7 @@
           const b = cityData.city.bbox;
           if (b && b.length === 4) mapDemand.fitBounds([[b[1], b[0]], [b[3], b[2]]]);
         }
+        lucide.createIcons();
       } catch (e) {
         console.error("Error al cargar demanda final:", e);
       }
@@ -6494,6 +6786,11 @@
     }
 
     function downloadCityPackage() {
+      const btn = document.getElementById('btnDownloadZip');
+      if (btn && btn.classList.contains('cursor-not-allowed')) {
+        showToast("El paquete aún no ha sido compilado. Dirígete al Paso 5 para iniciar la compilación.", "warning");
+        return;
+      }
       window.location.href = `/api/download?file=${encodeURIComponent(currentCityFile)}`;
     }
 
@@ -6537,37 +6834,6 @@
       return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
-    function openNewCityModal() { document.getElementById('modalNewCity').classList.remove('hidden'); }
-    function closeNewCityModal() { document.getElementById('modalNewCity').classList.add('hidden'); }
-    async function submitCreateCity() {
-      const code = document.getElementById('new_city_code').value.trim().toUpperCase();
-      const name = document.getElementById('new_city_name').value.trim();
-      const desc = document.getElementById('new_city_desc').value.trim();
-      if (!code || !name) {
-        showToast("Código y nombre son obligatorios", "error");
-        return;
-      }
-      try {
-        const res = await fetch('/api/city/create', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code, name, description: desc })
-        });
-        const json = await res.json();
-        if (json.status === 'ok') {
-          closeNewCityModal();
-          await fetchCitiesList();
-          currentCityFile = json.file;
-          document.getElementById('citySelect').value = json.file;
-          await loadCityData(json.file);
-          showToast(`Ciudad '${name}' creada exitosamente`, "success");
-        } else {
-          throw new Error(json.error);
-        }
-      } catch (e) {
-        showToast(e.message, "error");
-      }
-    }
   </script>
 </body>
 </html>

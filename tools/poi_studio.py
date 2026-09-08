@@ -747,11 +747,13 @@ def run_server(port: int = 8080, initial_city: str = None, open_browser: bool = 
         url += f"?city={initial_city}"
 
     print("=" * 60)
-    print(" 🚇 SUBWAY BUILDER MÉXICO v6.3 - POI STUDIO ")
+    print(" SUBWAY BUILDER MEXICO v6.3 - POI STUDIO ")
     print("=" * 60)
     print(f" Servidor iniciado en: {url}")
-    print(f" Raíz del proyecto:    {ROOT_DIR}")
-    print(f" Presiona Ctrl+C para detener el servidor.")
+    print(f" Raiz del proyecto:    {ROOT_DIR}")
+    print(" [NOTA] POI Studio se encuentra integrado en el Wizard unificado:")
+    print("        http://127.0.0.1:8080/#step-4")
+    print(" Presiona Ctrl+C para detener el servidor.")
     print("=" * 60)
 
     if open_browser:
