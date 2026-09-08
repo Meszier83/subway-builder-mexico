@@ -14,7 +14,8 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 from typing import List, Dict, Tuple, Optional, Union, Any
-from shapely.geometry import Point
+from shapely.geometry import Point, Polygon
+from shapely.prepared import prep
 from shapely.strtree import STRtree
 from shapely.ops import nearest_points
 from scipy.spatial import cKDTree
@@ -29,6 +30,87 @@ DEFAULT_RADIUS_METERS = {
 }
 
 
+def is_point_in_zone(lon: float, lat: float, zone: Dict[str, Any]) -> bool:
+    """
+    Verifica si una coordenada [lon, lat] cae dentro de una zona (polígono o bbox).
+    Maneja geometrías cerradas, auto-intersecciones y optimización con prepared geometries.
+    """
+    if not zone or not zone.get("enabled", True):
+        return False
+
+    # Chequeo preliminar ultrarrápido por bounding box
+    bbox = zone.get("bbox")
+    if bbox and len(bbox) == 4:
+        min_lon = min(float(bbox[0]), float(bbox[2]))
+        min_lat = min(float(bbox[1]), float(bbox[3]))
+        max_lon = max(float(bbox[0]), float(bbox[2]))
+        max_lat = max(float(bbox[1]), float(bbox[3]))
+        if not (min_lon <= lon <= max_lon and min_lat <= lat <= max_lat):
+            return False
+        if zone.get("type") == "bbox" or not zone.get("coordinates"):
+            return True
+
+    # Chequeo poligonal detallado
+    coords = zone.get("coordinates")
+    if coords and len(coords) >= 3:
+        try:
+            poly = zone.get("_prepared_poly")
+            if poly is None:
+                pts = [list(c) for c in coords]
+                if pts[0] != pts[-1]:
+                    pts.append(pts[0])
+                p_obj = Polygon(pts)
+                if not p_obj.is_valid:
+                    p_obj = p_obj.buffer(0)
+                poly = prep(p_obj)
+                zone["_prepared_poly"] = poly
+            return bool(poly.contains(Point(lon, lat)))
+        except Exception:
+            return False
+
+    return False
+
+
+def get_zone_multipliers_for_point(
+    lon: float,
+    lat: float,
+    affluence_zones: Optional[List[Dict[str, Any]]]
+) -> Tuple[float, float, Optional[str]]:
+    """
+    Determina el multiplicador de empleo y bono de alcance para un punto espacial,
+    resolviendo solapamientos mediante la regla canónica MAX Priority:
+    alpha = max(alpha_1, ..., alpha_k), reach_bonus = max(reach_1, ..., reach_k).
+    Retorna: (multiplier, reach_bonus, matched_zone_id)
+    """
+    if not affluence_zones:
+        return 1.0, 0.0, None
+
+    max_mult = 1.0
+    max_reach = 0.0
+    matched_id = None
+
+    for zone in affluence_zones:
+        if is_point_in_zone(lon, lat, zone):
+            try:
+                z_mult = float(zone.get("multiplier", 1.0))
+            except (ValueError, TypeError):
+                z_mult = 1.0
+            try:
+                z_reach = float(zone.get("reach_bonus", 0.0))
+            except (ValueError, TypeError):
+                z_reach = 0.0
+
+            if z_mult > max_mult:
+                max_mult = z_mult
+                matched_id = zone.get("id")
+            if z_reach > max_reach:
+                max_reach = z_reach
+                if matched_id is None:
+                    matched_id = zone.get("id")
+
+    return max_mult, max_reach, matched_id
+
+
 def build_demand_grid(
     df_denue: pd.DataFrame,
     df_cpv: pd.DataFrame,
@@ -37,11 +119,13 @@ def build_demand_grid(
     grid_size: float = 0.0025,
     min_residents: int = 10,
     min_jobs: int = 3,
-    seed: int = 42
+    seed: int = 42,
+    affluence_zones: Optional[List[Dict]] = None
 ) -> Tuple[List[Dict], List[Dict]]:
     """
     Agrega datos de población y empleo en celdas espaciales,
-    resuelve la absorción de POIs Especiales y realiza el snapping a la red vial.
+    resuelve la absorción de POIs Especiales, modula Zonas de Alta Afluencia
+    y realiza el snapping a la red vial.
     """
     rng = np.random.default_rng(seed)
     
@@ -115,6 +199,13 @@ def build_demand_grid(
             matched_poi["denue_jobs_absorbidos"] += r_jobs
             continue  # Se absorbe por el POI más cercano para evitar doble conteo
 
+        # Modulación de Zonas de Alta Afluencia para empleo regular DENUE
+        # (Los POIs especiales conservan estrictamente su valor manual declarado)
+        if affluence_zones:
+            mult, _, _ = get_zone_multipliers_for_point(r_lon, r_lat, affluence_zones)
+            if mult > 1.0:
+                r_jobs *= mult
+
         # Sumar a la malla regular con acumulación de masa humana activa
         k = get_grid_key(r_lon, r_lat)
         if k not in grid:
@@ -128,6 +219,27 @@ def build_demand_grid(
         cell["sum_lat_w"] += r_lat * w
         cell["weight"] += w
         cell["jobs"] += r_jobs
+
+    # 2b. Reescalado para Zonas con Cupo Objetivo Fijo (TARGET_CAPACITY)
+    if affluence_zones:
+        for zone in affluence_zones:
+            if not zone.get("enabled", True):
+                continue
+            if zone.get("target_mode") == "TARGET_CAPACITY":
+                target_j = float(zone.get("target_jobs", 0))
+                if target_j > 0:
+                    matching_keys = []
+                    current_j = 0.0
+                    for k, cell in grid.items():
+                        c_lon = cell["sum_lon_w"] / cell["weight"] if cell["weight"] > 0 else (float(k.split("_")[0]) + 0.5) * grid_size
+                        c_lat = cell["sum_lat_w"] / cell["weight"] if cell["weight"] > 0 else (float(k.split("_")[1]) + 0.5) * grid_size
+                        if is_point_in_zone(c_lon, c_lat, zone) and cell["jobs"] > 0:
+                            matching_keys.append(k)
+                            current_j += cell["jobs"]
+                    if matching_keys and current_j > 0:
+                        scale = target_j / current_j
+                        for k in matching_keys:
+                            grid[k]["jobs"] *= scale
 
     # 3. Sumar Población del Censo a la Malla
     cpv_records = (
@@ -606,6 +718,7 @@ def furness_ipfp_balance(
     orig_pea: np.ndarray,
     dest_jobs: np.ndarray,
     dist_km_mat: np.ndarray,
+    reach_bonuses: Optional[np.ndarray] = None,
     beta: float = 0.12,
     max_distance_km: float = 55.0,
     max_iter: int = 15,
@@ -618,7 +731,7 @@ def furness_ipfp_balance(
     Garantiza que la matriz de flujos converja simultáneamente hacia:
     1. Totales por fila: Sum_j T_ij = O_i (PEA residencial por origen).
     2. Totales por columna: Sum_i T_ij proporcional a D_j (Capacidad de puestos de trabajo).
-    3. Fricción espacial: f(d_ij) = exp(-beta * d_ij) para d_ij <= max_distance_km.
+    3. Fricción espacial modulada: f(d_ij) = exp(-beta_j * d_ij) con bono de alcance y piso de retención local.
 
     Retorna la matriz de probabilidades condicionales P_ij = T_ij / O_i de dimensión (N, M),
     donde cada fila suma exactamente 1.0.
@@ -638,8 +751,18 @@ def furness_ipfp_balance(
     d_target = (dest_jobs.astype(np.float64) / total_d) * total_o
     o_target = orig_pea.astype(np.float64)
 
-    # 2. Matriz de Fricción Espacial Base
-    friction = np.exp(-beta * dist_km_mat)
+    # 2. Matriz de Fricción Espacial con modulación de alcance por destino
+    if reach_bonuses is not None and np.any(reach_bonuses > 0):
+        clamped_reach = np.clip(reach_bonuses, 0.0, 0.60)
+        eff_beta = beta * (1.0 - clamped_reach)
+        friction = np.exp(-eff_beta[np.newaxis, :] * dist_km_mat)
+        # Salvaguarda de Piso de Retención Local para viajes de proximidad (<= 3 km)
+        local_mask = dist_km_mat <= 3.0
+        friction_base = np.exp(-beta * dist_km_mat)
+        friction = np.where(local_mask & (friction < friction_base), friction_base, friction)
+    else:
+        friction = np.exp(-beta * dist_km_mat)
+
     friction[dist_km_mat > max_distance_km] = 0.0
 
     # 3. Inicializar Matriz de Flujos T_ij^(0)
@@ -709,6 +832,7 @@ def simulate_gravity_demand(
     target_pop_size: int = 180,
     seed: int = 42,
     isolated_zones: Optional[List[Dict]] = None,
+    affluence_zones: Optional[List[Dict]] = None,
     furness_iterations: int = 15,
     furness_tol: float = 0.02,
     road_index: Optional["ArterialRoadIndex"] = None
@@ -876,6 +1000,15 @@ def simulate_gravity_demand(
         a = np.sin(dlat / 2.0)**2 + np.cos(orig_coords[:, 1][:, np.newaxis]) * np.cos(dest_coords[:, 1][np.newaxis, :]) * np.sin(dlon / 2.0)**2
         dist_km_mat = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
 
+        # Vectorizar bonos de alcance por destino según Zonas de Alta Afluencia
+        reach_bonuses = np.zeros(len(regular_dests), dtype=np.float64)
+        if affluence_zones:
+            for d_idx, d in enumerate(regular_dests):
+                _, r_bonus, _ = get_zone_multipliers_for_point(
+                    d["location"][0], d["location"][1], affluence_zones
+                )
+                reach_bonuses[d_idx] = r_bonus
+
         prob_matrix = np.zeros((len(origins), len(regular_dests)), dtype=np.float64)
 
         # Balanceo de Furness / IPFP ejecutado de forma estanca por cada zona topológica
@@ -893,6 +1026,7 @@ def simulate_gravity_demand(
                 sub_dist = dist_km_mat[np.ix_(orig_indices, dest_indices)].copy()
                 sub_pea = orig_pea[orig_indices].copy()
                 sub_jobs = dest_jobs[dest_indices].copy()
+                sub_reach = reach_bonuses[dest_indices].copy()
 
                 # Anular auto-viajes si hay múltiples destinos disponibles en la zona
                 if len(dest_indices) > 1:
@@ -908,6 +1042,7 @@ def simulate_gravity_demand(
                     orig_pea=sub_pea,
                     dest_jobs=sub_jobs,
                     dist_km_mat=sub_dist,
+                    reach_bonuses=sub_reach,
                     beta=beta,
                     max_distance_km=max_distance_km,
                     max_iter=furness_iterations,

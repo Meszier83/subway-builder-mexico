@@ -466,23 +466,119 @@
             left: 470px;
             z-index: 1000;
             background: var(--bg-panel);
-            backdrop-filter: blur(12px);
+            backdrop-filter: blur(14px);
             border: 1px solid var(--accent-amber);
             border-radius: 12px;
-            padding: 14px 18px;
+            padding: 16px 18px;
             box-shadow: var(--shadow-lg);
-            min-width: 280px;
+            width: 440px;
+            max-width: calc(100vw - 500px);
+            max-height: 82vh;
+            overflow-y: auto;
             display: none;
         }
         .measure-title {
-            font-size: 12px;
+            font-size: 13px;
             font-weight: 800;
             color: var(--accent-amber);
-            margin-bottom: 8px;
+            margin-bottom: 12px;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 8px;
         }
+        .meas-comp-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .meas-box {
+            background: rgba(30, 41, 59, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            padding: 10px 12px;
+        }
+        .meas-box-title {
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .meas-val-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            margin-bottom: 4px;
+        }
+        .meas-val-row strong { font-size: 14px; }
+        .meas-delta-badge {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .delta-positive { background: rgba(74, 222, 128, 0.2); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.4); }
+        .delta-negative { background: rgba(248, 113, 113, 0.2); color: #f87171; border: 1px solid rgba(248, 113, 113, 0.4); }
+        .delta-neutral { background: rgba(148, 163, 184, 0.2); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.4); }
+
+        .meas-audit-section {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 11px;
+            line-height: 1.5;
+            color: #cbd5e1;
+        }
+        .meas-audit-section h4 {
+            font-size: 11px;
+            font-weight: 800;
+            color: var(--accent-cyan);
+            text-transform: uppercase;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .meas-audit-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 0;
+            border-bottom: 1px dashed rgba(255, 255, 255, 0.06);
+        }
+        .meas-audit-item:last-child { border-bottom: none; }
+        .meas-poi-pill {
+            background: rgba(56, 189, 248, 0.15);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 10px;
+            color: #7dd3fc;
+            display: inline-block;
+            margin: 2px 3px 2px 0;
+        }
+        .meas-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+            font-size: 10px;
+            color: var(--text-muted);
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            padding-top: 6px;
+        }
+        .legend-item { display: flex; align-items: center; gap: 4px; }
+        .legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 
         /* Quick helper tooltip bar */
         .map-crosshair-tip {
@@ -795,23 +891,108 @@
 
         <!-- Floating Map Toolbar -->
         <div class="map-toolbar">
-            <button class="tool-btn" id="btn-toggle-box-select" title="Selecciona un área rectangular arrastrando sobre el mapa para sumar empleos y población">
+            <button class="tool-btn" id="btn-toggle-box-select" title="Selecciona un área rectangular arrastrando sobre el mapa">
                 <i class="fa-solid fa-vector-square" style="color:var(--accent-amber)"></i>
-                <span>Medir Área / Empleos</span>
+                <span>Caja (BBox)</span>
+            </button>
+            <button class="tool-btn" id="btn-toggle-poly-select" title="Haz clics en el mapa para trazar un polígono irregular. Doble clic o clic en 'Cerrar' para finalizar.">
+                <i class="fa-solid fa-draw-polygon" style="color:var(--accent-purple)"></i>
+                <span>Polígono (Lazo)</span>
+            </button>
+            <button class="tool-btn btn-sm btn-success" id="btn-finish-poly" style="display:none;" title="Finalizar polígono trazado">
+                <i class="fa-solid fa-check"></i> <span>Cerrar Polígono</span>
             </button>
         </div>
 
         <!-- Area Selection Floating Result HUD -->
         <div id="area-measure-hud">
             <div class="measure-title">
-                <span><i class="fa-solid fa-draw-polygon"></i> Resumen del Área</span>
+                <span><i class="fa-solid fa-chart-simple"></i> Auditoría de Demanda de Área</span>
                 <button class="btn btn-sm btn-danger" id="btn-clear-measure" style="padding:2px 6px;">✕ Cerrar</button>
             </div>
-            <div class="absorption-grid" style="margin-bottom:0;">
-                <div class="stat-mini"><span>Empleos Censados:</span><strong id="meas-jobs" style="color:var(--accent-green); font-size:15px;">0</strong></div>
-                <div class="stat-mini"><span>Población Habitante:</span><strong id="meas-pop" style="color:var(--accent-cyan); font-size:15px;">0</strong></div>
-                <div class="stat-mini"><span>Nodos en Zona:</span><strong id="meas-nodes">0</strong></div>
-                <div class="stat-mini"><span>Área Estimada:</span><strong id="meas-area">0 km²</strong></div>
+            
+            <div class="meas-comp-grid">
+                <!-- Columna 1: Línea Base Calibrada -->
+                <div class="meas-box">
+                    <div class="meas-box-title" style="color:#94a3b8;">
+                        <i class="fa-solid fa-database"></i> Línea Base (Calibrada)
+                    </div>
+                    <div class="meas-val-row">
+                        <span title="Empleos base calibrados con Censo Económico 2024 y factor de informalidad TIL1 de ENOE">Empleos Calibrados:</span>
+                        <strong id="meas-orig-jobs" style="color:#38bdf8;">0</strong>
+                    </div>
+                    <div class="meas-val-row" style="font-size:11px; opacity:0.85;">
+                        <span title="Conteo crudo directo de directorios DENUE según estrato">DENUE Crudo:</span>
+                        <strong id="meas-raw-jobs" style="color:#94a3b8;">0</strong>
+                    </div>
+                    <div class="meas-val-row">
+                        <span>Población CPV:</span>
+                        <strong id="meas-orig-pop" style="color:#c084fc;">0</strong>
+                    </div>
+                    <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
+                        Base oficial pre-modificadores.
+                    </div>
+                </div>
+
+                <!-- Columna 2: Simulación En el Juego -->
+                <div class="meas-box" style="border-color:rgba(74, 222, 128, 0.3);">
+                    <div class="meas-box-title" style="color:#4ade80;">
+                        <i class="fa-solid fa-train-subway"></i> En el Juego (Final)
+                    </div>
+                    <div class="meas-val-row">
+                        <span>Empleos Totales:</span>
+                        <strong id="meas-game-jobs" style="color:#4ade80; font-size:16px;">0</strong>
+                    </div>
+                    <div class="meas-val-row">
+                        <span>Balance Neto:</span>
+                        <span id="meas-delta-badge" class="meas-delta-badge delta-neutral">0 (0%)</span>
+                    </div>
+                    <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
+                        Con POIs y Zonas de Afluencia.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Desglose de Modificadores -->
+            <div class="meas-audit-section">
+                <h4><i class="fa-solid fa-magnifying-glass-chart"></i> Desglose de Modificadores</h4>
+                <div class="meas-audit-item">
+                    <span>🏢 Empleo Orgánico Directo:</span>
+                    <strong id="meas-organic-jobs">0</strong>
+                </div>
+                <div class="meas-audit-item">
+                    <span>🚀 Impulso por Zonas de Afluencia:</span>
+                    <strong id="meas-affluence-boost" style="color:#fbbf24;">+0</strong>
+                </div>
+                <div class="meas-audit-item">
+                    <span title="Empleos DENUE en el área absorbidos por POIs cuyo centro está afuera de la selección">📤 Fuga hacia POIs Exteriores:</span>
+                    <strong id="meas-leaked-jobs" style="color:#f87171;">-0</strong>
+                </div>
+                <div class="meas-audit-item" style="flex-direction:column; align-items:flex-start; gap:4px; padding-top:4px;">
+                    <div style="display:flex; justify-content:space-between; width:100%;">
+                        <span>🌟 POIs Especiales en la Zona:</span>
+                        <strong id="meas-pois-count" style="color:#c084fc;">0</strong>
+                    </div>
+                    <div id="meas-pois-list" style="width:100%; font-size:10px;"></div>
+                </div>
+                <div class="meas-audit-item" style="flex-direction:column; align-items:flex-start; gap:4px; padding-top:4px;">
+                    <div style="display:flex; justify-content:space-between; width:100%;">
+                        <span>🟣 Zonas de Afluencia que Cruzan:</span>
+                        <strong id="meas-zones-count">0</strong>
+                    </div>
+                    <div id="meas-zones-list" style="width:100%; font-size:10px;"></div>
+                </div>
+                <div class="meas-audit-item" style="margin-top:4px; padding-top:4px; border-top:1px solid rgba(255,255,255,0.08);">
+                    <span>Superficie: <strong id="meas-area" style="color:var(--accent-amber);">0 km²</strong></span>
+                    <span>Nodos Censales: <strong id="meas-nodes" style="color:var(--accent-cyan);">0</strong></span>
+                </div>
+
+                <!-- Leyenda de colores de nodos en mapa -->
+                <div class="meas-legend">
+                    <span class="legend-item"><span class="legend-dot" style="background:#10b981;"></span> Impulsado Afluencia</span>
+                    <span class="legend-item"><span class="legend-dot" style="background:#ef4444;"></span> Orgánico Directo</span>
+                    <span class="legend-item"><span class="legend-dot" style="background:#64748b;"></span> Absorbido por POI</span>
+                </div>
             </div>
         </div>
 
@@ -826,6 +1007,9 @@
             <div class="map-hud-stat"><span>BBox:</span> <strong id="hud-bbox-status">Óptimo</strong></div>
             <div style="margin-top: 6px; border-top: 1px solid var(--border-color); padding-top: 6px; display: flex; flex-direction: column; gap: 4px;">
                 <div style="font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Capas de Demanda</div>
+                <label style="font-size: 11px; color: #c084fc; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="checkbox" id="chk-toggle-affluence" checked /> 🟣 Zonas de Afluencia
+                </label>
                 <label style="font-size: 11px; color: #bae6fd; display: flex; align-items: center; gap: 6px; cursor: pointer;">
                     <input type="checkbox" id="chk-toggle-residents" checked /> 🔵 Residencial (Población)
                 </label>
@@ -876,6 +1060,8 @@
         let residentsLayerGroup = L.layerGroup();
         let jobsLayerGroup = L.layerGroup();
         let placesLayerGroup = L.layerGroup();
+        let affluenceZonesLayerGroup = L.layerGroup();
+        let selectionHighlightLayerGroup = L.layerGroup();
         let layerControl = null;
         let isPickingLocation = false;
         let isPickingPlaceLocation = false;
@@ -884,9 +1070,16 @@
 
         // Area Selection State
         let isBoxSelectActive = false;
+        let isPolySelectActive = false;
         let isMouseDownForBox = false;
         let boxStartLatLng = null;
-        let boxSelectionLayer = null;
+        let selectionLayer = null;
+        let currentSelectionBounds = null;
+        let currentSelectionPolygon = null; // [[lon, lat], ...]
+        let currentSelectionType = null; // 'box' | 'poly' | null
+        let polyTempPoints = []; // [L.latLng, ...]
+        let polyTempMarkers = []; // [L.circleMarker, ...]
+        let polyTempLine = null; // L.polyline
 
         const CATEGORY_COLORS = {
             "AIR": "#c084fc",
@@ -969,6 +1162,8 @@
 
             cartoDark.addTo(map);
             placesLayerGroup.addTo(map);
+            affluenceZonesLayerGroup.addTo(map);
+            selectionHighlightLayerGroup.addTo(map);
 
             const baseMaps = {
                 "🌙 Modo Oscuro (CartoDB)": cartoDark,
@@ -979,13 +1174,14 @@
 
             const overlayMaps = {
                 "🏷️ Toponimia & Colonias (Places)": placesLayerGroup,
+                "🟣 Zonas de Afluencia": affluenceZonesLayerGroup,
                 "🔵 Nodos Residenciales (Población)": residentsLayerGroup,
                 "🔴 Nodos de Empleo (DENUE)": jobsLayerGroup
             };
 
             layerControl = L.control.layers(baseMaps, overlayMaps, { position: 'topright', collapsed: true }).addTo(map);
 
-            // Map Click Event for Coords Picking
+            // Map Click Event for Coords Picking and Polygon Drawing
             map.on('click', (e) => {
                 if (isPickingLocation) {
                     const lat = parseFloat(e.latlng.lat.toFixed(5));
@@ -999,6 +1195,15 @@
                     const lon = parseFloat(e.latlng.lng.toFixed(5));
                     stopPickingLocation();
                     addNewPlaceAt([lon, lat]);
+                } else if (isPolySelectActive) {
+                    handlePolyVertexClick(e);
+                }
+            });
+
+            map.on('dblclick', (e) => {
+                if (isPolySelectActive && polyTempPoints.length >= 3) {
+                    L.DomEvent.stop(e);
+                    finishPolygonSelection();
                 }
             });
         }
@@ -1101,26 +1306,76 @@
                 else map.removeLayer(jobsLayerGroup);
             });
 
+            document.getElementById('chk-toggle-affluence').addEventListener('change', (e) => {
+                if (e.target.checked) map.addLayer(affluenceZonesLayerGroup);
+                else map.removeLayer(affluenceZonesLayerGroup);
+            });
+
             // Sync Leaflet layer control clicks with HUD checkboxes
             map.on('overlayadd', (e) => {
                 if (e.layer === residentsLayerGroup) document.getElementById('chk-toggle-residents').checked = true;
                 if (e.layer === jobsLayerGroup) document.getElementById('chk-toggle-jobs').checked = true;
+                if (e.layer === affluenceZonesLayerGroup) document.getElementById('chk-toggle-affluence').checked = true;
             });
 
             map.on('overlayremove', (e) => {
                 if (e.layer === residentsLayerGroup) document.getElementById('chk-toggle-residents').checked = false;
                 if (e.layer === jobsLayerGroup) document.getElementById('chk-toggle-jobs').checked = false;
+                if (e.layer === affluenceZonesLayerGroup) document.getElementById('chk-toggle-affluence').checked = false;
             });
 
-            // Area Selection toggle button
+            // Area Selection toggle buttons
             document.getElementById('btn-toggle-box-select').addEventListener('click', toggleBoxSelectMode);
+            document.getElementById('btn-toggle-poly-select').addEventListener('click', togglePolySelectMode);
+            document.getElementById('btn-finish-poly').addEventListener('click', finishPolygonSelection);
             document.getElementById('btn-clear-measure').addEventListener('click', clearAreaSelection);
         }
 
         // =========================================================================
-        // AREA BOX SELECTION TOOL (Drag & Measure)
+        // AREA SELECTION TOOLS & DEMAND SIMULATION ENGINE
         // =========================================================================
+
+        function pointInPolygon(pt, vs) {
+            // pt: [lon, lat], vs: [[lon, lat], ...]
+            const x = pt[0], y = pt[1];
+            let inside = false;
+            for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+                const xi = vs[i][0], yi = vs[i][1];
+                const xj = vs[j][0], yj = vs[j][1];
+                const intersect = ((yi > y) !== (yj > y)) &&
+                    (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+                if (intersect) inside = !inside;
+            }
+            return inside;
+        }
+
+        function isPointInAffluenceZone(lon, lat, zone) {
+            if (!zone || zone.enabled === false) return false;
+            if (zone.bbox && zone.bbox.length === 4) {
+                const minLon = Math.min(zone.bbox[0], zone.bbox[2]);
+                const minLat = Math.min(zone.bbox[1], zone.bbox[3]);
+                const maxLon = Math.max(zone.bbox[0], zone.bbox[2]);
+                const maxLat = Math.max(zone.bbox[1], zone.bbox[3]);
+                if (lon < minLon || lon > maxLon || lat < minLat || lat > maxLat) return false;
+                if (zone.type === "bbox" || !zone.coordinates || zone.coordinates.length < 3) return true;
+            }
+            if (zone.coordinates && zone.coordinates.length >= 3) {
+                return pointInPolygon([lon, lat], zone.coordinates);
+            }
+            return false;
+        }
+
+        function isPointInsideSelection(lon, lat) {
+            if (currentSelectionType === 'box' && currentSelectionBounds) {
+                return currentSelectionBounds.contains([lat, lon]);
+            } else if (currentSelectionType === 'poly' && currentSelectionPolygon) {
+                return pointInPolygon([lon, lat], currentSelectionPolygon);
+            }
+            return false;
+        }
+
         function toggleBoxSelectMode() {
+            if (isPolySelectActive) cancelPolySelectMode();
             isBoxSelectActive = !isBoxSelectActive;
             const btn = document.getElementById('btn-toggle-box-select');
             btn.classList.toggle('active', isBoxSelectActive);
@@ -1134,37 +1389,155 @@
             }
         }
 
-        function setupBoxSelection() {
-            const mapContainer = map.getContainer();
+        function togglePolySelectMode() {
+            if (isBoxSelectActive) toggleBoxSelectMode();
+            isPolySelectActive = !isPolySelectActive;
+            const btn = document.getElementById('btn-toggle-poly-select');
+            btn.classList.toggle('active', isPolySelectActive);
 
+            if (isPolySelectActive) {
+                startPolySelectMode();
+            } else {
+                cancelPolySelectMode();
+            }
+        }
+
+        function startPolySelectMode() {
+            cleanPolyTemp();
+            map.dragging.disable();
+            map.doubleClickZoom.disable();
+            document.getElementById('map').style.cursor = 'crosshair';
+            document.getElementById('btn-finish-poly').style.display = 'inline-flex';
+            document.getElementById('btn-finish-poly').innerHTML = '<i class="fa-solid fa-check"></i> <span>Cerrar Polígono</span>';
+            document.getElementById('map-pick-tip-text').innerText = 'Haz clics para marcar los vértices del área. Doble clic o "Cerrar" para finalizar.';
+            document.getElementById('map-pick-tip').style.display = 'flex';
+        }
+
+        function cancelPolySelectMode() {
+            isPolySelectActive = false;
+            document.getElementById('btn-toggle-poly-select').classList.remove('active');
+            document.getElementById('btn-finish-poly').style.display = 'none';
+            document.getElementById('map-pick-tip').style.display = 'none';
+            map.dragging.enable();
+            map.doubleClickZoom.enable();
+            document.getElementById('map').style.cursor = '';
+            cleanPolyTemp();
+        }
+
+        function cleanPolyTemp() {
+            polyTempPoints = [];
+            polyTempMarkers.forEach(m => map.removeLayer(m));
+            polyTempMarkers = [];
+            if (polyTempLine) {
+                map.removeLayer(polyTempLine);
+                polyTempLine = null;
+            }
+        }
+
+        function handlePolyVertexClick(e) {
+            // Si hace clic cerca del primer punto con >= 3 vértices, cerrar polígono
+            if (polyTempPoints.length >= 3) {
+                const firstPt = map.latLngToContainerPoint(polyTempPoints[0]);
+                const clickPt = map.latLngToContainerPoint(e.latlng);
+                const pixelDist = Math.hypot(firstPt.x - clickPt.x, firstPt.y - clickPt.y);
+                if (pixelDist < 20) {
+                    finishPolygonSelection();
+                    return;
+                }
+            }
+
+            polyTempPoints.push(e.latlng);
+
+            // Marcador visual de vértice
+            const vm = L.circleMarker(e.latlng, {
+                radius: 4,
+                color: '#c084fc',
+                fillColor: '#fff',
+                fillOpacity: 0.9,
+                weight: 2
+            }).addTo(map);
+            polyTempMarkers.push(vm);
+
+            // Actualizar polilínea guía
+            if (!polyTempLine) {
+                polyTempLine = L.polyline(polyTempPoints, {
+                    color: '#c084fc',
+                    weight: 2,
+                    dashArray: '4, 4'
+                }).addTo(map);
+            } else {
+                polyTempLine.setLatLngs(polyTempPoints);
+            }
+
+            if (polyTempPoints.length >= 3) {
+                document.getElementById('btn-finish-poly').innerHTML = `<i class="fa-solid fa-check"></i> <span>Cerrar Polígono (${polyTempPoints.length} pts)</span>`;
+            }
+        }
+
+        function finishPolygonSelection() {
+            if (polyTempPoints.length < 3) {
+                alert("Debes marcar al menos 3 vértices en el mapa para delimitar un área poligonal.");
+                return;
+            }
+
+            if (selectionLayer) {
+                map.removeLayer(selectionLayer);
+                selectionLayer = null;
+            }
+
+            // Coordenadas GeoJSON [lon, lat]
+            currentSelectionPolygon = polyTempPoints.map(p => [
+                parseFloat(p.lng.toFixed(5)),
+                parseFloat(p.lat.toFixed(5))
+            ]);
+            currentSelectionBounds = null;
+            currentSelectionType = 'poly';
+
+            selectionLayer = L.polygon(polyTempPoints, {
+                color: '#fbbf24',
+                weight: 2,
+                dashArray: '5, 5',
+                fillColor: '#f59e0b',
+                fillOpacity: 0.18
+            }).addTo(map);
+
+            cancelPolySelectMode();
+            calculateAreaSimulationStats();
+        }
+
+        function setupBoxSelection() {
             map.on('mousedown', (e) => {
                 if (isBoxSelectActive || e.originalEvent.shiftKey) {
                     isMouseDownForBox = true;
                     boxStartLatLng = e.latlng;
                     map.dragging.disable();
 
-                    if (boxSelectionLayer) {
-                        map.removeLayer(boxSelectionLayer);
-                        boxSelectionLayer = null;
+                    if (selectionLayer) {
+                        map.removeLayer(selectionLayer);
+                        selectionLayer = null;
                     }
+                    selectionHighlightLayerGroup.clearLayers();
                 }
             });
 
             map.on('mousemove', (e) => {
                 if (isMouseDownForBox && boxStartLatLng) {
                     const bounds = L.latLngBounds(boxStartLatLng, e.latlng);
-                    if (!boxSelectionLayer) {
-                        boxSelectionLayer = L.rectangle(bounds, {
+                    if (!selectionLayer) {
+                        selectionLayer = L.rectangle(bounds, {
                             color: '#fbbf24',
                             weight: 2,
                             dashArray: '4, 4',
                             fillColor: '#f59e0b',
-                            fillOpacity: 0.2
+                            fillOpacity: 0.18
                         }).addTo(map);
                     } else {
-                        boxSelectionLayer.setBounds(bounds);
+                        selectionLayer.setBounds(bounds);
                     }
-                    calculateAreaSelectionStats(bounds);
+                    currentSelectionBounds = bounds;
+                    currentSelectionPolygon = null;
+                    currentSelectionType = 'box';
+                    calculateAreaSimulationStats();
                 }
             });
 
@@ -1174,46 +1547,308 @@
                     if (!isBoxSelectActive && !e.originalEvent.shiftKey) {
                         map.dragging.enable();
                     }
+                    if (currentSelectionType === 'box') {
+                        calculateAreaSimulationStats();
+                    }
                 }
             });
-        }
-
-        function calculateAreaSelectionStats(bounds) {
-            let totalJobs = 0;
-            let totalPop = 0;
-            let count = 0;
-
-            densityPoints.forEach(p => {
-                const lat = p.location[1];
-                const lon = p.location[0];
-                if (bounds.contains([lat, lon])) {
-                    totalJobs += (p.jobs || 0);
-                    totalPop += (p.residents || 0);
-                    count++;
-                }
-            });
-
-            // Calculate Approximate Area in km²
-            const sw = bounds.getSouthWest();
-            const ne = bounds.getNorthEast();
-            const widthKm = (ne.lng - sw.lng) * 111.32 * Math.cos((sw.lat + ne.lat) / 2 * Math.PI / 180);
-            const heightKm = (ne.lat - sw.lat) * 110.57;
-            const areaKm2 = Math.max(0.01, Math.abs(widthKm * heightKm));
-
-            document.getElementById('meas-jobs').innerText = totalJobs.toLocaleString();
-            document.getElementById('meas-pop').innerText = totalPop.toLocaleString();
-            document.getElementById('meas-nodes').innerText = count.toLocaleString();
-            document.getElementById('meas-area').innerText = `${areaKm2.toFixed(2)} km²`;
-            document.getElementById('area-measure-hud').style.display = 'block';
         }
 
         function clearAreaSelection() {
-            if (boxSelectionLayer) {
-                map.removeLayer(boxSelectionLayer);
-                boxSelectionLayer = null;
+            if (selectionLayer) {
+                map.removeLayer(selectionLayer);
+                selectionLayer = null;
             }
+            selectionHighlightLayerGroup.clearLayers();
+            currentSelectionType = null;
+            currentSelectionBounds = null;
+            currentSelectionPolygon = null;
+            cleanPolyTemp();
             document.getElementById('area-measure-hud').style.display = 'none';
             if (isBoxSelectActive) toggleBoxSelectMode();
+            if (isPolySelectActive) cancelPolySelectMode();
+        }
+
+        function getPolygonAreaKm2(coords) {
+            if (!coords || coords.length < 3) return 0;
+            let avgLat = 0;
+            for (const c of coords) avgLat += c[1];
+            avgLat /= coords.length;
+            const cosLat = Math.cos(avgLat * Math.PI / 180);
+
+            let area = 0;
+            for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
+                const x1 = coords[j][0] * 111.32 * cosLat;
+                const y1 = coords[j][1] * 110.57;
+                const x2 = coords[i][0] * 111.32 * cosLat;
+                const y2 = coords[i][1] * 110.57;
+                area += (x1 * y2 - x2 * y1);
+            }
+            return Math.max(0.01, Math.abs(area / 2));
+        }
+
+        function calculateAreaSimulationStats() {
+            if (!currentSelectionType || (!currentSelectionBounds && !currentSelectionPolygon)) {
+                document.getElementById('area-measure-hud').style.display = 'none';
+                selectionHighlightLayerGroup.clearLayers();
+                return;
+            }
+
+            const affluenceZones = (currentCityData && Array.isArray(currentCityData.affluence_zones))
+                ? currentCityData.affluence_zones.filter(z => z.enabled !== false)
+                : [];
+
+            // 1. Resolver POIs con métrica esferoidal y radio de absorción
+            const resolvedPois = pois.map(p => {
+                const lon = p.loc[0];
+                const lat = p.loc[1];
+                const rad = parseFloat(p.radius_m || 750);
+                const cosLat = Math.cos(lat * Math.PI / 180);
+                const inSel = isPointInsideSelection(lon, lat);
+                return {
+                    id: p.id,
+                    name: typeof p.name === 'object' ? (p.name.es || p.name.en || p.id) : (p.name || p.id),
+                    loc: [lon, lat],
+                    lat: lat,
+                    lon: lon,
+                    radius_m: rad,
+                    cosLat: cosLat,
+                    dLatMax: rad / 110574.0,
+                    dLonMax: rad / (111320.0 * Math.max(0.1, cosLat)),
+                    mode: (p.mode || 'MAX').toUpperCase(),
+                    declaredJobs: parseInt(p.jobs || 0),
+                    absorbedJobs: 0,
+                    absorbedInsideJobs: 0,
+                    isInsideSelection: inSel
+                };
+            });
+
+            // 2. Mapear absorción de DENUE sobre todos los POIs (regla argmin de distancia)
+            densityPoints.forEach(pt => {
+                let matchedPoi = null;
+                let bestDist = Infinity;
+                const ptLon = pt.location[0];
+                const ptLat = pt.location[1];
+
+                for (const poi of resolvedPois) {
+                    if (Math.abs(ptLat - poi.lat) > poi.dLatMax) continue;
+                    if (Math.abs(ptLon - poi.lon) > poi.dLonMax) continue;
+                    const d = getDistanceMeters(ptLon, ptLat, poi.lon, poi.lat);
+                    if (d <= poi.radius_m && d < bestDist) {
+                        matchedPoi = poi;
+                        bestDist = d;
+                    }
+                }
+
+                pt._absorbedBy = matchedPoi;
+                if (matchedPoi) {
+                    matchedPoi.absorbedJobs += (pt.jobs || 0);
+                    if (isPointInsideSelection(ptLon, ptLat)) {
+                        matchedPoi.absorbedInsideJobs += (pt.jobs || 0);
+                    }
+                } else {
+                    // Modulación por Zonas de Afluencia para no absorbidos
+                    let maxMult = 1.0;
+                    let matchedZone = null;
+                    for (const zone of affluenceZones) {
+                        if (isPointInAffluenceZone(ptLon, ptLat, zone)) {
+                            const mult = parseFloat(zone.multiplier || 1.0);
+                            if (mult > maxMult) {
+                                maxMult = mult;
+                                matchedZone = zone;
+                            }
+                        }
+                    }
+                    pt._affluenceMult = maxMult;
+                    pt._matchedZone = matchedZone;
+                    pt._finalJobs = Math.round((pt.jobs || 0) * maxMult);
+                }
+            });
+
+            // 3. Resolver empleo final de cada POI según su modo canónico (gravity.py)
+            resolvedPois.forEach(poi => {
+                const manual = poi.declaredJobs;
+                const absorbed = Math.round(poi.absorbedJobs);
+                if (poi.mode === "MAX") {
+                    poi.finalJobs = Math.max(manual, absorbed);
+                } else if (poi.mode === "BOOST" || poi.mode === "ADDITIVE") {
+                    poi.finalJobs = manual + absorbed;
+                } else if (poi.mode === "REPLACE") {
+                    poi.finalJobs = manual;
+                } else {
+                    poi.finalJobs = Math.max(manual, absorbed);
+                }
+            });
+
+            // 4. Agregar métricas dentro del área seleccionada
+            let origJobs = 0;
+            let origRawJobs = 0;
+            let origPop = 0;
+            let organicJobsInside = 0;
+            let affluenceBoostJobs = 0;
+            let leakedJobs = 0;
+            let nodesCount = 0;
+            const activeZonesInside = new Map();
+
+            selectionHighlightLayerGroup.clearLayers();
+
+            densityPoints.forEach(pt => {
+                const ptLon = pt.location[0];
+                const ptLat = pt.location[1];
+                if (!isPointInsideSelection(ptLon, ptLat)) return;
+
+                nodesCount++;
+                const j = (pt.jobs || 0);
+                const rawJ = (pt.raw_jobs !== undefined ? pt.raw_jobs : j);
+                const r = (pt.residents || 0);
+                origJobs += j;
+                origRawJobs += rawJ;
+                origPop += r;
+
+                if (pt._absorbedBy) {
+                    if (!pt._absorbedBy.isInsideSelection) {
+                        leakedJobs += j;
+                    }
+                    // Highlight node: absorbido por POI (gris suave con contorno discontinuo)
+                    const cm = L.circleMarker([ptLat, ptLon], {
+                        radius: 4,
+                        color: '#64748b',
+                        weight: 1,
+                        dashArray: '2, 2',
+                        fillColor: '#475569',
+                        fillOpacity: 0.6
+                    });
+                    cm.bindTooltip(`<b>${pt.id}</b><br>⚪ <i>Absorbido por:</i> <strong>${pt._absorbedBy.id}</strong><br>Comercios: ${j.toLocaleString()}`, { direction: 'top' });
+                    selectionHighlightLayerGroup.addLayer(cm);
+                } else {
+                    organicJobsInside += j;
+                    const finalJ = pt._finalJobs || j;
+                    if (finalJ > j) {
+                        affluenceBoostJobs += (finalJ - j);
+                    }
+                    if (pt._matchedZone) {
+                        activeZonesInside.set(pt._matchedZone.id, {
+                            name: pt._matchedZone.name || pt._matchedZone.id,
+                            mult: pt._affluenceMult
+                        });
+                    }
+
+                    // Highlight node: verde si está impulsado, rojo si es orgánico directo
+                    const isBoosted = pt._affluenceMult > 1.0;
+                    const cm = L.circleMarker([ptLat, ptLon], {
+                        radius: isBoosted ? 6 : 5,
+                        color: '#fff',
+                        weight: isBoosted ? 1.5 : 1,
+                        fillColor: isBoosted ? '#10b981' : '#ef4444',
+                        fillOpacity: isBoosted ? 0.85 : 0.75
+                    });
+                    const desc = isBoosted 
+                        ? `🟢 <i>Impulsado por:</i> <strong>${pt._matchedZone.name || pt._matchedZone.id}</strong> (${pt._affluenceMult}x)<br>Final: ${finalJ.toLocaleString()} (Base: ${j.toLocaleString()})`
+                        : `🔴 <i>Orgánico Directo:</i> ${j.toLocaleString()} empleos`;
+                    cm.bindTooltip(`<b>${pt.id}</b><br>${desc}`, { direction: 'top' });
+                    selectionHighlightLayerGroup.addLayer(cm);
+                }
+            });
+
+            // POIs especiales con coordenadas centro dentro del área seleccionada
+            const poisInside = resolvedPois.filter(p => p.isInsideSelection);
+            let totalPoiJobsInside = 0;
+            poisInside.forEach(p => {
+                totalPoiJobsInside += p.finalJobs;
+            });
+
+            // Total de empleos finales en el juego:
+            // (empleo orgánico no absorbido con multiplicador de afluencia) + (POIs especiales dentro de la zona)
+            const totalGameJobs = (organicJobsInside + affluenceBoostJobs) + totalPoiJobsInside;
+            const delta = totalGameJobs - origJobs;
+            const deltaPct = origJobs > 0 ? ((delta / origJobs) * 100) : 0;
+
+            // Calcular Superficie en km²
+            let areaKm2 = 0;
+            if (currentSelectionType === 'box' && currentSelectionBounds) {
+                const sw = currentSelectionBounds.getSouthWest();
+                const ne = currentSelectionBounds.getNorthEast();
+                const widthKm = (ne.lng - sw.lng) * 111.32 * Math.cos((sw.lat + ne.lat) / 2 * Math.PI / 180);
+                const heightKm = (ne.lat - sw.lat) * 110.57;
+                areaKm2 = Math.max(0.01, Math.abs(widthKm * heightKm));
+            } else if (currentSelectionType === 'poly' && currentSelectionPolygon) {
+                areaKm2 = getPolygonAreaKm2(currentSelectionPolygon);
+            }
+
+            // Actualizar DOM del HUD
+            document.getElementById('meas-orig-jobs').innerText = origJobs.toLocaleString();
+            const rawJobsEl = document.getElementById('meas-raw-jobs');
+            if (rawJobsEl) rawJobsEl.innerText = origRawJobs.toLocaleString();
+            document.getElementById('meas-orig-pop').innerText = origPop.toLocaleString();
+            document.getElementById('meas-game-jobs').innerText = totalGameJobs.toLocaleString();
+
+            const deltaBadge = document.getElementById('meas-delta-badge');
+            const sign = delta > 0 ? '+' : '';
+            deltaBadge.innerText = `${sign}${delta.toLocaleString()} (${sign}${deltaPct.toFixed(1)}%)`;
+            deltaBadge.className = 'meas-delta-badge ' + (delta > 0 ? 'delta-positive' : (delta < 0 ? 'delta-negative' : 'delta-neutral'));
+
+            document.getElementById('meas-organic-jobs').innerText = organicJobsInside.toLocaleString();
+            document.getElementById('meas-affluence-boost').innerText = `+${affluenceBoostJobs.toLocaleString()}`;
+            document.getElementById('meas-leaked-jobs').innerText = `-${leakedJobs.toLocaleString()}`;
+            document.getElementById('meas-pois-count').innerText = `${poisInside.length} (${totalPoiJobsInside.toLocaleString()} empl.)`;
+
+            // Píldoras de POIs
+            const poisListContainer = document.getElementById('meas-pois-list');
+            if (poisInside.length === 0) {
+                poisListContainer.innerHTML = '<span style="color:var(--text-muted);">Ningún POI especial con centro dentro del área</span>';
+            } else {
+                poisListContainer.innerHTML = poisInside.map(p => {
+                    return `<span class="meas-poi-pill" title="Modo: ${p.mode} | Absorbido: ${p.absorbedJobs.toLocaleString()} | Declarado: ${p.declaredJobs.toLocaleString()}">
+                        <strong>${p.id}</strong>: ${p.finalJobs.toLocaleString()} <span style="opacity:0.75;">(${p.mode})</span>
+                    </span>`;
+                }).join('');
+            }
+
+            // Píldoras de Zonas de Afluencia
+            const zonesListContainer = document.getElementById('meas-zones-list');
+            if (activeZonesInside.size === 0) {
+                zonesListContainer.innerHTML = '<span style="color:var(--text-muted);">Sin zonas de afluencia activas en esta selección</span>';
+            } else {
+                zonesListContainer.innerHTML = Array.from(activeZonesInside.values()).map(z => {
+                    return `<span class="meas-poi-pill" style="border-color:rgba(251,191,36,0.4); color:#fde68a;">
+                        <strong>${z.name}</strong> (${z.mult}x)
+                    </span>`;
+                }).join('');
+            }
+
+            document.getElementById('meas-zones-count').innerText = activeZonesInside.size;
+            document.getElementById('meas-area').innerText = `${areaKm2.toFixed(2)} km²`;
+            document.getElementById('meas-nodes').innerText = nodesCount.toLocaleString();
+            document.getElementById('area-measure-hud').style.display = 'block';
+        }
+
+        function renderAffluenceZones() {
+            affluenceZonesLayerGroup.clearLayers();
+            const zones = (currentCityData && Array.isArray(currentCityData.affluence_zones))
+                ? currentCityData.affluence_zones
+                : [];
+
+            zones.forEach(z => {
+                if (!z.coordinates || z.coordinates.length < 3) return;
+                const latLngs = z.coordinates.map(c => [c[1], c[0]]);
+                const color = z.color || "#8B5CF6";
+                const poly = L.polygon(latLngs, {
+                    color: color,
+                    weight: 2,
+                    dashArray: "5, 5",
+                    fillColor: color,
+                    fillOpacity: z.enabled !== false ? 0.15 : 0.05
+                }).addTo(affluenceZonesLayerGroup);
+
+                const status = z.enabled !== false ? "Activa" : "Deshabilitada";
+                const multText = z.target_mode === "TARGET_CAPACITY" 
+                    ? `Cupo: ${z.target_jobs || 0}` 
+                    : `${z.multiplier || 1.0}x`;
+
+                poly.bindTooltip(`<b>${z.name || z.id}</b><br>Multiplicador: <strong>${multText}</strong> (${status})`, {
+                    direction: 'center'
+                });
+            });
         }
 
         // =========================================================================
@@ -1248,6 +1883,7 @@
         async function loadCity(filePath) {
             try {
                 currentCityFile = filePath;
+                clearAreaSelection();
                 const res = await fetch(`/api/city?file=${encodeURIComponent(filePath)}`);
                 const data = await res.json();
                 currentCityData = data;
@@ -1257,6 +1893,7 @@
 
                 updateHud();
                 renderBbox(data.city.bbox);
+                renderAffluenceZones();
                 renderAllPois();
                 renderPoiList();
                 renderAllPlaces();
@@ -1429,6 +2066,9 @@
                     }
                     updateYamlPreview();
                     runValidations();
+                    if (currentSelectionType) {
+                        calculateAreaSimulationStats();
+                    }
                 });
 
                 marker.on('click', () => {
@@ -1594,6 +2234,10 @@
             document.getElementById('stat-absorbed-nodes').innerText = absorbedNodesCount.toLocaleString();
             document.getElementById('stat-final-jobs').innerText = finalJobs.toLocaleString();
             document.getElementById('stat-diagnosis').innerHTML = `<i class="fa-solid fa-circle-info"></i> <span>${diagnosis}</span>`;
+
+            if (currentSelectionType) {
+                calculateAreaSimulationStats();
+            }
         }
 
         function savePoiFromForm() {
@@ -1632,6 +2276,9 @@
             updateHud();
             runValidations();
             updateYamlPreview();
+            if (currentSelectionType) {
+                calculateAreaSimulationStats();
+            }
             switchTab('tab-list');
         }
 
@@ -1644,6 +2291,9 @@
                 updateHud();
                 runValidations();
                 updateYamlPreview();
+                if (currentSelectionType) {
+                    calculateAreaSimulationStats();
+                }
                 switchTab('tab-list');
             }
         };
@@ -2126,6 +2776,9 @@
                     }
                     renderAllPois();
                     renderPoiList();
+                    if (currentSelectionType) {
+                        calculateAreaSimulationStats();
+                    }
                 }
             } catch (e) {
                 console.log("No hay capa de demanda precargada:", e);

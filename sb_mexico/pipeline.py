@@ -365,6 +365,29 @@ def execute_pipeline(
     except (ValueError, TypeError):
         seed = 42
 
+    affluence_zones = cfg.get("affluence_zones", [])
+    if affluence_zones:
+        enabled_zones = [z for z in affluence_zones if z.get("enabled", True)]
+        console.print(f"-> Zonas de Alta Afluencia detectadas: [yellow]{len(enabled_zones)}[/yellow] activas ({len(affluence_zones)} totales).")
+        tabla_az = Table(title=f"Zonas de Alta Afluencia ({city_code})")
+        tabla_az.add_column("ID / Nombre", style="cyan")
+        tabla_az.add_column("Arquetipo", style="magenta")
+        tabla_az.add_column("Multiplicador", justify="right", style="bold yellow")
+        tabla_az.add_column("Bono Alcance", justify="right", style="blue")
+        tabla_az.add_column("Modo", style="white")
+        for az in affluence_zones:
+            status = "[green]Activa[/green]" if az.get("enabled", True) else "[dim]Desactivada[/dim]"
+            mult_str = f"{float(az.get('multiplier', 1.0)):.1f}x"
+            reach_str = f"+{int(float(az.get('reach_bonus', 0.0)) * 100)}%"
+            tabla_az.add_row(
+                f"{az.get('name', az.get('id', 'Zona'))} ({status})",
+                az.get("archetype", "custom"),
+                mult_str,
+                reach_str,
+                az.get("target_mode", "MULTIPLIER")
+            )
+        console.print(tabla_az)
+
     demand_points, poi_audit = build_demand_grid(
         df_denue=df_denue,
         df_cpv=df_cpv,
@@ -373,7 +396,8 @@ def execute_pipeline(
         grid_size=grid_size,
         min_residents=city_info.get("min_residents", 10),
         min_jobs=city_info.get("min_jobs", 3),
-        seed=seed
+        seed=seed,
+        affluence_zones=affluence_zones
     )
 
     console.print(f"-> Nodos de demanda consolidados: [green]{len(demand_points):,}[/green]")
@@ -417,6 +441,7 @@ def execute_pipeline(
         target_pop_size=target_pop_size,
         seed=seed,
         isolated_zones=isolated_zones,
+        affluence_zones=affluence_zones,
         furness_iterations=macro.get("furness_iterations", 15),
         furness_tol=macro.get("furness_tol", 0.02),
         road_index=None

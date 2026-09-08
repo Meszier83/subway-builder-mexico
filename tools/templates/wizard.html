@@ -867,11 +867,15 @@
           </button>
           <button id="poiTabBtn-editor" onclick="switchPoiTab('editor')" class="flex-1 py-2 px-1 text-center flex items-center justify-center space-x-1 border-b-2 border-transparent text-stone-600 hover:text-stone-900 transition">
             <i data-lucide="edit-3" class="w-3.5 h-3.5"></i>
-            <span>Editor & Absorción</span>
+            <span>Editor</span>
           </button>
           <button id="poiTabBtn-places" onclick="switchPoiTab('places')" class="flex-1 py-2 px-1 text-center flex items-center justify-center space-x-1 border-b-2 border-transparent text-stone-600 hover:text-stone-900 transition">
             <i data-lucide="tag" class="w-3.5 h-3.5"></i>
             <span>Colonias</span>
+          </button>
+          <button id="poiTabBtn-zones" onclick="switchPoiTab('zones')" class="flex-1 py-2 px-1 text-center flex items-center justify-center space-x-1 border-b-2 border-transparent text-stone-600 hover:text-stone-900 transition">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-500"></i>
+            <span>Afluencia (<span id="affluenceZoneBadge">0</span>)</span>
           </button>
         </div>
 
@@ -1124,6 +1128,52 @@
           </div>
         </div>
 
+        <!-- CONTENIDO PESTAÑA 4: ZONAS DE ALTA AFLUENCIA (AFFLUENCE ZONES) -->
+        <div id="poiTab-zones" class="hidden flex-1 overflow-y-auto p-3.5 space-y-3">
+          <div class="flex justify-between items-center border-b border-metro-border pb-2">
+            <div>
+              <h3 class="text-xs font-bold text-metro-text flex items-center space-x-1.5">
+                <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-500"></i>
+                <span>Zonas de Alta Afluencia</span>
+              </h3>
+              <p class="text-[10px] text-metro-muted">Potencia la atracción de empleo de distritos y corredores.</p>
+            </div>
+          </div>
+
+          <!-- Medidor de Equilibrio Metropolitano -->
+          <div class="p-2.5 bg-stone-50 border border-stone-200 rounded-xl space-y-1.5">
+            <div class="flex justify-between items-center text-[11px]">
+              <span class="text-stone-600 font-semibold">Equilibrio de Empleo:</span>
+              <span id="zoneBalanceLabel" class="font-bold text-emerald-600 font-mono text-[10px]">0% en Zonas</span>
+            </div>
+            <div class="w-full bg-stone-200 rounded-full h-1.5 overflow-hidden">
+              <div id="zoneBalanceBar" class="bg-emerald-500 h-1.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+            <p id="zoneBalanceTip" class="text-[9px] text-stone-400">Las zonas aumentan atracción redistribuyendo la PEA de forma balanceada.</p>
+          </div>
+
+          <!-- Botones de Acción de Trazado Rápido -->
+          <div class="grid grid-cols-2 gap-2">
+            <button onclick="startDrawingAffluenceZone('polygon')" class="px-2 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 text-[11px] font-bold rounded-lg border border-amber-500/30 flex items-center justify-center space-x-1.5 transition">
+              <i data-lucide="pentagon" class="w-3.5 h-3.5 text-amber-600"></i>
+              <span>Trazar Polígono</span>
+            </button>
+            <button onclick="startDrawingAffluenceZone('bbox')" class="px-2 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 text-[11px] font-bold rounded-lg border border-amber-500/30 flex items-center justify-center space-x-1.5 transition">
+              <i data-lucide="scan" class="w-3.5 h-3.5 text-amber-600"></i>
+              <span>Trazar Cuadro</span>
+            </button>
+          </div>
+
+          <div class="flex justify-between items-center pt-1">
+            <span id="affluenceZoneCountLabel" class="text-[11px] font-mono text-metro-muted">0 zonas configuradas</span>
+          </div>
+
+          <!-- Contenedor de Tarjetas de Zonas -->
+          <div id="affluenceZoneListContainer" class="space-y-2 overflow-y-auto flex-1 max-h-[380px]">
+            <!-- Renderizado dinámico de zonas -->
+          </div>
+        </div>
+
         <!-- Footer del Sidebar con Navegación -->
         <div class="p-3 bg-metro-panel/60 border-t border-metro-border flex justify-between items-center shrink-0">
           <button onclick="goToStep(3)" class="px-3.5 py-1.5 bg-metro-panel hover:bg-metro-border text-metro-text text-xs font-bold rounded-lg transition">
@@ -1146,7 +1196,7 @@
         <div id="mapPoi" class="w-full h-full"></div>
 
         <!-- Barra Flotante de Herramientas del Mapa (Top-Left) -->
-        <div class="absolute top-4 left-4 z-[990] flex gap-2">
+        <div class="absolute top-4 left-4 z-[990] flex flex-wrap gap-2">
           <button id="btnToggleDensityJobs" onclick="toggleDensityLayer('jobs')" class="px-2.5 py-1.5 bg-metro-card/90 backdrop-blur border border-metro-border text-metro-text text-[11px] font-bold rounded-lg shadow hover:bg-metro-panel transition flex items-center space-x-1.5">
             <span class="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block"></span>
             <span>🔴 Empleos DENUE</span>
@@ -1157,25 +1207,117 @@
           </button>
           <button id="btnToggleBoxSelect" onclick="toggleBoxSelectMode()" class="px-2.5 py-1.5 bg-metro-card/90 backdrop-blur border border-metro-border text-metro-text text-[11px] font-bold rounded-lg shadow hover:bg-metro-panel transition flex items-center space-x-1.5">
             <i data-lucide="box-select" class="w-3.5 h-3.5 text-amber-600"></i>
-            <span>📐 Medir Área (Box)</span>
+            <span>📐 Medir Caja</span>
+          </button>
+          <button id="btnTogglePolyMeasure" onclick="togglePolyMeasureMode()" class="px-2.5 py-1.5 bg-metro-card/90 backdrop-blur border border-metro-border text-metro-text text-[11px] font-bold rounded-lg shadow hover:bg-metro-panel transition flex items-center space-x-1.5">
+            <i data-lucide="lasso" class="w-3.5 h-3.5 text-amber-600"></i>
+            <span>📐 Medir Polígono</span>
+          </button>
+          <button id="btnDrawZonePoly" onclick="startDrawingAffluenceZone('polygon')" class="px-2.5 py-1.5 bg-metro-card/90 backdrop-blur border border-amber-500/40 text-amber-700 text-[11px] font-bold rounded-lg shadow hover:bg-amber-500/10 transition flex items-center space-x-1.5">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-500"></i>
+            <span>★ Trazar Zona</span>
           </button>
         </div>
 
-        <!-- HUD Flotante de Selección de Área (Box Select) -->
-        <div id="areaMeasureHud" class="hidden absolute top-16 left-4 z-[995] bg-metro-card/95 backdrop-blur border border-amber-600/50 p-3 rounded-xl shadow-2xl w-64 space-y-2">
-          <div class="flex justify-between items-center text-xs font-bold text-amber-700">
-            <span class="flex items-center space-x-1">
+        <!-- Banner Flotante de Trazado Activo de Zona de Afluencia -->
+        <div id="drawingZoneBanner" class="hidden absolute top-16 left-4 right-4 md:right-auto z-[995] bg-amber-900/90 text-amber-100 backdrop-blur px-4 py-2.5 rounded-xl border border-amber-500/50 shadow-2xl flex items-center justify-between space-x-3 text-xs">
+          <div class="flex items-center space-x-2">
+            <i data-lucide="pencil" class="w-4 h-4 text-amber-400 animate-pulse"></i>
+            <span id="drawingZoneInstructions">Haz clics en el mapa para delimitar vértices. Clic en primer vértice o Enter para cerrar.</span>
+          </div>
+          <button onclick="cancelDrawingAffluenceZone()" class="px-2.5 py-1 bg-white/20 hover:bg-white/30 text-white rounded-lg font-bold text-[11px] transition">
+            Cancelar (Esc)
+          </button>
+        </div>
+
+        <!-- Banner Flotante de Medición con Polígono / Lazo -->
+        <div id="polyMeasureBanner" class="hidden absolute top-16 left-4 right-4 md:right-auto z-[995] bg-amber-900/90 text-amber-100 backdrop-blur px-4 py-2.5 rounded-xl border border-amber-500/50 shadow-2xl flex items-center justify-between space-x-3 text-xs">
+          <div class="flex items-center space-x-2">
+            <i data-lucide="pencil" class="w-4 h-4 text-amber-400 animate-pulse"></i>
+            <span id="polyMeasureInstructions">Haz clics en el mapa para delimitar el área. Doble clic o clic en 'Finalizar' para medir.</span>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button id="btnFinishPolyMeasure" onclick="finishPolyMeasure()" class="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold text-[11px] transition">
+              Finalizar (0 pts)
+            </button>
+            <button onclick="cancelPolyMeasureMode()" class="px-2.5 py-1 bg-white/20 hover:bg-white/30 text-white rounded-lg font-bold text-[11px] transition">
+              Cancelar (Esc)
+            </button>
+          </div>
+        </div>
+
+        <!-- HUD Flotante de Selección de Área (Box & Poly Select con Simulación Completa) -->
+        <div id="areaMeasureHud" class="hidden absolute top-16 left-4 z-[995] bg-metro-card/95 backdrop-blur border border-amber-600/50 p-3.5 rounded-xl shadow-2xl w-84 max-w-[90vw] space-y-2 text-metro-text">
+          <div class="flex justify-between items-center text-xs font-bold text-amber-700 border-b border-metro-border/60 pb-1.5">
+            <span class="flex items-center space-x-1.5">
               <i data-lucide="scan" class="w-3.5 h-3.5"></i>
-              <span>Área Seleccionada</span>
+              <span>Auditoría & Simulación de Área</span>
             </span>
-            <button onclick="clearAreaSelection()" class="text-metro-muted hover:text-rose-600 text-[11px]">&times; Cerrar</button>
+            <button onclick="clearAreaSelection()" class="text-metro-muted hover:text-rose-600 text-[11px] font-bold transition">&times; Cerrar</button>
           </div>
-          <div class="grid grid-cols-2 gap-1.5 text-[11px] font-mono">
-            <div class="bg-metro-panel/80 p-1.5 rounded"><span>Área:</span> <strong id="measArea" class="block text-metro-text">0 km²</strong></div>
-            <div class="bg-metro-panel/80 p-1.5 rounded"><span>Empleos:</span> <strong id="measJobs" class="block text-metro-green">0</strong></div>
-            <div class="bg-metro-panel/80 p-1.5 rounded"><span>Población:</span> <strong id="measPop" class="block text-blue-600">0</strong></div>
-            <div class="bg-metro-panel/80 p-1.5 rounded"><span>Nodos:</span> <strong id="measNodes" class="block text-metro-text">0</strong></div>
+          
+          <div class="grid grid-cols-2 gap-2 text-[11px] font-mono">
+            <!-- Columna 1: Base Calibrada -->
+            <div class="bg-metro-panel/80 p-2 rounded border border-metro-border space-y-1">
+              <div class="text-[10px] uppercase font-bold text-metro-muted tracking-wider">Línea Base Calibrada</div>
+              <div class="text-[14px] font-bold text-sky-600" id="measJobs">0</div>
+              <div class="text-[10px] text-metro-muted flex justify-between">
+                <span>DENUE crudo:</span>
+                <strong id="measRawJobs" class="text-stone-400">0</strong>
+              </div>
+              <div class="text-[10px] text-metro-muted flex justify-between">
+                <span>Población:</span>
+                <strong id="measPop" class="text-blue-600">0</strong>
+              </div>
+            </div>
+
+            <!-- Columna 2: En el Juego -->
+            <div class="bg-emerald-500/10 p-2 rounded border border-emerald-500/30 space-y-1">
+              <div class="text-[10px] uppercase font-bold text-emerald-700 tracking-wider">En el Juego (Final)</div>
+              <div class="text-[14px] font-extrabold text-emerald-600" id="measGameJobs">0</div>
+              <div class="text-[10px] text-emerald-700 flex justify-between">
+                <span>Balance neto:</span>
+                <strong id="measDeltaBadge" class="text-emerald-700 font-bold">+0 (0%)</strong>
+              </div>
+              <div class="text-[10px] text-emerald-800/80">Con POIs y Afluencia</div>
+            </div>
           </div>
+
+          <!-- Desglose de Modificadores -->
+          <div class="bg-metro-panel/50 p-2 rounded text-[10px] space-y-1 border border-metro-border/50">
+            <div class="text-[9px] uppercase font-bold text-metro-muted tracking-wider">Desglose de Modificadores</div>
+            <div class="flex justify-between">
+              <span>🏢 Empleo Orgánico Directo:</span>
+              <strong id="measOrganicJobs" class="font-mono text-metro-text">0</strong>
+            </div>
+            <div class="flex justify-between text-amber-700 font-medium">
+              <span>🚀 Impulso Zonas Afluencia:</span>
+              <strong id="measAffluenceBoost" class="font-mono">+0</strong>
+            </div>
+            <div class="flex justify-between text-rose-700 font-medium" id="measLeakedRow">
+              <span title="Empleos en el área absorbidos por POIs externos">📤 Fuga hacia POIs Exteriores:</span>
+              <strong id="measLeakedJobs" class="font-mono">-0</strong>
+            </div>
+            <div class="flex justify-between text-purple-700 font-medium">
+              <span>🌟 POIs Especiales en Zona:</span>
+              <strong id="measPoisInside" class="font-mono">0</strong>
+            </div>
+          </div>
+
+          <!-- Métricas de contexto -->
+          <div class="flex justify-between items-center text-[10px] text-metro-muted bg-metro-panel/50 px-2 py-1 rounded">
+            <span>Área: <strong id="measArea" class="text-metro-text">0 km²</strong></span>
+            <span>Nodos: <strong id="measNodes" class="text-metro-text">0</strong></span>
+          </div>
+
+          <div id="measZonesContainer" class="hidden text-[10px] bg-amber-500/10 border border-amber-500/30 p-1.5 rounded text-amber-800 space-y-0.5">
+            <div class="font-bold flex items-center space-x-1">
+              <i data-lucide="sparkles" class="w-2.5 h-2.5"></i>
+              <span>Zonas de Afluencia activas en el área:</span>
+            </div>
+            <div id="measZonesList" class="flex flex-wrap gap-1 pt-0.5"></div>
+          </div>
+
           <button onclick="createPoiFromBoxSelection()" class="w-full py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded shadow transition flex items-center justify-center space-x-1">
             <i data-lucide="plus" class="w-3 h-3"></i>
             <span>Crear POI con esta masa</span>
@@ -1586,6 +1728,141 @@
         <button onclick="submitIsolatedZoneModal()" class="px-5 py-2 bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-bold rounded-lg transition shadow flex items-center space-x-1.5">
           <i data-lucide="check" class="w-4 h-4"></i>
           <span>Guardar Zona</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Crear / Editar Zona de Alta Afluencia -->
+  <div id="modalAffluenceZone" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white border border-stone-200 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center border-b border-stone-200 pb-3">
+        <div>
+          <h3 id="modalAffluenceTitle" class="text-base font-bold text-stone-900 flex items-center space-x-2">
+            <i data-lucide="sparkles" class="w-5 h-5 text-amber-500"></i>
+            <span>Zona de Alta Afluencia</span>
+          </h3>
+          <p class="text-xs text-stone-500 mt-0.5">Incrementa la atracción de empleo y el alcance metropolitano de la zona.</p>
+        </div>
+        <button onclick="closeAffluenceZoneModal()" class="text-stone-400 hover:text-stone-800 p-1.5 rounded-lg hover:bg-stone-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <input type="hidden" id="az_edit_index" value="-1">
+
+      <div class="space-y-3 text-xs">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-stone-700 font-semibold mb-1">Nombre de la Zona</label>
+            <input type="text" id="az_name" oninput="onAzNameInput()" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-amber-500 focus:outline-none" placeholder="ej. Zona Hotelera">
+          </div>
+          <div>
+            <label class="block text-stone-700 font-semibold mb-1">ID (Identificador)</label>
+            <input type="text" id="az_id" class="w-full bg-stone-50 font-mono border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-bold focus:border-amber-500 focus:outline-none" placeholder="zone_hotelera">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-stone-700 font-semibold mb-1">Arquetipo Urbano (Preset)</label>
+          <select id="az_archetype" onchange="onAzArchetypeChanged(this.value)" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-amber-500 focus:outline-none">
+            <option value="tourism">🏖️ Corredor Turístico / Hotelero (2.2x, Alcance +50%)</option>
+            <option value="cbd">🏦 Distrito Financiero / Corporativo (2.5x, Alcance +40%)</option>
+            <option value="industrial">🏭 Parque Industrial / Logístico (1.8x, Alcance +30%)</option>
+            <option value="commercial">🛍️ Corredor Comercial / High-Street (1.4x, Alcance +15%)</option>
+            <option value="custom">⚙️ Personalizado</option>
+          </select>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 p-3 bg-stone-50 rounded-xl border border-stone-200">
+          <div>
+            <div class="flex justify-between items-center mb-1">
+              <label class="text-stone-700 font-semibold">Multiplicador de Empleo</label>
+              <strong id="az_mult_display" class="font-mono text-amber-600 font-bold">2.2x</strong>
+            </div>
+            <input type="range" id="az_multiplier" min="1.1" max="5.0" step="0.1" value="2.2" oninput="onAzMultiplierInput(this.value)" class="w-full accent-amber-500 cursor-pointer">
+            <div class="flex justify-between text-[10px] text-stone-400">
+              <span>1.1x</span>
+              <span>3.0x</span>
+              <span>5.0x</span>
+            </div>
+          </div>
+
+          <div>
+            <div class="flex justify-between items-center mb-1">
+              <label class="text-stone-700 font-semibold">Bono de Alcance (Supralocal)</label>
+              <strong id="az_reach_display" class="font-mono text-blue-600 font-bold">+50%</strong>
+            </div>
+            <input type="range" id="az_reach_bonus" min="0.0" max="0.60" step="0.05" value="0.50" oninput="onAzReachInput(this.value)" class="w-full accent-blue-600 cursor-pointer">
+            <div class="flex justify-between text-[10px] text-stone-400">
+              <span>0% (Local)</span>
+              <span>+30%</span>
+              <span>+60% (Metro)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-stone-700 font-semibold mb-1">Color en Mapa</label>
+            <div class="flex items-center space-x-2">
+              <input type="color" id="az_color" value="#F59E0B" oninput="onAzColorInput(this.value)" class="w-8 h-8 rounded border border-stone-300 cursor-pointer">
+              <span id="az_color_hex" class="font-mono text-stone-500 font-bold">#F59E0B</span>
+            </div>
+          </div>
+          <div>
+            <label class="block text-stone-700 font-semibold mb-1">Modo de Asignación</label>
+            <select id="az_target_mode" onchange="onAzTargetModeChanged(this.value)" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium">
+              <option value="MULTIPLIER">Multiplicador Orgánico (DENUE)</option>
+              <option value="TARGET_CAPACITY">Cupo Fijo de Empleos (Target)</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="az_target_jobs_group" class="hidden">
+          <label class="block text-stone-700 font-semibold mb-1">Cupo Objetivo de Empleos</label>
+          <input type="number" id="az_target_jobs" placeholder="ej. 25000" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-semibold">
+        </div>
+
+        <!-- Tarjeta de Telemetría DENUE en Vivo -->
+        <div class="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-2">
+          <div class="flex justify-between items-center text-[11px] text-amber-900 font-bold">
+            <span class="flex items-center space-x-1">
+              <i data-lucide="bar-chart-2" class="w-3.5 h-3.5 text-amber-600"></i>
+              <span>Impacto Estimado en DENUE</span>
+            </span>
+            <span id="az_telemetry_status" class="font-mono text-[10px] text-amber-700">Calculando...</span>
+          </div>
+          <div class="grid grid-cols-3 gap-2 text-center text-[11px] font-mono">
+            <div class="bg-white/80 p-2 rounded-lg border border-amber-500/20">
+              <span class="text-stone-500 text-[10px] block">Establecimientos:</span>
+              <strong id="az_est_count" class="text-stone-900 text-sm">0</strong>
+            </div>
+            <div class="bg-white/80 p-2 rounded-lg border border-amber-500/20">
+              <span class="text-stone-500 text-[10px] block">Empleos Base:</span>
+              <strong id="az_base_jobs" class="text-stone-900 text-sm">0</strong>
+            </div>
+            <div class="bg-white/80 p-2 rounded-lg border border-amber-500/20">
+              <span class="text-stone-500 text-[10px] block">Con Boost:</span>
+              <strong id="az_boosted_jobs" class="text-amber-600 text-sm font-bold">0</strong>
+            </div>
+          </div>
+          <div id="az_pois_note" class="text-[10px] text-stone-500 hidden flex items-center space-x-1">
+            <i data-lucide="info" class="w-3 h-3 text-stone-400 shrink-0"></i>
+            <span id="az_pois_text">POIs especiales dentro de la zona mantienen su cuota manual declarada.</span>
+          </div>
+          <div id="az_overlap_alert" class="hidden text-[10px] text-amber-800 bg-amber-100 p-2 rounded-lg border border-amber-300 flex items-center space-x-1.5">
+            <i data-lucide="alert-triangle" class="w-3.5 h-3.5 text-amber-700 shrink-0"></i>
+            <span id="az_overlap_text">Solapamiento detectado: Los nodos compartidos adoptarán la regla MAX Priority.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end space-x-2 pt-3 border-t border-stone-200">
+        <button onclick="closeAffluenceZoneModal()" class="px-4 py-2 bg-stone-100 text-stone-700 text-xs font-bold rounded-lg hover:bg-stone-200 transition">Cancelar</button>
+        <button onclick="submitAffluenceZoneModal()" class="px-5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg transition shadow flex items-center space-x-1.5">
+          <i data-lucide="check" class="w-4 h-4"></i>
+          <span>Guardar Zona de Afluencia</span>
         </button>
       </div>
     </div>
@@ -2036,12 +2313,18 @@
       // 2. Mapa POI Studio
       const b2 = createBaseLayers();
       mapPoi = L.map('mapPoi', { ...mapOptions, layers: [b2.baseMapDefault] }).setView([21.16, -86.85], 11);
-      L.control.layers(b2.layerControl, null, { position: 'topright' }).addTo(mapPoi);
       poiMarkersGroup = L.layerGroup().addTo(mapPoi);
+      affluenceZonesGroup = L.featureGroup().addTo(mapPoi);
+      const poiOverlays = {
+        "📍 POIs y Marcadores": poiMarkersGroup,
+        "✨ Zonas de Afluencia": affluenceZonesGroup
+      };
+      L.control.layers(b2.layerControl, poiOverlays, { position: 'topright' }).addTo(mapPoi);
       mapPoi.on('mousemove', (e) => { lastMapMouseLatLng = e.latlng; });
       mapPoi.on('mouseout', () => { lastMapMouseLatLng = null; });
 
       setupBoxSelectionForPoi();
+      setupAffluenceDrawingEvents();
 
       // 3. Mapa Demand Viewer
       const b3 = createBaseLayers();
@@ -2050,12 +2333,14 @@
       demandLayers.jobs = L.layerGroup().addTo(mapDemand);
       demandLayers.pois = L.layerGroup().addTo(mapDemand);
       isolatedZonesDemandGroup = L.layerGroup().addTo(mapDemand);
+      affluenceZonesDemandGroup = L.layerGroup().addTo(mapDemand);
 
       const demandOverlays = {
         "👥 Población (Azul)": demandLayers.residents,
         "💼 Empleo (Rojo)": demandLayers.jobs,
         "⭐ POIs Especiales (Naranja)": demandLayers.pois,
-        "🏝️ Zonas Aisladas (Cian)": isolatedZonesDemandGroup
+        "🏝️ Zonas Aisladas (Cian)": isolatedZonesDemandGroup,
+        "✨ Zonas de Afluencia (Ámbar)": affluenceZonesDemandGroup
       };
       L.control.layers(b3.layerControl, demandOverlays, { position: 'topright' }).addTo(mapDemand);
     }
@@ -2746,6 +3031,647 @@
     }
 
     // -------------------------------------------------------------------------
+    // SUBSISTEMA: ZONAS DE ALTA AFLUENCIA (AFFLUENCE ZONES)
+    // -------------------------------------------------------------------------
+    let isDrawingAffluence = false;
+    let affluenceDrawMode = 'polygon';
+    let affluenceDrawPoints = [];
+    let affluenceTempShape = null;
+    let affluenceDrawMarkers = [];
+    let affluenceBoxStart = null;
+    let selectedAffluenceIndex = -1;
+    let currentAffluenceDraft = null;
+    let affluenceTelemetryTimer = null;
+
+    const AFFLUENCE_ARCHETYPES = {
+      tourism: { name: "Corredor Turístico", multiplier: 2.2, reach_bonus: 0.50, color: "#F59E0B" },
+      cbd: { name: "Distrito Financiero", multiplier: 2.5, reach_bonus: 0.40, color: "#8B5CF6" },
+      industrial: { name: "Parque Industrial", multiplier: 1.8, reach_bonus: 0.30, color: "#06B6D4" },
+      commercial: { name: "Corredor Comercial", multiplier: 1.4, reach_bonus: 0.15, color: "#10B981" },
+      custom: { name: "Personalizado", multiplier: 2.0, reach_bonus: 0.30, color: "#F59E0B" }
+    };
+
+    function setupAffluenceDrawingEvents() {
+      if (!mapPoi) return;
+
+      mapPoi.on('click', (e) => {
+        if (!isDrawingAffluence || affluenceDrawMode !== 'polygon') return;
+        addAffluencePolygonVertex(e.latlng);
+      });
+
+      mapPoi.on('dblclick', (e) => {
+        if (!isDrawingAffluence || affluenceDrawMode !== 'polygon') return;
+        L.DomEvent.stop(e);
+        finishAffluencePolygonDrawing();
+      });
+
+      mapPoi.on('mousedown', (e) => {
+        if (!isDrawingAffluence || affluenceDrawMode !== 'bbox') return;
+        affluenceBoxStart = e.latlng;
+        if (affluenceTempShape) mapPoi.removeLayer(affluenceTempShape);
+        affluenceTempShape = L.rectangle([affluenceBoxStart, affluenceBoxStart], {
+          color: '#F59E0B',
+          weight: 2,
+          dashArray: '5, 5',
+          fillColor: '#F59E0B',
+          fillOpacity: 0.25
+        }).addTo(mapPoi);
+      });
+
+      mapPoi.on('mousemove', (e) => {
+        if (!isDrawingAffluence) return;
+        if (affluenceDrawMode === 'bbox' && affluenceBoxStart && affluenceTempShape) {
+          affluenceTempShape.setBounds([affluenceBoxStart, e.latlng]);
+        } else if (affluenceDrawMode === 'polygon' && affluenceDrawPoints.length > 0 && affluenceTempShape) {
+          const currentPts = [...affluenceDrawPoints, e.latlng];
+          affluenceTempShape.setLatLngs([currentPts]);
+        }
+      });
+
+      mapPoi.on('mouseup', (e) => {
+        if (!isDrawingAffluence || affluenceDrawMode !== 'bbox' || !affluenceBoxStart) return;
+        const endLatLng = e.latlng;
+        const minLon = Math.min(affluenceBoxStart.lng, endLatLng.lng);
+        const minLat = Math.min(affluenceBoxStart.lat, endLatLng.lat);
+        const maxLon = Math.max(affluenceBoxStart.lng, endLatLng.lng);
+        const maxLat = Math.max(affluenceBoxStart.lat, endLatLng.lat);
+
+        cancelDrawingAffluenceZone();
+
+        if (maxLon - minLon < 0.001 || maxLat - minLat < 0.001) {
+          showToast("Área trazada muy pequeña o inválida", "warning");
+          return;
+        }
+
+        const bbox = [
+          parseFloat(minLon.toFixed(5)),
+          parseFloat(minLat.toFixed(5)),
+          parseFloat(maxLon.toFixed(5)),
+          parseFloat(maxLat.toFixed(5))
+        ];
+        const coordinates = [
+          [bbox[0], bbox[1]],
+          [bbox[2], bbox[1]],
+          [bbox[2], bbox[3]],
+          [bbox[0], bbox[3]],
+          [bbox[0], bbox[1]]
+        ];
+
+        openAffluenceZoneModal(-1, {
+          type: 'bbox',
+          bbox: bbox,
+          coordinates: coordinates,
+          name: 'Nueva Zona de Afluencia'
+        });
+      });
+
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && isDrawingAffluence) {
+          cancelDrawingAffluenceZone();
+        } else if (e.key === 'Enter' && isDrawingAffluence && affluenceDrawMode === 'polygon') {
+          finishAffluencePolygonDrawing();
+        }
+      });
+    }
+
+    function startDrawingAffluenceZone(mode = 'polygon') {
+      if (!currentCityFile) {
+        showToast("Selecciona o crea un proyecto primero", "warning");
+        return;
+      }
+      isDrawingAffluence = true;
+      affluenceDrawMode = mode;
+      affluenceDrawPoints = [];
+      affluenceDrawMarkers = [];
+      affluenceBoxStart = null;
+
+      if (mapPoi) {
+        if (mode === 'bbox') mapPoi.dragging.disable();
+        mapPoi.getContainer().style.cursor = 'crosshair';
+      }
+
+      const banner = document.getElementById('drawingZoneBanner');
+      const instructions = document.getElementById('drawingZoneInstructions');
+      if (banner) banner.classList.remove('hidden');
+      if (instructions) {
+        if (mode === 'polygon') {
+          instructions.innerText = "Haz clics para trazar los vértices del polígono. Clic en el primer punto o Enter para cerrar.";
+        } else {
+          instructions.innerText = "Haz clic y arrastra en el mapa para delimitar el rectángulo de afluencia.";
+        }
+      }
+      lucide.createIcons();
+      showToast(`Modo trazado activo: ${mode === 'polygon' ? 'Polígono libre' : 'Rectángulo'}`, "info");
+    }
+
+    function cancelDrawingAffluenceZone() {
+      isDrawingAffluence = false;
+      affluenceBoxStart = null;
+      affluenceDrawPoints = [];
+
+      if (affluenceTempShape && mapPoi) {
+        mapPoi.removeLayer(affluenceTempShape);
+        affluenceTempShape = null;
+      }
+      if (affluenceDrawMarkers && mapPoi) {
+        affluenceDrawMarkers.forEach(m => mapPoi.removeLayer(m));
+        affluenceDrawMarkers = [];
+      }
+
+      if (mapPoi) {
+        mapPoi.dragging.enable();
+        mapPoi.getContainer().style.cursor = '';
+      }
+
+      const banner = document.getElementById('drawingZoneBanner');
+      if (banner) banner.classList.add('hidden');
+    }
+
+    function addAffluencePolygonVertex(latlng) {
+      if (affluenceDrawPoints.length >= 3) {
+        const first = affluenceDrawPoints[0];
+        const dist = mapPoi.distance(first, latlng);
+        if (dist < 35) {
+          finishAffluencePolygonDrawing();
+          return;
+        }
+      }
+
+      affluenceDrawPoints.push(latlng);
+
+      const m = L.circleMarker(latlng, {
+        radius: 5,
+        color: '#F59E0B',
+        fillColor: '#FFFFFF',
+        fillOpacity: 1,
+        weight: 2
+      }).addTo(mapPoi);
+      affluenceDrawMarkers.push(m);
+
+      if (affluenceDrawPoints.length === 1) {
+        m.setStyle({ radius: 7, fillColor: '#F59E0B', color: '#FFFFFF' });
+      }
+
+      if (!affluenceTempShape) {
+        affluenceTempShape = L.polygon([affluenceDrawPoints], {
+          color: '#F59E0B',
+          weight: 2,
+          dashArray: '5, 5',
+          fillColor: '#F59E0B',
+          fillOpacity: 0.2
+        }).addTo(mapPoi);
+      } else {
+        affluenceTempShape.setLatLngs([affluenceDrawPoints]);
+      }
+    }
+
+    function finishAffluencePolygonDrawing() {
+      if (affluenceDrawPoints.length < 3) {
+        showToast("Un polígono requiere al menos 3 vértices", "warning");
+        return;
+      }
+
+      const rawCoords = affluenceDrawPoints.map(p => [
+        parseFloat(p.lng.toFixed(5)),
+        parseFloat(p.lat.toFixed(5))
+      ]);
+      if (rawCoords[0][0] !== rawCoords[rawCoords.length - 1][0] || rawCoords[0][1] !== rawCoords[rawCoords.length - 1][1]) {
+        rawCoords.push([rawCoords[0][0], rawCoords[0][1]]);
+      }
+
+      cancelDrawingAffluenceZone();
+
+      openAffluenceZoneModal(-1, {
+        type: 'polygon',
+        coordinates: rawCoords,
+        name: 'Nuevo Corredor de Afluencia'
+      });
+    }
+
+    function openAffluenceZoneModal(index = -1, draftData = null) {
+      selectedAffluenceIndex = index;
+      document.getElementById('az_edit_index').value = index;
+
+      cityData.affluence_zones = cityData.affluence_zones || [];
+      const z = (index >= 0 && cityData.affluence_zones[index]) ? { ...cityData.affluence_zones[index] } : (draftData || {});
+
+      currentAffluenceDraft = {
+        id: z.id || `zone_${Date.now().toString().slice(-4)}`,
+        name: z.name || "Nueva Zona de Afluencia",
+        type: z.type || "polygon",
+        archetype: z.archetype || "tourism",
+        multiplier: parseFloat(z.multiplier || 2.2),
+        reach_bonus: parseFloat(z.reach_bonus !== undefined ? z.reach_bonus : 0.50),
+        target_mode: z.target_mode || "MULTIPLIER",
+        target_jobs: z.target_jobs || null,
+        color: z.color || "#F59E0B",
+        enabled: z.enabled !== undefined ? z.enabled : true,
+        coordinates: z.coordinates || [],
+        bbox: z.bbox || null
+      };
+
+      document.getElementById('az_name').value = currentAffluenceDraft.name;
+      document.getElementById('az_id').value = currentAffluenceDraft.id;
+      document.getElementById('az_archetype').value = currentAffluenceDraft.archetype;
+      document.getElementById('az_multiplier').value = currentAffluenceDraft.multiplier;
+      document.getElementById('az_mult_display').innerText = `${currentAffluenceDraft.multiplier.toFixed(1)}x`;
+      document.getElementById('az_reach_bonus').value = currentAffluenceDraft.reach_bonus;
+      document.getElementById('az_reach_display').innerText = `+${Math.round(currentAffluenceDraft.reach_bonus * 100)}%`;
+      document.getElementById('az_color').value = currentAffluenceDraft.color;
+      document.getElementById('az_color_hex').innerText = currentAffluenceDraft.color;
+      document.getElementById('az_target_mode').value = currentAffluenceDraft.target_mode;
+      document.getElementById('az_target_jobs').value = currentAffluenceDraft.target_jobs || '';
+
+      const targetGroup = document.getElementById('az_target_jobs_group');
+      if (targetGroup) {
+        if (currentAffluenceDraft.target_mode === 'TARGET_CAPACITY') targetGroup.classList.remove('hidden');
+        else targetGroup.classList.add('hidden');
+      }
+
+      document.getElementById('modalAffluenceTitle').querySelector('span').innerText = index >= 0 ? "Editar Zona de Afluencia" : "Nueva Zona de Afluencia";
+      document.getElementById('modalAffluenceZone').classList.remove('hidden');
+      lucide.createIcons();
+
+      requestAffluenceZoneTelemetry();
+    }
+
+    function closeAffluenceZoneModal() {
+      document.getElementById('modalAffluenceZone').classList.add('hidden');
+      currentAffluenceDraft = null;
+    }
+
+    function onAzNameInput() {
+      const name = document.getElementById('az_name').value;
+      if (currentAffluenceDraft && selectedAffluenceIndex < 0) {
+        const slug = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').slice(0, 20);
+        document.getElementById('az_id').value = slug ? `zone_${slug}` : `zone_${Date.now().toString().slice(-4)}`;
+      }
+    }
+
+    function onAzArchetypeChanged(archetype) {
+      if (AFFLUENCE_ARCHETYPES[archetype] && archetype !== 'custom') {
+        const arch = AFFLUENCE_ARCHETYPES[archetype];
+        document.getElementById('az_multiplier').value = arch.multiplier;
+        document.getElementById('az_mult_display').innerText = `${arch.multiplier.toFixed(1)}x`;
+        document.getElementById('az_reach_bonus').value = arch.reach_bonus;
+        document.getElementById('az_reach_display').innerText = `+${Math.round(arch.reach_bonus * 100)}%`;
+        document.getElementById('az_color').value = arch.color;
+        document.getElementById('az_color_hex').innerText = arch.color;
+      }
+      requestAffluenceZoneTelemetry();
+    }
+
+    function onAzMultiplierInput(val) {
+      const m = parseFloat(val);
+      document.getElementById('az_mult_display').innerText = `${m.toFixed(1)}x`;
+      document.getElementById('az_archetype').value = 'custom';
+      requestAffluenceZoneTelemetry();
+    }
+
+    function onAzReachInput(val) {
+      const r = parseFloat(val);
+      document.getElementById('az_reach_display').innerText = `+${Math.round(r * 100)}%`;
+      document.getElementById('az_archetype').value = 'custom';
+    }
+
+    function onAzColorInput(val) {
+      document.getElementById('az_color_hex').innerText = val;
+    }
+
+    function onAzTargetModeChanged(mode) {
+      const targetGroup = document.getElementById('az_target_jobs_group');
+      if (targetGroup) {
+        if (mode === 'TARGET_CAPACITY') targetGroup.classList.remove('hidden');
+        else targetGroup.classList.add('hidden');
+      }
+    }
+
+    function requestAffluenceZoneTelemetry() {
+      if (affluenceTelemetryTimer) clearTimeout(affluenceTelemetryTimer);
+      affluenceTelemetryTimer = setTimeout(async () => {
+        if (!currentAffluenceDraft || !currentCityFile) return;
+
+        const mult = parseFloat(document.getElementById('az_multiplier').value) || 1.0;
+        const statusEl = document.getElementById('az_telemetry_status');
+        if (statusEl) statusEl.innerText = "Consultando...";
+
+        const payload = {
+          file: currentCityFile,
+          zone: {
+            ...currentAffluenceDraft,
+            id: document.getElementById('az_id').value || currentAffluenceDraft.id,
+            multiplier: mult
+          }
+        };
+
+        try {
+          const res = await fetch('/api/affluence-zones/inspect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const json = await res.json();
+          if (json.status === 'ok') {
+            document.getElementById('az_est_count').innerText = Number(json.establishment_count || 0).toLocaleString();
+            document.getElementById('az_base_jobs').innerText = Number(json.base_jobs || 0).toLocaleString();
+            document.getElementById('az_boosted_jobs').innerText = Number(json.boosted_jobs || 0).toLocaleString();
+            if (statusEl) statusEl.innerText = "Actualizado";
+
+            const poisNote = document.getElementById('az_pois_note');
+            if (poisNote) {
+              if (json.pois_inside && json.pois_inside.length > 0) {
+                poisNote.classList.remove('hidden');
+                document.getElementById('az_pois_text').innerText = `${json.pois_inside.length} POI(s) especial(es) en la zona (${json.pois_inside.map(p => p.id).join(', ')}) conservan sus empleos manuales intactos.`;
+              } else {
+                poisNote.classList.add('hidden');
+              }
+            }
+
+            const overlapAlert = document.getElementById('az_overlap_alert');
+            if (overlapAlert) {
+              if (json.overlapping && json.overlapping.length > 0) {
+                overlapAlert.classList.remove('hidden');
+                document.getElementById('az_overlap_text').innerText = `Solapamiento detectado con '${json.overlapping.map(o => o.name).join(', ')}': los nodos compartidos adoptarán la regla MAX Priority.`;
+              } else {
+                overlapAlert.classList.add('hidden');
+              }
+            }
+          }
+        } catch (e) {
+          if (statusEl) statusEl.innerText = "Error";
+        }
+      }, 250);
+    }
+
+    function submitAffluenceZoneModal() {
+      const name = document.getElementById('az_name').value.trim();
+      const id = document.getElementById('az_id').value.trim();
+      if (!name || !id) {
+        showToast("Nombre e ID son obligatorios", "warning");
+        return;
+      }
+
+      cityData.affluence_zones = cityData.affluence_zones || [];
+      const mult = parseFloat(document.getElementById('az_multiplier').value) || 2.0;
+      const reach = parseFloat(document.getElementById('az_reach_bonus').value) || 0.30;
+      const color = document.getElementById('az_color').value;
+      const archetype = document.getElementById('az_archetype').value;
+      const targetMode = document.getElementById('az_target_mode').value;
+      const targetJobs = parseInt(document.getElementById('az_target_jobs').value) || null;
+
+      const zoneObj = {
+        ...currentAffluenceDraft,
+        name: name,
+        id: id,
+        archetype: archetype,
+        multiplier: mult,
+        reach_bonus: reach,
+        color: color,
+        target_mode: targetMode,
+        target_jobs: targetMode === 'TARGET_CAPACITY' ? targetJobs : null,
+        enabled: currentAffluenceDraft.enabled !== undefined ? currentAffluenceDraft.enabled : true
+      };
+
+      if (selectedAffluenceIndex >= 0) {
+        cityData.affluence_zones[selectedAffluenceIndex] = zoneObj;
+        showToast("Zona de afluencia actualizada", "success");
+      } else {
+        cityData.affluence_zones.push(zoneObj);
+        showToast("Nueva zona de afluencia agregada", "success");
+      }
+
+      closeAffluenceZoneModal();
+      renderAffluenceZones();
+      triggerAutoSave();
+    }
+
+    function deleteAffluenceZone(index) {
+      if (!cityData.affluence_zones || index < 0 || index >= cityData.affluence_zones.length) return;
+      const zName = cityData.affluence_zones[index].name || "Zona";
+      cityData.affluence_zones.splice(index, 1);
+      renderAffluenceZones();
+      triggerAutoSave();
+      showToast(`Zona '${zName}' eliminada`, "info");
+    }
+
+    function toggleAffluenceZone(index) {
+      if (!cityData.affluence_zones || index < 0 || index >= cityData.affluence_zones.length) return;
+      cityData.affluence_zones[index].enabled = !cityData.affluence_zones[index].enabled;
+      renderAffluenceZones();
+      triggerAutoSave();
+    }
+
+    function centerAffluenceZoneOnMap(index) {
+      if (!cityData.affluence_zones || index < 0 || index >= cityData.affluence_zones.length) return;
+      const z = cityData.affluence_zones[index];
+      if (!mapPoi) return;
+
+      if (z.coordinates && z.coordinates.length >= 3) {
+        const bounds = L.latLngBounds(z.coordinates.map(c => [c[1], c[0]]));
+        mapPoi.fitBounds(bounds, { padding: [50, 50] });
+      } else if (z.bbox && z.bbox.length === 4) {
+        mapPoi.fitBounds([[z.bbox[1], z.bbox[0]], [z.bbox[3], z.bbox[2]]], { padding: [50, 50] });
+      }
+    }
+
+    function renderAffluenceZones() {
+      renderAffluenceZonesList();
+      renderAffluenceZonesOnMap();
+      renderAffluenceZonesOnDemandMap();
+      updateZoneBalanceMeter();
+    }
+
+    function renderAffluenceZonesList() {
+      const container = document.getElementById('affluenceZoneListContainer');
+      const badge = document.getElementById('affluenceZoneBadge');
+      const countLabel = document.getElementById('affluenceZoneCountLabel');
+      const zones = cityData.affluence_zones || [];
+
+      if (badge) badge.innerText = zones.length;
+      if (countLabel) countLabel.innerText = `${zones.length} ${zones.length === 1 ? 'zona configurada' : 'zonas configuradas'}`;
+      if (!container) return;
+
+      if (zones.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-6 text-stone-400 bg-stone-50 border border-dashed border-stone-300 rounded-xl space-y-2">
+            <i data-lucide="sparkles" class="w-6 h-6 mx-auto text-stone-300"></i>
+            <p class="text-xs font-medium">No hay zonas de afluencia definidas.</p>
+            <p class="text-[10px] text-stone-400">Traza un polígono o rectángulo para potenciar distritos como centros de negocio o zonas turísticas.</p>
+          </div>
+        `;
+        lucide.createIcons();
+        return;
+      }
+
+      container.innerHTML = zones.map((z, idx) => {
+        const isEnabled = z.enabled !== false;
+        const color = z.color || '#F59E0B';
+        const mult = parseFloat(z.multiplier || 2.0).toFixed(1);
+        const reach = Math.round(parseFloat(z.reach_bonus || 0) * 100);
+        const archName = AFFLUENCE_ARCHETYPES[z.archetype]?.name || 'Personalizado';
+
+        return `
+          <div class="p-3 bg-white border ${isEnabled ? 'border-stone-200 shadow-xs' : 'border-dashed border-stone-300 opacity-60'} rounded-xl transition hover:border-amber-400 space-y-2">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-2 truncate">
+                <span class="w-3 h-3 rounded-full shrink-0" style="background-color: ${color}"></span>
+                <strong class="text-xs text-stone-900 font-bold truncate">${escapeHtml(z.name || z.id)}</strong>
+              </div>
+              <div class="flex items-center space-x-1 shrink-0">
+                <button onclick="toggleAffluenceZone(${idx})" title="${isEnabled ? 'Desactivar zona' : 'Activar zona'}" class="p-1 text-stone-400 hover:text-amber-600 rounded">
+                  <i data-lucide="${isEnabled ? 'eye' : 'eye-off'}" class="w-3.5 h-3.5"></i>
+                </button>
+                <button onclick="centerAffluenceZoneOnMap(${idx})" title="Centrar en el mapa" class="p-1 text-stone-400 hover:text-stone-700 rounded">
+                  <i data-lucide="crosshair" class="w-3.5 h-3.5"></i>
+                </button>
+                <button onclick="openAffluenceZoneModal(${idx})" title="Editar zona" class="p-1 text-stone-400 hover:text-amber-600 rounded">
+                  <i data-lucide="edit-2" class="w-3.5 h-3.5"></i>
+                </button>
+                <button onclick="deleteAffluenceZone(${idx})" title="Eliminar zona" class="p-1 text-stone-400 hover:text-rose-600 rounded">
+                  <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
+              <span class="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 font-bold border border-amber-200">
+                ${mult}x Empleo
+              </span>
+              <span class="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-bold border border-blue-200">
+                +${reach}% Alcance
+              </span>
+              <span class="px-1.5 py-0.5 rounded bg-stone-100 text-stone-600 border border-stone-200">
+                ${archName}
+              </span>
+            </div>
+          </div>
+        `;
+      }).join('');
+      lucide.createIcons();
+    }
+
+    function renderAffluenceZonesOnMap() {
+      if (!affluenceZonesGroup) return;
+      affluenceZonesGroup.clearLayers();
+      const zones = cityData.affluence_zones || [];
+
+      zones.forEach((z, idx) => {
+        if (!z.enabled && z.enabled !== undefined) return;
+        const color = z.color || '#F59E0B';
+        let layer = null;
+
+        if (z.coordinates && z.coordinates.length >= 3) {
+          const latlngs = z.coordinates.map(c => [c[1], c[0]]);
+          layer = L.polygon(latlngs, {
+            color: color,
+            weight: 2.5,
+            fillColor: color,
+            fillOpacity: 0.20,
+            dashArray: '6, 4'
+          });
+        } else if (z.bbox && z.bbox.length === 4) {
+          const bounds = [[z.bbox[1], z.bbox[0]], [z.bbox[3], z.bbox[2]]];
+          layer = L.rectangle(bounds, {
+            color: color,
+            weight: 2.5,
+            fillColor: color,
+            fillOpacity: 0.20,
+            dashArray: '6, 4'
+          });
+        }
+
+        if (layer) {
+          const mult = parseFloat(z.multiplier || 2.0).toFixed(1);
+          const reach = Math.round(parseFloat(z.reach_bonus || 0) * 100);
+          layer.bindTooltip(`
+            <div class="p-1 space-y-0.5">
+              <strong style="color: ${color}">★ ${escapeHtml(z.name || z.id)}</strong><br>
+              <span class="text-[10px] text-stone-500 font-mono">Atracción: ${mult}x | Alcance: +${reach}%</span>
+            </div>
+          `, { sticky: true, className: 'poi-custom-tooltip' });
+
+          layer.on('click', () => { openAffluenceZoneModal(idx); });
+          layer.addTo(affluenceZonesGroup);
+        }
+      });
+    }
+
+    function renderAffluenceZonesOnDemandMap() {
+      if (!affluenceZonesDemandGroup) return;
+      affluenceZonesDemandGroup.clearLayers();
+      const zones = cityData.affluence_zones || [];
+
+      zones.forEach(z => {
+        if (!z.enabled && z.enabled !== undefined) return;
+        const color = z.color || '#F59E0B';
+        let layer = null;
+
+        if (z.coordinates && z.coordinates.length >= 3) {
+          const latlngs = z.coordinates.map(c => [c[1], c[0]]);
+          layer = L.polygon(latlngs, {
+            color: color,
+            weight: 2,
+            fillColor: color,
+            fillOpacity: 0.15,
+            dashArray: '4, 4'
+          });
+        } else if (z.bbox && z.bbox.length === 4) {
+          const bounds = [[z.bbox[1], z.bbox[0]], [z.bbox[3], z.bbox[2]]];
+          layer = L.rectangle(bounds, {
+            color: color,
+            weight: 2,
+            fillColor: color,
+            fillOpacity: 0.15,
+            dashArray: '4, 4'
+          });
+        }
+
+        if (layer) {
+          layer.bindTooltip(`<strong>★ ${escapeHtml(z.name || z.id)}</strong><br><span class="text-[10px] text-stone-500">Zona de Afluencia</span>`, { sticky: true });
+          layer.addTo(affluenceZonesDemandGroup);
+        }
+      });
+    }
+
+    function updateZoneBalanceMeter() {
+      const label = document.getElementById('zoneBalanceLabel');
+      const bar = document.getElementById('zoneBalanceBar');
+      const tip = document.getElementById('zoneBalanceTip');
+      const zones = cityData.affluence_zones || [];
+      const activeZones = zones.filter(z => z.enabled !== false);
+
+      if (!label || !bar) return;
+
+      if (activeZones.length === 0) {
+        label.innerText = "0% en Zonas";
+        label.className = "font-bold text-stone-500 font-mono text-[10px]";
+        bar.style.width = "0%";
+        bar.className = "bg-stone-300 h-1.5 rounded-full transition-all duration-300";
+        if (tip) tip.innerText = "Las zonas aumentan atracción redistribuyendo la PEA de forma balanceada.";
+        return;
+      }
+
+      let avgMult = activeZones.reduce((acc, z) => acc + (parseFloat(z.multiplier) || 1.0), 0) / activeZones.length;
+      let estimatedShare = Math.min(85, Math.round(activeZones.length * 15 * (avgMult / 2.0)));
+
+      label.innerText = `${estimatedShare}% en Zonas`;
+      bar.style.width = `${estimatedShare}%`;
+
+      if (estimatedShare <= 45) {
+        label.className = "font-bold text-emerald-600 font-mono text-[10px]";
+        bar.className = "bg-emerald-500 h-1.5 rounded-full transition-all duration-300";
+        if (tip) tip.innerText = "Distribución equilibrada: los centros locales conservan masa barrial.";
+      } else if (estimatedShare <= 70) {
+        label.className = "font-bold text-amber-600 font-mono text-[10px]";
+        bar.className = "bg-amber-500 h-1.5 rounded-full transition-all duration-300";
+        if (tip) tip.innerText = "Alta concentración: gran flujo de pasajeros viajará hacia los corredores.";
+      } else {
+        label.className = "font-bold text-rose-600 font-mono text-[10px]";
+        bar.className = "bg-rose-500 h-1.5 rounded-full transition-all duration-300";
+        if (tip) tip.innerText = "Zonificación muy densa: el empleo periférico tendrá baja afluencia.";
+      }
+    }
+
+    // -------------------------------------------------------------------------
     // API CITIES Y CARGA DE DATOS
     // -------------------------------------------------------------------------
     async function fetchCitiesList() {
@@ -3049,6 +3975,10 @@
         cityData.isolated_zones = (cityData.city && Array.isArray(cityData.city.isolated_zones)) ? cityData.city.isolated_zones : [];
       }
       renderIsolatedZones();
+      if (!cityData.affluence_zones) {
+        cityData.affluence_zones = [];
+      }
+      renderAffluenceZones();
     }
 
     // -------------------------------------------------------------------------
@@ -3713,7 +4643,7 @@
 
     function switchPoiTab(tabName) {
       if (tabName === 'absorption') tabName = 'editor';
-      const tabs = ['list', 'editor', 'places'];
+      const tabs = ['list', 'editor', 'places', 'zones'];
       tabs.forEach(t => {
         const btn = document.getElementById(`poiTabBtn-${t}`);
         const content = document.getElementById(`poiTab-${t}`);
@@ -3727,6 +4657,7 @@
       });
       if (tabName === 'places') renderPlacesList();
       if (tabName === 'editor') updatePoiPreviewFromForm();
+      if (tabName === 'zones') renderAffluenceZones();
       lucide.createIcons();
     }
 
@@ -4811,6 +5742,140 @@
       }
     }
 
+    let isPolyMeasureActive = false;
+    let polyMeasurePoints = [];
+    let polyMeasurePreviewLayer = null;
+    let polySelectionLayer = null;
+    let measureHighlightGroup = null;
+
+    function getDistMetersWizard(lat1, lon1, lat2, lon2) {
+      const dLat = (lat2 - lat1) * 111139.0;
+      const dLon = (lon2 - lon1) * 111139.0 * Math.cos(((lat1 + lat2) / 2.0) * Math.PI / 180.0);
+      return Math.sqrt(dLat * dLat + dLon * dLon);
+    }
+
+    function isPointInZonePolygon(point, vs) {
+      const x = point[0], y = point[1];
+      let inside = false;
+      for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+        const xi = vs[i][0], yi = vs[i][1];
+        const xj = vs[j][0], yj = vs[j][1];
+        const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    function getPolygonAreaKm2Wizard(coords) {
+      if (!coords || coords.length < 3) return 0;
+      let avgLat = 0;
+      for (const c of coords) avgLat += c[1];
+      avgLat /= coords.length;
+      const cosLat = Math.cos(avgLat * Math.PI / 180);
+
+      let area = 0;
+      for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
+        const xi = coords[i][0] * 111.32 * cosLat;
+        const yi = coords[i][1] * 110.57;
+        const xj = coords[j][0] * 111.32 * cosLat;
+        const yj = coords[j][1] * 110.57;
+        area += (xj * yi) - (xi * yj);
+      }
+      return Math.max(0.01, Math.abs(area / 2.0));
+    }
+
+    function toggleBoxSelectMode() {
+      if (isPolyMeasureActive) cancelPolyMeasureMode();
+      isBoxSelectActive = !isBoxSelectActive;
+      const btn = document.getElementById('btnToggleBoxSelect');
+      if (btn) {
+        btn.classList.toggle('bg-amber-600/30', isBoxSelectActive);
+        btn.classList.toggle('border-amber-600', isBoxSelectActive);
+      }
+
+      if (isBoxSelectActive) {
+        mapPoi.dragging.disable();
+        mapPoi.getContainer().style.cursor = 'crosshair';
+        showToast("Arrastra sobre el mapa para medir empleos y población en el área", "info");
+      } else {
+        mapPoi.dragging.enable();
+        mapPoi.getContainer().style.cursor = '';
+      }
+    }
+
+    function togglePolyMeasureMode() {
+      if (isBoxSelectActive) toggleBoxSelectMode();
+      if (isPolyMeasureActive) {
+        cancelPolyMeasureMode();
+      } else {
+        startPolyMeasureMode();
+      }
+    }
+
+    function startPolyMeasureMode() {
+      isPolyMeasureActive = true;
+      polyMeasurePoints = [];
+      const btn = document.getElementById('btnTogglePolyMeasure');
+      if (btn) {
+        btn.classList.add('bg-amber-600/30', 'border-amber-600');
+      }
+      document.getElementById('polyMeasureBanner')?.classList.remove('hidden');
+      updatePolyMeasureButton();
+      mapPoi.getContainer().style.cursor = 'crosshair';
+      showToast("Modo Lazo / Polígono activo: haz clics para marcar los vértices de la zona", "info");
+    }
+
+    function cancelPolyMeasureMode() {
+      isPolyMeasureActive = false;
+      polyMeasurePoints = [];
+      if (polyMeasurePreviewLayer && mapPoi) {
+        mapPoi.removeLayer(polyMeasurePreviewLayer);
+        polyMeasurePreviewLayer = null;
+      }
+      const btn = document.getElementById('btnTogglePolyMeasure');
+      if (btn) {
+        btn.classList.remove('bg-amber-600/30', 'border-amber-600');
+      }
+      document.getElementById('polyMeasureBanner')?.classList.add('hidden');
+      mapPoi.getContainer().style.cursor = '';
+    }
+
+    function updatePolyMeasureButton() {
+      const btn = document.getElementById('btnFinishPolyMeasure');
+      if (btn) {
+        btn.innerText = `Finalizar (${polyMeasurePoints.length} pts)`;
+      }
+    }
+
+    function finishPolyMeasure() {
+      if (polyMeasurePoints.length < 3) {
+        showToast("Debes marcar al menos 3 puntos para delimitar un polígono", "warning");
+        return;
+      }
+
+      if (polySelectionLayer && mapPoi) {
+        mapPoi.removeLayer(polySelectionLayer);
+        polySelectionLayer = null;
+      }
+      if (boxSelectionLayer && mapPoi) {
+        mapPoi.removeLayer(boxSelectionLayer);
+        boxSelectionLayer = null;
+      }
+
+      polySelectionLayer = L.polygon(polyMeasurePoints, {
+        color: '#d97706',
+        weight: 2,
+        dashArray: '4, 4',
+        fillColor: '#f59e0b',
+        fillOpacity: 0.18
+      }).addTo(mapPoi);
+
+      const coords = polyMeasurePoints.map(p => [parseFloat(p.lng.toFixed(5)), parseFloat(p.lat.toFixed(5))]);
+      cancelPolyMeasureMode();
+
+      runAreaSimulationInWizard('poly', coords);
+    }
+
     function setupBoxSelectionForPoi() {
       if (!mapPoi) return;
 
@@ -4822,6 +5887,10 @@
           if (boxSelectionLayer) {
             mapPoi.removeLayer(boxSelectionLayer);
             boxSelectionLayer = null;
+          }
+          if (polySelectionLayer) {
+            mapPoi.removeLayer(polySelectionLayer);
+            polySelectionLayer = null;
           }
         }
       });
@@ -4840,7 +5909,7 @@
           } else {
             boxSelectionLayer.setBounds(bounds);
           }
-          calculateBoxStats(bounds);
+          runAreaSimulationInWizard('box', bounds);
         }
       });
 
@@ -4854,6 +5923,21 @@
       });
 
       mapPoi.on('click', (e) => {
+        if (isPolyMeasureActive) {
+          polyMeasurePoints.push(e.latlng);
+          updatePolyMeasureButton();
+          if (!polyMeasurePreviewLayer) {
+            polyMeasurePreviewLayer = L.polyline(polyMeasurePoints, {
+              color: '#d97706',
+              weight: 2,
+              dashArray: '3, 3'
+            }).addTo(mapPoi);
+          } else {
+            polyMeasurePreviewLayer.setLatLngs(polyMeasurePoints);
+          }
+          return;
+        }
+
         if (isBoxSelectActive) return;
 
         isPickingLocation = false;
@@ -4863,50 +5947,260 @@
         const isEditorOpen = editorTab && !editorTab.classList.contains('hidden');
 
         if (isEditorOpen) {
-          // Si el editor está abierto, actualizar las coordenadas del POI en edición
           document.getElementById('editPoiLon').value = e.latlng.lng.toFixed(5);
           document.getElementById('editPoiLat').value = e.latlng.lat.toFixed(5);
           updatePoiPreviewFromForm();
         } else {
-          // Al hacer clic en cualquier punto del mapa, colocar un nuevo POI Especial allí
           openPoiEditorForNew(e.latlng);
+        }
+      });
+
+      mapPoi.on('dblclick', (e) => {
+        if (isPolyMeasureActive && polyMeasurePoints.length >= 3) {
+          L.DomEvent.stopPropagation(e);
+          finishPolyMeasure();
         }
       });
     }
 
-    function calculateBoxStats(bounds) {
-      let totalJobs = 0;
-      let totalPop = 0;
-      let count = 0;
+    function runAreaSimulationInWizard(type, selectionObj) {
+      if (!mapPoi || !densityPoints || densityPoints.length === 0) return;
 
-      densityPoints.forEach(p => {
-        if (bounds.contains([p.location[1], p.location[0]])) {
-          totalJobs += (p.jobs || 0);
-          totalPop += (p.residents || 0);
-          count++;
+      if (!measureHighlightGroup) {
+        measureHighlightGroup = L.layerGroup().addTo(mapPoi);
+      }
+      measureHighlightGroup.clearLayers();
+
+      const isInside = (lon, lat) => {
+        if (type === 'box') {
+          return selectionObj.contains([lat, lon]);
+        } else if (type === 'poly') {
+          return isPointInZonePolygon([lon, lat], selectionObj);
+        }
+        return false;
+      };
+
+      // 1. Preparar POIs con radios y estados dentro/fuera
+      const poisList = (cityData && Array.isArray(cityData.pois)) ? cityData.pois : [];
+      const resolvedPois = poisList.map(p => {
+        const loc = p.loc || p.location || [0, 0];
+        const lon = parseFloat(loc[0]);
+        const lat = parseFloat(loc[1]);
+        return {
+          id: p.id || 'POI',
+          lon: lon,
+          lat: lat,
+          radius_m: parseFloat(p.radius_m || 1000),
+          mode: (p.mode || 'MAX').toUpperCase(),
+          declaredJobs: parseInt(p.jobs || 0, 10),
+          absorbedJobs: 0,
+          finalJobs: 0,
+          isInsideSelection: isInside(lon, lat)
+        };
+      });
+
+      // Zonas de Afluencia
+      const zones = (cityData && Array.isArray(cityData.affluence_zones))
+        ? cityData.affluence_zones.filter(z => z.enabled !== false && z.coordinates && z.coordinates.length >= 3)
+        : [];
+
+      // 2. Resolver absorción y afluencia para cada nodo
+      densityPoints.forEach(pt => {
+        const ptLon = pt.location[0];
+        const ptLat = pt.location[1];
+
+        // Absorción estricta al POI más cercano (argmin)
+        let matchedPoi = null;
+        let minDist = Infinity;
+        for (const poi of resolvedPois) {
+          const d = getDistMetersWizard(ptLat, ptLon, poi.lat, poi.lon);
+          if (d <= poi.radius_m && d < minDist) {
+            minDist = d;
+            matchedPoi = poi;
+          }
+        }
+
+        pt._absorbedBy = matchedPoi;
+        if (matchedPoi) {
+          matchedPoi.absorbedJobs += (pt.jobs || 0);
+        } else {
+          let maxMult = 1.0;
+          let matchedZone = null;
+          for (const zone of zones) {
+            if (isPointInZonePolygon([ptLon, ptLat], zone.coordinates)) {
+              const mult = parseFloat(zone.multiplier || 1.0);
+              if (mult > maxMult) {
+                maxMult = mult;
+                matchedZone = zone;
+              }
+            }
+          }
+          pt._affluenceMult = maxMult;
+          pt._matchedZone = matchedZone;
+          pt._finalJobs = Math.round((pt.jobs || 0) * maxMult);
         }
       });
 
-      const sw = bounds.getSouthWest();
-      const ne = bounds.getNorthEast();
-      const widthKm = (ne.lng - sw.lng) * 111.32 * Math.cos((sw.lat + ne.lat) / 2 * Math.PI / 180);
-      const heightKm = (ne.lat - sw.lat) * 110.57;
-      const areaKm2 = Math.max(0.01, Math.abs(widthKm * heightKm));
+      // Resolver POIs finales
+      resolvedPois.forEach(poi => {
+        const manual = poi.declaredJobs;
+        const absorbed = Math.round(poi.absorbedJobs);
+        if (poi.mode === "MAX") {
+          poi.finalJobs = Math.max(manual, absorbed);
+        } else if (poi.mode === "BOOST" || poi.mode === "ADDITIVE") {
+          poi.finalJobs = manual + absorbed;
+        } else if (poi.mode === "REPLACE") {
+          poi.finalJobs = manual;
+        } else {
+          poi.finalJobs = Math.max(manual, absorbed);
+        }
+      });
+
+      // 3. Acumular métricas dentro del área seleccionada
+      let origCalibratedJobs = 0;
+      let origRawJobs = 0;
+      let origPop = 0;
+      let organicJobsInside = 0;
+      let affluenceBoostJobs = 0;
+      let leakedJobs = 0;
+      let nodesCount = 0;
+      const activeZonesInside = new Map();
+
+      densityPoints.forEach(pt => {
+        const ptLon = pt.location[0];
+        const ptLat = pt.location[1];
+        if (!isInside(ptLon, ptLat)) return;
+
+        nodesCount++;
+        const j = (pt.jobs || 0);
+        const rawJ = (pt.raw_jobs !== undefined ? pt.raw_jobs : j);
+        const r = (pt.residents || 0);
+        origCalibratedJobs += j;
+        origRawJobs += rawJ;
+        origPop += r;
+
+        if (pt._absorbedBy) {
+          if (!pt._absorbedBy.isInsideSelection) {
+            leakedJobs += j;
+          }
+          // Nodo absorbido: gris suave con contorno discontinuo
+          const cm = L.circleMarker([ptLat, ptLon], {
+            radius: 4,
+            color: '#64748b',
+            weight: 1,
+            dashArray: '2, 2',
+            fillColor: '#475569',
+            fillOpacity: 0.6
+          });
+          cm.bindTooltip(`<b>${pt.id}</b><br>⚪ <i>Absorbido por:</i> <strong>${pt._absorbedBy.id}</strong><br>Base: ${j.toLocaleString()} empleos`, { direction: 'top' });
+          measureHighlightGroup.addLayer(cm);
+        } else {
+          organicJobsInside += j;
+          const finalJ = pt._finalJobs || j;
+          if (finalJ > j) {
+            affluenceBoostJobs += (finalJ - j);
+          }
+          if (pt._matchedZone) {
+            activeZonesInside.set(pt._matchedZone.id, {
+              name: pt._matchedZone.name || pt._matchedZone.id,
+              mult: pt._affluenceMult
+            });
+          }
+
+          const isBoosted = (pt._affluenceMult || 1.0) > 1.0;
+          const cm = L.circleMarker([ptLat, ptLon], {
+            radius: isBoosted ? 6 : 5,
+            color: '#fff',
+            weight: isBoosted ? 1.5 : 1,
+            fillColor: isBoosted ? '#10b981' : '#ef4444',
+            fillOpacity: isBoosted ? 0.85 : 0.75
+          });
+          const desc = isBoosted
+            ? `🟢 <i>Impulsado por:</i> <strong>${pt._matchedZone?.name || pt._matchedZone?.id}</strong> (${pt._affluenceMult}x)<br>Final: ${finalJ.toLocaleString()} (Base: ${j.toLocaleString()})`
+            : `🔴 <i>Orgánico Directo:</i> ${j.toLocaleString()} empleos`;
+          cm.bindTooltip(`<b>${pt.id}</b><br>${desc}`, { direction: 'top' });
+          measureHighlightGroup.addLayer(cm);
+        }
+      });
+
+      // POIs con centro adentro de la selección
+      const poisInside = resolvedPois.filter(p => p.isInsideSelection);
+      let totalPoiJobsInside = 0;
+      poisInside.forEach(p => { totalPoiJobsInside += p.finalJobs; });
+
+      const totalGameJobs = (organicJobsInside + affluenceBoostJobs) + totalPoiJobsInside;
+      const delta = totalGameJobs - origCalibratedJobs;
+      const deltaPct = origCalibratedJobs > 0 ? ((delta / origCalibratedJobs) * 100) : 0;
+
+      // Calcular Superficie km²
+      let areaKm2 = 0;
+      let centerLatLng = { lat: 0, lng: 0 };
+      if (type === 'box') {
+        const sw = selectionObj.getSouthWest();
+        const ne = selectionObj.getNorthEast();
+        const widthKm = (ne.lng - sw.lng) * 111.32 * Math.cos((sw.lat + ne.lat) / 2 * Math.PI / 180);
+        const heightKm = (ne.lat - sw.lat) * 110.57;
+        areaKm2 = Math.max(0.01, Math.abs(widthKm * heightKm));
+        centerLatLng = selectionObj.getCenter();
+      } else if (type === 'poly') {
+        areaKm2 = getPolygonAreaKm2Wizard(selectionObj);
+        let sLon = 0, sLat = 0;
+        selectionObj.forEach(c => { sLon += c[0]; sLat += c[1]; });
+        centerLatLng = { lat: sLat / selectionObj.length, lng: sLon / selectionObj.length };
+      }
 
       currentAreaStats = {
-        bounds: bounds,
-        center: bounds.getCenter(),
+        type: type,
+        center: centerLatLng,
         areaKm2: areaKm2,
-        jobs: totalJobs,
-        pop: totalPop,
-        nodes: count
+        jobs: origCalibratedJobs,
+        rawJobs: origRawJobs,
+        gameJobs: totalGameJobs,
+        pop: origPop,
+        nodes: nodesCount
       };
 
-      document.getElementById('measJobs').innerText = totalJobs.toLocaleString();
-      document.getElementById('measPop').innerText = totalPop.toLocaleString();
-      document.getElementById('measNodes').innerText = count.toLocaleString();
+      // Actualizar DOM del HUD
+      document.getElementById('measJobs').innerText = origCalibratedJobs.toLocaleString();
+      const rawEl = document.getElementById('measRawJobs');
+      if (rawEl) rawEl.innerText = origRawJobs.toLocaleString();
+      const gameEl = document.getElementById('measGameJobs');
+      if (gameEl) gameEl.innerText = totalGameJobs.toLocaleString();
+      const deltaEl = document.getElementById('measDeltaBadge');
+      if (deltaEl) {
+        const sign = delta > 0 ? '+' : '';
+        deltaEl.innerText = `${sign}${delta.toLocaleString()} (${sign}${deltaPct.toFixed(1)}%)`;
+        deltaEl.className = 'font-bold ' + (delta > 0 ? 'text-emerald-700' : (delta < 0 ? 'text-rose-600' : 'text-stone-500'));
+      }
+
+      document.getElementById('measOrganicJobs').innerText = organicJobsInside.toLocaleString();
+      document.getElementById('measAffluenceBoost').innerText = `+${affluenceBoostJobs.toLocaleString()}`;
+      document.getElementById('measLeakedJobs').innerText = `-${leakedJobs.toLocaleString()}`;
+      document.getElementById('measPoisInside').innerText = `${poisInside.length} (${totalPoiJobsInside.toLocaleString()} empl.)`;
+
+      const zonesContainer = document.getElementById('measZonesContainer');
+      const zonesList = document.getElementById('measZonesList');
+      if (zonesContainer && zonesList) {
+        if (activeZonesInside.size > 0) {
+          zonesContainer.classList.remove('hidden');
+          zonesList.innerHTML = Array.from(activeZonesInside.values()).map(z => {
+            return `<span class="px-1.5 py-0.5 bg-amber-200/90 border border-amber-400/50 rounded font-semibold text-amber-900">${z.name} (${z.mult}x)</span>`;
+          }).join('');
+        } else {
+          zonesContainer.classList.add('hidden');
+          zonesList.innerHTML = '';
+        }
+      }
+
+      document.getElementById('measPop').innerText = origPop.toLocaleString();
+      document.getElementById('measNodes').innerText = nodesCount.toLocaleString();
       document.getElementById('measArea').innerText = `${areaKm2.toFixed(2)} km²`;
       document.getElementById('areaMeasureHud').classList.remove('hidden');
+      if (window.lucide) lucide.createIcons();
+    }
+
+    function calculateBoxStats(bounds) {
+      runAreaSimulationInWizard('box', bounds);
     }
 
     function clearAreaSelection() {
@@ -4914,8 +6208,16 @@
         mapPoi.removeLayer(boxSelectionLayer);
         boxSelectionLayer = null;
       }
+      if (polySelectionLayer && mapPoi) {
+        mapPoi.removeLayer(polySelectionLayer);
+        polySelectionLayer = null;
+      }
+      if (measureHighlightGroup) {
+        measureHighlightGroup.clearLayers();
+      }
       document.getElementById('areaMeasureHud').classList.add('hidden');
       if (isBoxSelectActive) toggleBoxSelectMode();
+      if (isPolyMeasureActive) cancelPolyMeasureMode();
     }
 
     function createPoiFromBoxSelection() {
@@ -5164,6 +6466,7 @@
         document.getElementById('metricTotalPea').innerText = totalResidents.toLocaleString();
 
         renderIsolatedZonesOnDemandMap();
+        renderAffluenceZonesOnDemandMap();
 
         if (points.length > 0 && mapDemand) {
           const b = cityData.city.bbox;

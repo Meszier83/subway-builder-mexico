@@ -159,6 +159,8 @@ def load_city_data(rel_or_abs_path: str) -> Dict[str, Any]:
             data["isolated_zones"] = data["city"]["isolated_zones"]
         else:
             data["isolated_zones"] = []
+    if not isinstance(data.get("affluence_zones"), list):
+        data["affluence_zones"] = []
 
     return data
 
@@ -189,6 +191,7 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
     pois_cfg = data.get("pois") or []
     places_cfg = data.get("places") or []
     isolated_zones_cfg = data.get("isolated_zones") or city_cfg.get("isolated_zones") or []
+    affluence_zones_cfg = data.get("affluence_zones") or []
     data_dir_cfg = str(data.get("data_dir", "")).strip()
     data_exclusions_cfg = data.get("data_exclusions", [])
 
@@ -292,6 +295,54 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
             lines.append(f'    name: "{z_name}"')
             lines.append(f'    bbox: {norm_b}')
         lines.append("")
+
+    # Bloque de Zonas de Alta Afluencia (High Attraction Zones)
+    if affluence_zones_cfg and isinstance(affluence_zones_cfg, list):
+        lines.append("# Zonas de Alta Afluencia (High Attraction Zones)")
+        lines.append("affluence_zones:")
+        for az in affluence_zones_cfg:
+            z_id = str(az.get("id", "zone_1")).strip()
+            z_name = str(az.get("name", z_id)).strip()
+            z_type = str(az.get("type", "polygon")).strip()
+            z_archetype = str(az.get("archetype", "custom")).strip()
+            z_mult = float(az.get("multiplier", 2.0))
+            z_reach = float(az.get("reach_bonus", 0.3))
+            z_enabled = bool(az.get("enabled", True))
+            z_color = str(az.get("color", "#F59E0B")).strip()
+            z_target_mode = str(az.get("target_mode", "MULTIPLIER")).strip()
+
+            lines.append(f'  - id: "{z_id}"')
+            lines.append(f'    name: "{z_name}"')
+            lines.append(f'    type: "{z_type}"')
+            lines.append(f'    archetype: "{z_archetype}"')
+            lines.append(f'    multiplier: {z_mult:.2f}')
+            lines.append(f'    reach_bonus: {z_reach:.2f}')
+            lines.append(f'    target_mode: "{z_target_mode}"')
+            if az.get("target_jobs") is not None and int(az.get("target_jobs", 0)) > 0:
+                lines.append(f'    target_jobs: {int(az["target_jobs"])}')
+            lines.append(f'    color: "{z_color}"')
+            lines.append(f'    enabled: {"true" if z_enabled else "false"}')
+
+            coords = az.get("coordinates")
+            if isinstance(coords, list) and len(coords) >= 3:
+                lines.append("    coordinates:")
+                for c in coords:
+                    if isinstance(c, (list, tuple)) and len(c) >= 2:
+                        lines.append(f'      - [{float(c[0]):.5f}, {float(c[1]):.5f}]')
+
+            raw_b = az.get("bbox")
+            if isinstance(raw_b, (list, tuple)) and len(raw_b) == 4:
+                try:
+                    norm_b = [
+                        round(min(float(raw_b[0]), float(raw_b[2])), 4),
+                        round(min(float(raw_b[1]), float(raw_b[3])), 4),
+                        round(max(float(raw_b[0]), float(raw_b[2])), 4),
+                        round(max(float(raw_b[1]), float(raw_b[3])), 4)
+                    ]
+                    lines.append(f'    bbox: {norm_b}')
+                except Exception:
+                    pass
+            lines.append("")
 
     # Bloque de POIs
     lines.append("pois:")
@@ -1503,6 +1554,89 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
 
                 saved_path = save_full_city_data(city_file, req_data)
                 self.serve_json({"status": "ok", "saved_path": saved_path})
+            except Exception as e:
+                self.serve_error(str(e), 500)
+
+        elif path == "/api/affluence-zones/inspect":
+            try:
+                content_len = int(self.headers.get('Content-Length', 0))
+                post_body = self.rfile.read(content_len)
+                req_data = json.loads(post_body.decode('utf-8'))
+
+                city_file = req_data.get("file", "")
+                zone_data = req_data.get("zone", {})
+                if not zone_data:
+                    self.serve_error("Falta el objeto 'zone'", 400)
+                    return
+
+                from sb_mexico.gravity import is_point_in_zone
+                from tools.poi_studio import load_demand_sample
+
+                cdata = load_city_data(city_file) if city_file else {}
+                bbox = cdata.get("city", {}).get("bbox")
+                sample_pts = load_demand_sample(bbox, city_file=city_file)
+
+                multiplier = float(zone_data.get("multiplier", 1.0))
+                est_count = 0
+                base_jobs = 0
+
+                for pt in sample_pts:
+                    loc = pt.get("location", [0, 0])
+                    if is_point_in_zone(loc[0], loc[1], zone_data):
+                        jobs = int(pt.get("jobs", 0))
+                        if jobs > 0:
+                            est_count += 1
+                            base_jobs += jobs
+
+                boosted_jobs = int(round(base_jobs * multiplier))
+
+                # POIs dentro de la zona (indicando que mantienen su cuota manual)
+                pois_inside = []
+                for p in cdata.get("pois", []):
+                    ploc = p.get("loc", [0, 0])
+                    if is_point_in_zone(ploc[0], ploc[1], zone_data):
+                        pois_inside.append({
+                            "id": p.get("id"),
+                            "name": p.get("name"),
+                            "jobs": p.get("jobs", 0)
+                        })
+
+                # Detección de solapamiento con otras zonas existentes
+                existing_zones = cdata.get("affluence_zones", [])
+                overlapping = []
+                cur_id = zone_data.get("id")
+                z_coords = zone_data.get("coordinates")
+                from shapely.geometry import Polygon
+                if z_coords and len(z_coords) >= 3:
+                    try:
+                        p1 = Polygon(z_coords)
+                        if not p1.is_valid:
+                            p1 = p1.buffer(0)
+                        for ez in existing_zones:
+                            if ez.get("id") == cur_id or not ez.get("enabled", True):
+                                continue
+                            ez_coords = ez.get("coordinates")
+                            if ez_coords and len(ez_coords) >= 3:
+                                p2 = Polygon(ez_coords)
+                                if not p2.is_valid:
+                                    p2 = p2.buffer(0)
+                                if p1.intersects(p2):
+                                    overlapping.append({
+                                        "id": ez.get("id"),
+                                        "name": ez.get("name", ez.get("id")),
+                                        "multiplier": ez.get("multiplier", 1.0)
+                                    })
+                    except Exception:
+                        pass
+
+                self.serve_json({
+                    "status": "ok",
+                    "establishment_count": est_count,
+                    "base_jobs": base_jobs,
+                    "boosted_jobs": boosted_jobs,
+                    "pois_inside": pois_inside,
+                    "overlapping": overlapping
+                })
             except Exception as e:
                 self.serve_error(str(e), 500)
 

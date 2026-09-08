@@ -159,6 +159,70 @@ class TestPoiStudio(unittest.TestCase):
         self.assertGreater(total_jobs, 100_000)
         self.assertGreater(total_residents, 500_000)
 
+    def test_load_city_data_affluence_zones(self):
+        """Verifica que load_city_data cargue las zonas de afluencia activas."""
+        target_file = "cities/cancun.yaml" if os.path.exists("cities/cancun.yaml") else "cities/_template.yaml"
+        cdata = load_city_data(target_file)
+        self.assertIn("affluence_zones", cdata)
+        self.assertIsInstance(cdata["affluence_zones"], list)
+        self.assertGreaterEqual(len(cdata["affluence_zones"]), 1)
+        z = cdata["affluence_zones"][0]
+        self.assertIn("coordinates", z)
+        self.assertIn("multiplier", z)
+
+    def test_save_city_data_preserves_affluence_zones(self):
+        """Verifica que save_city_data conserve intacto el bloque de affluence_zones."""
+        from tools.poi_studio import save_city_data
+        target_file = "cities/cancun.yaml" if os.path.exists("cities/cancun.yaml") else "cities/_template.yaml"
+        data = load_city_data(target_file)
+        tmp_path = os.path.join(os.path.dirname(__file__), "tmp_test_affluence.yaml")
+
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(data, f)
+
+        try:
+            new_pois = [
+                {
+                    "id": "AIR_Cancun_Test",
+                    "loc": [-86.87, 21.04],
+                    "jobs": 12000,
+                    "radius_m": 2500,
+                    "mode": "MAX"
+                }
+            ]
+            save_city_data(tmp_path, new_pois=new_pois)
+            reloaded = load_city_data(tmp_path)
+            self.assertIn("affluence_zones", reloaded)
+            self.assertEqual(len(reloaded["affluence_zones"]), len(data["affluence_zones"]))
+            self.assertEqual(reloaded["affluence_zones"][0]["id"], data["affluence_zones"][0]["id"])
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_load_demand_sample_applies_economic_calibration(self):
+        """Verifica que load_demand_sample aplique calibración económica (TIL1/CE2024) y preserve raw_jobs."""
+        from tools.poi_studio import load_demand_sample
+        import json
+
+        pts = load_demand_sample(city_file="cities/cancun.yaml")
+        self.assertGreater(len(pts), 0)
+
+        total_calibrated = sum(p["jobs"] for p in pts)
+        total_raw = sum(p.get("raw_jobs", p["jobs"]) for p in pts)
+
+        # Con til_1_state: 0.455 en Quintana Roo, el empleo calibrado debe ser ~1.45x del estrato crudo
+        self.assertGreater(total_calibrated, total_raw)
+        ratio = total_calibrated / total_raw
+        self.assertAlmostEqual(ratio, 1.455, delta=0.05)
+
+        # Verificar que el cache se haya guardado con version 2
+        cache_path = os.path.join(os.path.dirname(__file__), "..", "data", "cancun", ".density_cache.json")
+        if os.path.exists(cache_path):
+            with open(cache_path, "r", encoding="utf-8") as f:
+                cdata = json.load(f)
+            self.assertEqual(cdata.get("version"), 2)
+            self.assertIn("raw_jobs", cdata["points"][0])
+
 if __name__ == "__main__":
     unittest.main()
 

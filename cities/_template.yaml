@@ -43,6 +43,29 @@ macroeconomics:
     "23003": 1.05                     # Isla Mujeres: +5%
 
 # ==============================================================================
+# ZONAS DE ALTA AFLUENCIA (HIGH ATTRACTION ZONES)
+# ==============================================================================
+# Delimitan distritos o corredores (polígonos o cuadros) con atracción de empleo potenciada.
+# Arquetipos: "cbd" (2.5x), "tourism" (2.2x), "industrial" (1.8x), "commercial" (1.4x), "custom"
+# Los POIs especiales contenidos conservan estrictamente sus empleos manuales declarados.
+affluence_zones:
+  - id: "zone_distrito_financiero"
+    name: "Distrito Financiero Central"
+    type: "polygon"
+    archetype: "cbd"
+    multiplier: 2.5
+    reach_bonus: 0.40
+    target_mode: "MULTIPLIER"
+    color: "#8B5CF6"
+    enabled: true
+    coordinates:
+      - [-86.845, 21.155]
+      - [-86.835, 21.155]
+      - [-86.835, 21.145]
+      - [-86.845, 21.145]
+      - [-86.845, 21.155]
+
+# ==============================================================================
 # GENERADORES ESPECIALES (POIs) - REGLAS Y TAXONOMÍA:
 #
 # 1. Prefijos y Taxonomía Oficial (Subway Builder Modded / Foundry Standard):

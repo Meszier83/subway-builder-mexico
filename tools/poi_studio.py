@@ -95,17 +95,76 @@ def load_city_data(rel_or_abs_path: str) -> Dict[str, Any]:
         data["pois"] = []
     if not isinstance(data.get("places"), list):
         data["places"] = []
+    if not isinstance(data.get("affluence_zones"), list):
+        data["affluence_zones"] = []
 
     return data
+
+
+def _format_affluence_zones_yaml(zones: List[Dict[str, Any]]) -> str:
+    """Serializa la lista de zonas de afluencia a formato YAML canónico."""
+    if not zones:
+        return ""
+    lines = [
+        "# ==============================================================================",
+        "# ZONAS DE ALTA AFLUENCIA (HIGH ATTRACTION ZONES)",
+        "# ==============================================================================",
+        "affluence_zones:"
+    ]
+    for az in zones:
+        z_id = str(az.get("id", "zone_1")).strip()
+        z_name = str(az.get("name", z_id)).strip()
+        z_type = str(az.get("type", "polygon")).strip()
+        z_archetype = str(az.get("archetype", "custom")).strip()
+        z_mult = float(az.get("multiplier", 2.0))
+        z_reach = float(az.get("reach_bonus", 0.3))
+        z_enabled = bool(az.get("enabled", True))
+        z_color = str(az.get("color", "#F59E0B")).strip()
+        z_target_mode = str(az.get("target_mode", "MULTIPLIER")).strip()
+
+        lines.append(f'  - id: "{z_id}"')
+        lines.append(f'    name: "{z_name}"')
+        lines.append(f'    type: "{z_type}"')
+        lines.append(f'    archetype: "{z_archetype}"')
+        lines.append(f'    multiplier: {z_mult:.2f}')
+        lines.append(f'    reach_bonus: {z_reach:.2f}')
+        lines.append(f'    target_mode: "{z_target_mode}"')
+        if az.get("target_jobs") is not None and int(az.get("target_jobs", 0)) > 0:
+            lines.append(f'    target_jobs: {int(az["target_jobs"])}')
+        lines.append(f'    color: "{z_color}"')
+        lines.append(f'    enabled: {"true" if z_enabled else "false"}')
+
+        coords = az.get("coordinates")
+        if isinstance(coords, list) and len(coords) >= 3:
+            lines.append("    coordinates:")
+            for c in coords:
+                if isinstance(c, (list, tuple)) and len(c) >= 2:
+                    lines.append(f'      - [{float(c[0]):.5f}, {float(c[1]):.5f}]')
+
+        raw_b = az.get("bbox")
+        if isinstance(raw_b, (list, tuple)) and len(raw_b) == 4:
+            try:
+                norm_b = [
+                    round(min(float(raw_b[0]), float(raw_b[2])), 4),
+                    round(min(float(raw_b[1]), float(raw_b[3])), 4),
+                    round(max(float(raw_b[0]), float(raw_b[2])), 4),
+                    round(max(float(raw_b[1]), float(raw_b[3])), 4)
+                ]
+                lines.append(f'    bbox: {norm_b}')
+            except Exception:
+                pass
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def save_city_data(
     rel_or_abs_path: str,
     new_pois: List[Dict[str, Any]],
-    new_places: Optional[List[Dict[str, Any]]] = None
+    new_places: Optional[List[Dict[str, Any]]] = None,
+    new_affluence_zones: Optional[List[Dict[str, Any]]] = None
 ) -> None:
     """
-    Guarda los POIs y las Colonias/Toponimia (places) en el archivo YAML
+    Guarda los POIs, las Colonias/Toponimia (places) y Zonas de Alta Afluencia en el archivo YAML
     preservando la estructura y comentarios base del archivo.
     """
     fpath = _resolve_city_path(rel_or_abs_path)
@@ -115,6 +174,13 @@ def save_city_data(
 
     with open(fpath, "r", encoding="utf-8") as f:
         content = f.read()
+
+    try:
+        current_data = yaml.safe_load(content) or {}
+    except Exception:
+        current_data = {}
+
+    target_az = new_affluence_zones if new_affluence_zones is not None else current_data.get("affluence_zones", [])
 
     # 1. Formatear el bloque de POIs en YAML limpio
     pois_yaml_lines = ["pois:"]
@@ -176,7 +242,16 @@ def save_city_data(
             cut_idx = pos
 
     base_content = content[:cut_idx].rstrip() + "\n\n"
-    updated_content = base_content + new_pois_block + new_places_block
+
+    # 4. Asegurar preservación de affluence_zones:
+    # Si affluence_zones no quedó en base_content (porque estaba después de pois/places),
+    # o si se especificaron new_affluence_zones explícitamente, se formatea e inyecta.
+    az_block = ""
+    if target_az and isinstance(target_az, list) and len(target_az) > 0:
+        if "affluence_zones:" not in base_content:
+            az_block = _format_affluence_zones_yaml(target_az) + "\n\n"
+
+    updated_content = base_content + az_block + new_pois_block + new_places_block
 
     with open(fpath, "w", encoding="utf-8") as f:
         f.write(updated_content)
@@ -207,6 +282,7 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
     target_data_dir = None
     poi_ids = set()
     poi_prefixes = ("AIR_", "UNI_", "TOU_", "MED_", "SPO_", "TRA_")
+    cdata = None
 
     if city_file:
         city_base = os.path.splitext(os.path.basename(city_file))[0].lower()
@@ -228,6 +304,16 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
         if os.path.exists(cand_dir):
             target_data_dir = cand_dir
 
+    if not cdata and city_base:
+        cand_yaml = os.path.join(ROOT_DIR, "cities", f"{city_base}.yaml")
+        if os.path.exists(cand_yaml):
+            try:
+                cdata = load_city_data(cand_yaml)
+            except Exception:
+                pass
+    if not cdata:
+        cdata = {}
+
     def _clean_and_filter(pts: List[Dict[str, Any]], box: Optional[List[float]]) -> List[Dict[str, Any]]:
         clean_pts = []
         for p in pts:
@@ -244,10 +330,12 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
             if box and len(box) == 4:
                 if not (box[0] <= loc[0] <= box[2] and box[1] <= loc[1] <= box[3]):
                     continue
+            raw_j = p.get("raw_jobs")
             clean_pts.append({
                 "id": p_id,
                 "location": [round(float(loc[0]), 5), round(float(loc[1]), 5)],
                 "jobs": int(round(p.get("jobs", 0))),
+                "raw_jobs": int(round(raw_j)) if raw_j is not None else int(round(p.get("jobs", 0))),
                 "residents": int(round(p.get("residents", 0)))
             })
         return clean_pts
@@ -273,12 +361,13 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
         src_files = denue_files + cpv_files
         src_mtimes = {os.path.basename(f): os.path.getmtime(f) for f in src_files}
 
-        # 1. Verificar si existe caché válido
+        # 1. Verificar si existe caché válido (versión 2 con calibración económica)
         if os.path.exists(cache_path):
             try:
                 with open(cache_path, "r", encoding="utf-8") as f:
                     cached_data = json.load(f)
                 if (
+                    cached_data.get("version") == 2 and
                     cached_data.get("mtimes") == src_mtimes and
                     cached_data.get("bbox") == bbox and
                     isinstance(cached_data.get("points"), list)
@@ -291,63 +380,64 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
         try:
             import numpy as np
             import pandas as pd
-            from sb_mexico.inegi import DENUE_ESTRATOS, format_cve_mun
+            from sb_mexico.inegi import (
+                DENUE_ESTRATOS,
+                format_cve_mun,
+                load_denue,
+                calibrate_denue_employment,
+                parse_ce2024_municipal,
+                parse_enoe_indicators,
+            )
 
-            grid_size = 0.0025
+            grid_size = float(cdata.get("city", {}).get("grid_size", 0.0025)) if cdata else 0.0025
+            macro = cdata.get("macroeconomics", {}) if cdata else {}
+            til_1 = macro.get("til_1_state")
+            if til_1 is None:
+                enoe_files = glob.glob(os.path.join(target_data_dir, "*enoe*.csv")) + glob.glob(os.path.join(target_data_dir, "*enoe*.xls*"))
+                if enoe_files:
+                    try:
+                        enoe_res = parse_enoe_indicators(enoe_files[0])
+                        til_1 = enoe_res.get("til_1", 0.45)
+                    except Exception:
+                        til_1 = 0.45
+                else:
+                    til_1 = 0.45
+
+            ce_benchmarks = macro.get("ce_2024_benchmarks", {})
+            if not ce_benchmarks:
+                ce_files = glob.glob(os.path.join(target_data_dir, "*ce*.csv")) + glob.glob(os.path.join(target_data_dir, "*CE*.csv"))
+                for cf in ce_files:
+                    try:
+                        parsed = parse_ce2024_municipal(cf)
+                        if parsed:
+                            ce_benchmarks = parsed
+                            break
+                    except Exception:
+                        pass
+
             df_denue = None
             mza_coords = None
             ageb_coords = None
 
             if denue_files:
-                dfs_d = []
-                for df_path in denue_files:
-                    for enc in ['latin1', 'utf-8-sig', 'utf-8', 'cp1252']:
-                        try:
-                            t_df = pd.read_csv(df_path, encoding=enc, low_memory=False, dtype=str)
-                            t_df.columns = [c.strip().lower() for c in t_df.columns]
-                            dfs_d.append(t_df)
-                            break
-                        except Exception:
-                            continue
-                if dfs_d:
-                    df_denue = pd.concat(dfs_d, ignore_index=True)
-                    lat_cols = [c for c in df_denue.columns if 'latitud' in c]
-                    lon_cols = [c for c in df_denue.columns if 'longitud' in c]
-                    if lat_cols and lon_cols:
-                        df_denue['lat'] = pd.to_numeric(df_denue[lat_cols[0]], errors='coerce')
-                        df_denue['lon'] = pd.to_numeric(df_denue[lon_cols[0]], errors='coerce')
-                        df_denue = df_denue[
-                            (df_denue['lon'] >= bbox[0]) & (df_denue['lon'] <= bbox[2]) &
-                            (df_denue['lat'] >= bbox[1]) & (df_denue['lat'] <= bbox[3])
-                        ].dropna(subset=['lat', 'lon']).copy()
+                bbox_dict = {
+                    "min_lon": bbox[0],
+                    "min_lat": bbox[1],
+                    "max_lon": bbox[2],
+                    "max_lat": bbox[3]
+                }
+                df_denue_raw = load_denue(denue_files, bbox_dict)
+                df_denue, audit_calib = calibrate_denue_employment(
+                    df_denue=df_denue_raw,
+                    ce_benchmarks=ce_benchmarks,
+                    til_1=float(til_1),
+                    min_sample_threshold=int(macro.get("sample_threshold", 500))
+                )
 
-                        col_per = 'per_ocu' if 'per_ocu' in df_denue.columns else (
-                            [c for c in df_denue.columns if 'personal' in c or 'estrato' in c] + [''])[0]
-                        if col_per:
-                            df_denue['jobs'] = df_denue[col_per].astype(str).str.strip().map(DENUE_ESTRATOS).fillna(2.24)
-                        else:
-                            df_denue['jobs'] = 2.24
-
-                        # Normalización para matching con CPV
-                        if 'cve_mun' in df_denue.columns and 'cve_ent' in df_denue.columns:
-                            df_denue['cve_mun_clean'] = [format_cve_mun(m, e) for m, e in zip(df_denue['cve_mun'], df_denue['cve_ent'])]
-                        else:
-                            df_denue['cve_mun_clean'] = "-1"
-
-                        if 'ageb' in df_denue.columns:
-                            df_denue['ageb_clean'] = df_denue['ageb'].astype(str).str.strip().str.upper().str.replace('-', '').str.zfill(4)
-                        else:
-                            df_denue['ageb_clean'] = ""
-
-                        if 'manzana' in df_denue.columns:
-                            df_denue['mza_clean'] = pd.to_numeric(df_denue['manzana'], errors='coerce').fillna(-1).astype(int).astype(str)
-                        else:
-                            df_denue['mza_clean'] = "-1"
-
-                        valid_mza = df_denue[df_denue['mza_clean'] != '-1']
-                        if len(valid_mza) > 0:
-                            mza_coords = valid_mza.groupby(['cve_mun_clean', 'ageb_clean', 'mza_clean'])[['lon', 'lat']].mean().reset_index()
-                        ageb_coords = df_denue.groupby(['cve_mun_clean', 'ageb_clean'])[['lon', 'lat']].mean().reset_index()
+                valid_mza = df_denue[df_denue['mza_clean'] != '-1']
+                if len(valid_mza) > 0:
+                    mza_coords = valid_mza.groupby(['cve_mun_clean', 'ageb_clean', 'mza_clean'])[['lon', 'lat']].mean().reset_index()
+                ageb_coords = df_denue.groupby(['cve_mun_clean', 'ageb_clean'])[['lon', 'lat']].mean().reset_index()
 
             # Procesar Censo CPV
             df_cpv = None
@@ -401,7 +491,8 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
                 df_denue['gx'] = np.floor(df_denue['lon'] / grid_size).astype(int)
                 df_denue['gy'] = np.floor(df_denue['lat'] / grid_size).astype(int)
                 grp_d = df_denue.groupby(['gx', 'gy']).agg(
-                    jobs=('jobs', 'sum'),
+                    jobs=('calibrated_jobs', 'sum'),
+                    raw_jobs=('jobs_formal', 'sum'),
                     lon=('lon', 'mean'),
                     lat=('lat', 'mean')
                 ).reset_index()
@@ -419,18 +510,21 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
             if grp_d is not None and grp_c is not None:
                 merged_grid = pd.merge(grp_d, grp_c, on=['gx', 'gy'], how='outer', suffixes=('_d', '_c'))
                 merged_grid['jobs'] = merged_grid['jobs'].fillna(0).round().astype(int)
+                merged_grid['raw_jobs'] = merged_grid['raw_jobs'].fillna(0).round().astype(int)
                 merged_grid['residents'] = merged_grid['residents'].fillna(0).round().astype(int)
                 merged_grid['lon'] = merged_grid['lon_d'].fillna(merged_grid['lon_c']).round(5)
                 merged_grid['lat'] = merged_grid['lat_d'].fillna(merged_grid['lat_c']).round(5)
             elif grp_d is not None:
                 merged_grid = grp_d
                 merged_grid['jobs'] = merged_grid['jobs'].round().astype(int)
+                merged_grid['raw_jobs'] = merged_grid['raw_jobs'].round().astype(int)
                 merged_grid['residents'] = 0
                 merged_grid['lon'] = merged_grid['lon'].round(5)
                 merged_grid['lat'] = merged_grid['lat'].round(5)
             elif grp_c is not None:
                 merged_grid = grp_c
                 merged_grid['jobs'] = 0
+                merged_grid['raw_jobs'] = 0
                 merged_grid['residents'] = merged_grid['residents'].round().astype(int)
                 merged_grid['lon'] = merged_grid['lon'].round(5)
                 merged_grid['lat'] = merged_grid['lat'].round(5)
@@ -444,12 +538,14 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
                         'id': f"ref_{i+1:04d}",
                         'location': [float(r['lon']), float(r['lat'])],
                         'jobs': int(r['jobs']),
+                        'raw_jobs': int(r.get('raw_jobs', r['jobs'])),
                         'residents': int(r['residents'])
                     })
 
                 # Guardar caché atómicamente
                 try:
                     cache_payload = {
+                        "version": 2,
                         "bbox": bbox,
                         "mtimes": src_mtimes,
                         "points": raw_points
@@ -575,13 +671,21 @@ class PoiStudioRequestHandler(BaseHTTPRequestHandler):
                 city_file = req_data.get("file")
                 new_pois = req_data.get("pois", [])
                 new_places = req_data.get("places", [])
+                new_affluence_zones = req_data.get("affluence_zones")
 
                 if not city_file:
                     self.serve_error("Falta el parámetro 'file'", 400)
                     return
 
-                save_city_data(city_file, new_pois=new_pois, new_places=new_places)
-                self.serve_json({"status": "ok", "saved_pois": len(new_pois), "saved_places": len(new_places)})
+                save_city_data(city_file, new_pois=new_pois, new_places=new_places, new_affluence_zones=new_affluence_zones)
+                resp_payload = {
+                    "status": "ok",
+                    "saved_pois": len(new_pois),
+                    "saved_places": len(new_places)
+                }
+                if new_affluence_zones is not None:
+                    resp_payload["saved_affluence_zones"] = len(new_affluence_zones)
+                self.serve_json(resp_payload)
             except Exception as e:
                 self.serve_error(str(e), 500)
         else:
