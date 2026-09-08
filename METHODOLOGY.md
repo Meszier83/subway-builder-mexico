@@ -1,4 +1,4 @@
-# Libro Blanco de Metodologia y Fundamentos Matematicos (v7.0)
+# Libro Blanco de Metodologia y Fundamentos Matematicos (v7.1)
 
 Este documento expone formalmente la arquitectura matematica, estadistica y algoritmica del motor de generacion de demanda y ruteo vial de **Subway Builder Mexico** (`sb_mexico`). El sistema modela patrones de movilidad metropolitana a escala de manzana censal compatibles con el motor de simulacion de pasajeros de *Subway Builder* (Colin Miller) y sus variantes avanzadas (*Subway-Builder-Modded* de Kronifer).
 
@@ -338,11 +338,70 @@ Uno de los errores mas graves en el diseno de escenarios metropolitanos es conce
 
 ---
 
+## 7. Zonas de Alta Afluencia (`affluence_zones`) y Modulacion de Atraccion Territorial
+
+### 7.1. Justificacion Urbana: Corredores de Empleo vs. Macro-Distritos
+En la morfologia urbana existen areas de concentracion laboral intensiva que no se comportan como un polo puntual unico (como un aeropuerto) ni como empleo barrial homogeneamente disperso. Ejemplos representativos incluyen:
+* Corredores corporativos y distritos financieros (Paseo de la Reforma y Santa Fe en CDMX, San Pedro Garza Garcia en Monterrey).
+* Zonas hoteleras y franjas de recreacion intensiva (Boulevard Kukulcan en Cancun, Zona Hotelera Norte en Puerto Vallarta).
+* Macro-parques industriales y complejos logisticos metropolitanos (Parque Finsa en Puebla, Corredor El Salto en Guadalajara).
+
+Si un modelador intenta representar estas zonas continuas mediante un unico mega-POI puntual, colapsa la red en una estacion saturada ficticia y deja desierto el resto del trazado. Por el contrario, si solo confia en el DENUE disperso, se subestima la potencia de atraccion de largo alcance de estos distritos a escala metropolitana.
+
+### 7.2. Modulacion de Masa y Capacidad Laboral
+Para resolver esta disyuntiva, `sb_mexico` incorpora **Zonas de Alta Afluencia (`affluence_zones`)**, delimitadas como poligonos vectoriales o cuadros delimitadores en la configuracion YAML:
+
+1. **Multiplicador de Empleo Regular ($\alpha \ge 1.0$):**
+   Para cada establecimiento DENUE regular $j$ ubicado dentro del poligono de la zona $Z$:
+   $$E_{\text{mod}, j} = E_{\text{denue}, j} \times \alpha_Z$$
+2. **Modo Cupo Objetivo (`target_mode: TARGET_CAPACITY`):**
+   Si la zona declara una capacidad total de puestos de trabajo ($J_{\text{target}}$), el sistema cuantifica el empleo regular contenido y reescala uniformemente las celdas de la malla dentro del perimetro:
+   $$\text{scale} = \frac{J_{\text{target}}}{\sum_{k \in Z} E_k}, \qquad E'_k = E_k \times \text{scale}$$
+3. **Preservacion Hermetica de POIs Especiales:**
+   Los generadores especiales manuales (`AIR_`, `UNI_`, `SPO_`, `MED_`, etc.) contenidos dentro de la zona de afluencia **conservan estrictamente su cuota declarada**. El multiplicador $\alpha_Z$ modula exclusivamente el empleo regular DENUE, impidiendo distorsiones sobre nodos clave ya calibrados.
+
+### 7.3. Modulacion de Friccion Espacial y Bono de Alcance Metropolitano (`reach_bonus`)
+Un centro financiero o polo turistico internacional atrae trabajadores y visitantes desde distancias significativamente mayores que un comercio ordinario. Para modelar esta interaccion gravitatoria, cada zona de afluencia puede declarar un bono de alcance:
+$$\text{reach\_bonus}_Z \in [0.0, \ 0.60]$$
+
+En el algoritmo de balanceo bidireccional de Furness / IPFP, el bono de alcance modula directamente el coeficiente de decaimiento por distancia ($\beta = 0.12$) para cada celda de destino $j \in Z$:
+$$\beta_j = \beta \times (1.0 - \text{clamped\_reach}_j)$$
+
+Donde $\text{clamped\_reach}_j = \min(0.60, \ \max(0.0, \ \text{reach\_bonus}_Z))$.
+
+**Salvaguarda de Piso de Retencion Local ($d \le 3.0\text{ km}$):**
+A fin de asegurar que la reduccion de friccion a larga distancia no penalice artificialmente los viajes de proximidad residencial inmediata (residentes vecinos), se aplica una salvaguarda de piso en la funcion de impedancia:
+$$\text{friction}_{ij} = \begin{cases}
+\max\left(e^{-\beta_j \cdot d_{ij}}, \ e^{-\beta \cdot d_{ij}}\right) & \text{si } d_{ij} \le 3.0\text{ km} \\
+e^{-\beta_j \cdot d_{ij}} & \text{si } 3.0 < d_{ij} \le 55.0\text{ km} \\
+0.0 & \text{si } d_{ij} > 55.0\text{ km}
+\end{cases}$$
+
+### 7.4. Arquetipos Urbanos Estandarizados
+El motor tipifica cuatro arquetipos predefinidos con parametros de calibracion contrastados:
+
+| Arquetipo | Clave | Multiplicador ($\alpha$) | Bono de Alcance (`reach_bonus`) | Ambito Tipico de Aplicacion |
+| :--- | :--- | :--- | :--- | :--- |
+| **Distrito Financiero / CBD** | `cbd` | $2.5\text{x}$ | $0.40$ (de $\beta=0.12 \to 0.072$) | Centros financieros, Reforma, Santa Fe, Valle Oriente. |
+| **Polo Turistico / Hotelero** | `tourism` | $2.2\text{x}$ | $0.35$ (de $\beta=0.12 \to 0.078$) | Zona Hotelera Cancun, Malecon Mazatlan, Riviera Nayarit. |
+| **Corredor Industrial** | `industrial` | $1.8\text{x}$ | $0.25$ (de $\beta=0.12 \to 0.090$) | Parques industriales conurbados, aduanas interiores. |
+| **Cluster Comercial** | `commercial` | $1.4\text{x}$ | $0.15$ (de $\beta=0.12 \to 0.102$) | Corredores de centros comerciales y retail metropolitano. |
+| **Personalizado** | `custom` | Libre | Libre | Parametros arbitrarios calibrados en el YAML de la ciudad. |
+
+### 7.5. Resolucion Espacial de Solapamientos (Regla Canonica MAX Priority)
+Cuando una manzana o establecimiento queda cubierto por dos o mas zonas de alta afluencia simultaneas, el conflicto se resuelve de forma determinista mediante el principio de maxima jerarquia (*MAX Priority*):
+$$\alpha^* = \max(\alpha_1, \alpha_2, \dots, \alpha_k)$$
+$$\text{reach\_bonus}^* = \max(\text{reach}_1, \text{reach}_2, \dots, \text{reach}_k)$$
+
+Esta regla garantiza idempotencia e independencia del orden de definicion en el archivo YAML. La evaluacion se ejecuta mediante geometrias poligonales preparadas (`shapely.prepared.prep`) con filtrado rapido por BBOX.
+
+---
+
 # PARTE 3: Fisicas Viales, Ruteo Arterial, Cohortes Dinamicas y Metadatos del Motor
 
-## 7. Fisicas de Trafico, Congestion y Eleccion Modal en Subway Builder
+## 8. Fisicas de Trafico, Congestion y Eleccion Modal en Subway Builder
 
-### 7.1. La Funcion de Eleccion Modal en el Motor de Simulacion
+### 8.1. La Funcion de Eleccion Modal en el Motor de Simulacion
 Un aspecto critico de la arquitectura de *Subway Builder* es comprender como el motor de simulacion decide si una cohorte de pasajeros utiliza la red de metro construida por el jugador o se desplaza en automovil privado:
 
 1. **El juego NO calcula rutas viales en tiempo real:** Durante la simulacion a 60 FPS, el motor no ejecuta busquedas de caminos (A* o Dijkstra) sobre el mapa de calles para los vehiculos; seria computacionalmente inviable simular decenas de miles de automoviles simultaneos en JavaScript/WebGL.
@@ -362,7 +421,7 @@ Un aspecto critico de la arquitectura de *Subway Builder* es comprender como el 
 4. **Regla de Oro: Prohibida la Doble Contabilidad de Congestion:**
    Dado que el motor de *Subway Builder* ya aplica penalizaciones de congestion (1.5x, 1.33x) y busqueda de estacionamiento en tiempo de ejecucion, el valor inyectado en `drivingSeconds` **debe corresponder estrictamente a la linea base a flujo libre** (~40 km/h promedio en red mixta). Pre-congestionar artificialmente los datos a 20 o 25 km/h destruye el canon del juego, penalizando doblemente al automovil y creando una demanda ficticia.
 
-### 7.2. Linea Base Canonica de Colin (Colin's Canonical Fallback)
+### 8.2. Linea Base Canonica de Colin (Colin's Canonical Fallback)
 Documentado formalmente en las guias oficiales del creador del juego (*Subway Builder Custom Cities / Demand API*), el estandar universal de respaldo ante la ausencia de ruteo punto a punto es:
 * **Circuidad Vial Canonica:** Las calles urbanas anaden un 30% de distancia sobre la linea recta euclidiana ($\tau = 1.3$).
 * **Velocidad Promedio Canonica:** $40\text{ km/h}$ ($\approx 11.11\text{ m/s}$) representativa del flujo urbano promedio.
@@ -372,11 +431,45 @@ Documentado formalmente en las guias oficiales del creador del juego (*Subway Bu
 
 Este calculo garantiza valores fisicamente plausibles, evita discontinuidades numericas y sirve como salvaguarda absoluta en todo el sistema.
 
+### 8.3. Laboratorio Experimental de Competitividad Modal (`modal_experiment`)
+En ciudades latinoamericanas con niveles de congestion vehicular atipicos o donde la tasa de motorizacion privada es reducida y gran parte de la clase trabajadora depende de transporte colectivo de superficie de baja velocidad (combis, microbuses, autobuses urbanos con paradas continuas), los planificadores pueden requerir simular condiciones de competitividad modal reforzada.
+
+Para este fin, `sb_mexico` provee el modulo opcional `modal_experiment` en la seccion `macroeconomics` del YAML.
+
+#### Formulacion de Impedancia Alternativa Ponderada
+Cuando se activa (`enabled: true`), el modulo transforma los tiempos viales base mediante una funcion de dos modos competitivos:
+1. **Tiempo en Automovil Congestionado:**
+   $$T_{\text{auto}} = \begin{cases}
+   \max\left(45\text{ s}, \ \text{drivingSeconds} \times \frac{40.0}{V_{\text{trafico}}}\right) & \text{si } \text{drivingSeconds} > 0 \\
+   \max\left(45\text{ s}, \ \frac{\text{drivingDistance}}{V_{\text{trafico}} / 3.6}\right) & \text{en otro caso}
+   \end{cases}$$
+2. **Tiempo en Transporte Colectivo de Superficie (Ruta Lenta + Espera):**
+   $$T_{\text{colectivo}} = T_{\text{auto}} \times 2.0 + 300\text{ s}$$
+3. **Tiempo Efectivo Inyectado (`drivingSeconds`):**
+   $$T_{\text{effective}} = P_{\text{auto}} \cdot T_{\text{auto}} + (1.0 - P_{\text{auto}}) \cdot T_{\text{colectivo}}$$
+   $$\text{drivingSeconds} = \max(45\text{ s}, \ \operatorname{round}(T_{\text{effective}}))$$
+
+Donde:
+* $V_{\text{trafico}}$ es la velocidad vehicular media configurada en km/h ($[10.0, 60.0]$).
+* $P_{\text{auto}}$ es la tasa de motorizacion de hogares ($[0.05, 1.0]$). El remanente $(1 - P_{\text{auto}})$ representa poblacion cautiva de transporte colectivo de superficie.
+
+#### Presets Estandarizados
+
+| Preset | Nombre Descriptivo | Velocidad ($V_{\text{trafico}}$) | Motorizacion ($P_{\text{auto}}$) | Escenario de Uso |
+| :--- | :--- | :--- | :--- | :--- |
+| `canonical` | Flujo Libre (Oficial Colin) | $40\text{ km/h}$ | $1.00$ | Estandar oficial por defecto del juego. |
+| `moderate_traffic` | Trafico Moderado | $28\text{ km/h}$ | $0.55$ | Ciudades intermedias con horas pico definidas. |
+| `cdmx_peak` | Megaciudad Saturada | $18\text{ km/h}$ | $0.35$ | Horas punta en valles saturados (ZMVM, Guadalajara). |
+| `captive_transit` | Transporte Cautivo | $24\text{ km/h}$ | $0.20$ | Metropolis con baja tasa de vehiculo particular. |
+| `custom` | Personalizado | Libre en YAML | Libre en YAML | Calibracion manual directa de parametros. |
+
+> **Nota de Compatibilidad:** Por defecto, `modal_experiment.enabled = false`. Esto garantiza que los mapas compilados sigan rigurosamente el canon de simulacion a flujo libre de Colin Miller a menos que el usuario active explicitamente el experimento.
+
 ---
 
-## 8. Ruteo Vial Canonico con OSRM (Open Source Routing Machine) y WSL 2
+## 9. Ruteo Vial Canonico con OSRM (Open Source Routing Machine) y WSL 2
 
-### 8.1. El Estandar Oficial de Subway Builder
+### 9.1. El Estandar Oficial de Subway Builder
 Para metropolis con anomalias topologicas severas (como Cancun y la Laguna Nichupte, o bahias como Acapulco y Puerto Vallarta), una simple aproximacion euclidiana ignora las barreras de agua, calculando viajes en linea recta a traves de lagunas y arruinando la demanda del metro.
 
 Para solucionar esto de raiz sin caer en aproximaciones arbitrarias, la documentacion oficial de *Subway Builder* estipula el uso de **OSRM (`osrm/osrm-backend`) con el perfil de automovil `car.lua`**:
@@ -395,7 +488,7 @@ De esta respuesta oficial se extraen:
 * `drivingDistance = routes[0].distance` (metros de pavimento real).
 * `drivingPath = routes[0].geometry.coordinates` (traza vectorial GeoJSON para renderizar los vehiculos en la simulacion).
 
-### 8.2. Arquitectura de Compilacion Rapida en WSL 2
+### 9.2. Arquitectura de Compilacion Rapida en WSL 2
 En cumplimiento con el estandar de la **Regla 10 (WSL 2 y Puente Cartografico)**, el pipeline de `sb_mexico`:
 
 1. **Recorte BBOX con `osmium extract`:** Si el archivo OSM PBF es de escala nacional o regional, se recorta al rectangulo metropolitano de la ciudad antes de compilar. Esto reduce el tiempo de indexacion de ~15 minutos a solo **1.2 segundos**.
@@ -406,9 +499,9 @@ En cumplimiento con el estandar de la **Regla 10 (WSL 2 y Puente Cartografico)**
 
 ---
 
-## 9. Zonas Topologicas Aisladas (`isolated_zones`)
+## 10. Zonas Topologicas Aisladas (`isolated_zones`)
 
-### 9.1. Tratamiento Hermetico de Islas y Barreras Hidricas Infranqueables
+### 10.1. Tratamiento Hermetico de Islas y Barreras Hidricas Infranqueables
 En conurbaciones costeras que incluyen islas habitadas sin puente vehicular (ej. Isla Mujeres frente a Cancun, Cozumel frente a Playa del Carmen):
 * Un automovilista no puede conducir desde la isla hacia el continente ni viceversa.
 * Si el modelo gravitatorio tratara el espacio como un plano continuo, generaria miles de viajes en automovil sobre las aguas del mar Caribe, distorsionando la demanda y creando viajes imposibles.
@@ -422,21 +515,21 @@ isolated_zones:
     bbox: [-86.76, 21.20, -86.68, 21.28]
 ```
 
-### 9.2. Ejecucion Estanca del Modelo Gravitatorio por Zona
+### 10.2. Ejecucion Estanca del Modelo Gravitatorio por Zona
 El motor clasifica cada coordenada en su zona topologica ($z = 0$ para tierra continental, $z \ge 1$ para cada isla independiente):
 1. **Balanceo de Furness / IPFP Estanco:** El equilibrio bidireccional de la Capa 2 se corre de forma aislada e independiente dentro de cada sub-espacio zonal. Los residentes de Isla Mujeres compiten exclusivamente por los puestos de trabajo existentes dentro de su propia isla.
 2. **Eliminacion de Viajes Trans-Maritimos en Auto:** Se garantiza formalmente que ningun objeto `pop` tenga un `residenceId` en una isla y un `jobId` en el continente (o viceversa), a menos que exista un generador especial de transporte multimodal interurbano (`TRA_Terminal Maritima`).
 
 ---
 
-## 10. Dimensionamiento Dinamico de Cohortes de Viaje (`Dynamic Cohort Sizing`)
+## 11. Dimensionamiento Dinamico de Cohortes de Viaje (`Dynamic Cohort Sizing`)
 
-### 10.1. El Compromiso entre Fidelidad Estadistica y Rendimiento (60 FPS WebGL)
+### 11.1. El Compromiso entre Fidelidad Estadistica y Rendimiento (60 FPS WebGL)
 El motor de *Subway Builder* simula a cada individuo de la simulacion agrupado en cohortes denominadas `pops`:
 * **El cuello de botella de rendimiento:** Si una metropoli grande como la ZMVM (6 millones de PEA) o Monterrey (2.5 millones de PEA) se compila con cohortes fijas pequenas (ej. tamano 20 o 35), el archivo resultante contiene entre 80,000 y 150,000 objetos `pop`. Al cargar el JSON en el juego, la simulacion sufre caidas severas de fotogramas (< 15 FPS) o colapso por saturacion de memoria en navegadores de gama media.
 * **El riesgo de sub-muestreo tosco:** Si una ciudad mediana se compila con cohortes gigantes (ej. tamano 150), se generan menos de 3,000 `pops`, lo que provoca que los trenes se llenen con pulsos toscos e intermitentes, vaciando estaciones intermedias y arruinando el realismo visual.
 
-### 10.2. Formulacion Adaptativa de Tamano de Cohorte
+### 11.2. Formulacion Adaptativa de Tamano de Cohorte
 Para garantizar una experiencia visual y de rendimiento optima en cualquier escala urbana, `sb_mexico` ajusta dinamicamente el tamano objetivo de cohorte en funcion de la masa total de PEA metropolitana:
 
 $$\text{target\_pop\_size} = \max\left(35, \ \operatorname{round}\left(\frac{\text{PEA}_{\text{total}}}{18{,}000}\right)\right)$$
@@ -452,9 +545,9 @@ $$\text{target\_pop\_size} = \max\left(35, \ \operatorname{round}\left(\frac{\te
 
 ---
 
-## 11. Metadatos del Escenario y Camara Inicial Centrada en Masa
+## 12. Metadatos del Escenario y Camara Inicial Centrada en Masa
 
-### 11.1. Esquema Canonico JSON de Subway Builder
+### 12.1. Esquema Canonico JSON de Subway Builder
 El archivo de demanda compilado `demand_data.json` cumple estrictamente con el esquema oficial del juego:
 
 * **Objeto `points` (Demand Points):** Exactamente 5 propiedades requeridas por el motor:
@@ -471,7 +564,7 @@ El archivo de demanda compilado `demand_data.json` cumple estrictamente con el e
   5. `drivingSeconds` (entero): Tiempo de manejo estimado sobre la red vial real.
   6. `drivingDistance` (entero): Distancia de recorrido vehicular en metros.
 
-### 11.2. Camara Viewport Inicial Centrada en Masa
+### 12.2. Camara Viewport Inicial Centrada en Masa
 Al abrir un mapa nuevo, el juego posiciona la vista en las coordenadas declaradas en los metadatos del escenario.
 * **El error clasico:** Centrar la camara en el centro geometrico del BBOX:
   $$\text{cam}_{\text{geom}} = \left(\frac{\text{min\_lat} + \text{max\_lat}}{2}, \ \frac{\text{min\_lon} + \text{max\_lon}}{2}\right)$$
@@ -483,7 +576,7 @@ Al abrir un mapa nuevo, el juego posiciona la vista en las coordenadas declarada
 
 ---
 
-## 12. Cuadro Maestro de Estandares de Calidad S-Tier
+## 13. Cuadro Maestro de Estandares de Calidad S-Tier
 
 | Componente | Estandar Tecnico | Metodologia Implementada | Garantia de Calidad |
 | :--- | :--- | :--- | :--- |
@@ -492,10 +585,12 @@ Al abrir un mapa nuevo, el juego posiciona la vista en las coordenadas declarada
 | **Calibracion de Empleo** | Control Censal CE 2024 / SAIC | Ponderacion Territorial BBOX y Clamping Asimetrico | Grandes empresas intactas (1.0x), micro acotado a informalidad |
 | **Proyecciones Temporales** | Base 2024–2026 Homogenea | Ratios oficiales CONAPO intercensales por municipio | Refleja dinamismo demografico sin desfase temporal |
 | **Georreferenciacion Censal** | Cero Megapuntos Artificiales | Cascada cuadruple (MGM $\to$ DENUE) y `dropna()` estricto | Cero imputacion al centro de BBOX |
-| **Fisica de Eleccion Modal** | Ruteo Vial Topologico | Contraccion de Grado 2 de red arterial OSM + APSP | Tiempos viales realistas en peninsulas, lagunas y bahias |
+| **Zonas de Alta Afluencia** | Atraccion Territorial Diferenciada | Modulacion de $\beta_j$ con reach_bonus y regla MAX Priority | Reflejo de CBDs y corredores sin deformar POIs manuales |
+| **Fisica Vial y Ruteo** | Red Vial Real OSM | OSRM (`car.lua`) en WSL 2 + Fallback canonico de Colin | Tiempos y distancias viales exactos con `drivingPath` |
+| **Competitividad Modal** | Laboratorio Experimental Opcional | Impedancia alternativa ponderada ($T_{\text{auto}}, T_{\text{colectivo}}$) | Simulacion controlada de congestion y transporte cautivo |
 | **Rendimiento de Simulacion** | 60 FPS Continuos WebGL | Tamano de cohorte adaptativo ($\text{target\_pop\_size}$) | Poblacion estabilizada entre 15k y 25k pops |
 | **Aislamiento Insular** | Cero Conduccion sobre el Agua | Particionamiento zonal estanco (`isolated_zones`) | Cero viajes trans-maritimos en automovil |
-| **Esquema JSON** | Canónico de Colin Miller / Kronifer | 5 propiedades en points, 6 en pops, cero llaves espurias | Compatibilidad nativa sin cierres inesperados del juego |
+| **Esquema JSON** | Canonico de Colin Miller / Kronifer | 5 propiedades en points, 6 en pops, cero llaves espurias | Compatibilidad nativa sin cierres inesperados del juego |
 | **Integridad de Codificacion** | Universal UTF-8 sin BOM | Terminaciones LF, sin emojis SMP en cabeceras | Cero mojibake o errores de decodificacion en Windows |
 
 

@@ -1,5 +1,5 @@
 # ==============================================================================
-# PLANTILLA DE CONFIGURACIÓN DE CIUDAD - SUBWAY BUILDER MÉXICO v6.3
+# PLANTILLA DE CONFIGURACIÓN DE CIUDAD - SUBWAY BUILDER MÉXICO v7.1
 # ==============================================================================
 
 city:
@@ -64,6 +64,16 @@ affluence_zones:
       - [-86.835, 21.145]
       - [-86.845, 21.145]
       - [-86.845, 21.155]
+
+# ==============================================================================
+# ZONAS TOPOLÓGICAS AISLADAS (ISOLATED ZONES - OPCIONAL)
+# ==============================================================================
+# Para conurbaciones con islas o barreras marítimas sin puente vehicular (ej. Isla Mujeres).
+# Impide que el modelo gravitatorio genere viajes en automóvil cruzando el mar.
+# isolated_zones:
+#   - id: "isla_mujeres"
+#     name: "Isla Mujeres"
+#     bbox: [-86.76, 21.20, -86.68, 21.28]
 
 # ==============================================================================
 # GENERADORES ESPECIALES (POIs) - REGLAS Y TAXONOMÍA:

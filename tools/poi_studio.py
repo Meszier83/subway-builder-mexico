@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Subway Builder México v6.3 - POI Studio Server
+Subway Builder México v7.1 - POI Studio Server
 ===============================================
 Servidor local interactivo para visualizar, crear, calibrar radios de absorción
 y validar POIs sobre mapas Leaflet y capas satelitales en tiempo real.
@@ -747,7 +747,7 @@ def run_server(port: int = 8080, initial_city: str = None, open_browser: bool = 
         url += f"?city={initial_city}"
 
     print("=" * 60)
-    print(" SUBWAY BUILDER MEXICO v6.3 - POI STUDIO ")
+    print(" SUBWAY BUILDER MEXICO v7.1 - POI STUDIO ")
     print("=" * 60)
     print(f" Servidor iniciado en: {url}")
     print(f" Raiz del proyecto:    {ROOT_DIR}")
@@ -771,7 +771,7 @@ def run_server(port: int = 8080, initial_city: str = None, open_browser: bool = 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="POI Studio v6.3 - Visualizador y Editor Interactivo de POIs para Subway Builder México"
+        description="POI Studio v7.1 - Visualizador y Editor Interactivo de POIs para Subway Builder México"
     )
     parser.add_argument(
         "--city",

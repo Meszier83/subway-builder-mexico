@@ -1,8 +1,8 @@
 @echo off
 chcp 65001 > nul
-title Subway Builder Mexico - Wizard Studio v6.3
+title Subway Builder Mexico - Wizard Studio v7.1
 echo ================================================================
-echo   SUBWAY BUILDER MEXICO v6.3 - WIZARD STUDIO
+echo   SUBWAY BUILDER MEXICO v7.1 - WIZARD STUDIO
 echo   Identidad Grafica: Metro CDMX / Lance Wyman Standard
 echo ================================================================
 echo.
