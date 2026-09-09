@@ -13,7 +13,9 @@ try:
     import psutil
 except ImportError:
     psutil = None
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
+from shapely.geometry import shape, mapping, MultiPolygon, Polygon
+from shapely.ops import unary_union
 
 ETIQUETAS_CITIES = ['city', 'borough', 'town']
 ETIQUETAS_SUBURBS = ['city', 'borough', 'town', 'suburb', 'quarter']
@@ -50,6 +52,140 @@ def to_wsl_path(win_path: str) -> str:
         clean_rest = rest.replace("\\", "/").lstrip("/")
         return f"/mnt/{letter}/{clean_rest}"
     return abs_p.replace("\\", "/")
+
+
+def process_commercial_college_features(
+    features: List[Dict],
+    tile_bounds: Optional[Any] = None,
+    water_mask: Optional[Any] = None,
+    aerodrome_mask: Optional[Any] = None
+) -> List[Dict]:
+    """
+    Procesa las características de la capa 'commercial' aplicando el canon oficial
+    de Subway Builder:
+    1. Etiquetado dual canónico:
+       - 'type': 'college' para campus universitarios y escuelas.
+       - 'type': 'commercial' para distritos comerciales y retail.
+    2. Regla canónica 'Campus Wins' (disyuntividad espacial estricta):
+       - Los campus universitarios tienen prioridad visual y espacial sobre los comercios.
+       - La máscara de campus universitarios se sustrae de los polígonos comerciales
+         superpuestos, evitando la mezcla anómala de colores semitransparentes en MapLibre.
+    """
+    if not features:
+        return []
+
+    # 1. Normalizar etiquetas y tipología
+    normalized_features = []
+    for feat in features:
+        props = dict(feat.get("properties", {}))
+        geom = feat.get("geometry")
+        if not geom:
+            continue
+
+        raw_type = str(props.get("type", "")).lower()
+        raw_kind = str(props.get("kind", "")).lower()
+
+        is_college = (
+            raw_type in ["college", "university"]
+            or raw_kind in ["college", "university", "school"]
+        )
+
+        if is_college:
+            props["type"] = "college"
+            props["kind"] = "college"
+        else:
+            props["type"] = "commercial"
+            if not props.get("kind"):
+                props["kind"] = "commercial"
+
+        normalized_features.append({
+            "geometry": geom,
+            "properties": props,
+            "id": feat.get("id"),
+            "type": feat.get("type", "Feature")
+        })
+
+    # 2. Construir máscara de campus universitarios (para Campus Wins)
+    college_geoms = []
+    for feat in normalized_features:
+        if feat["properties"].get("type") == "college":
+            try:
+                g = shape(feat["geometry"])
+                if tile_bounds is not None:
+                    g = g.intersection(tile_bounds)
+                if not g.is_empty:
+                    if not g.is_valid:
+                        g = g.buffer(0)
+                    college_geoms.append(g)
+            except Exception:
+                continue
+
+    college_mask = unary_union(college_geoms) if college_geoms else None
+
+    # 3. Procesar y recortar geometrías
+    kept = []
+    for feat in normalized_features:
+        try:
+            geom = shape(feat["geometry"])
+        except Exception:
+            continue
+
+        if tile_bounds is not None:
+            geom = geom.intersection(tile_bounds)
+        if geom.is_empty:
+            continue
+        if not geom.is_valid:
+            geom = geom.buffer(0)
+
+        # Sustraer cuerpos de agua
+        if water_mask is not None and not water_mask.is_empty:
+            if geom.intersects(water_mask):
+                geom = geom.difference(water_mask)
+                if not geom.is_valid:
+                    geom = geom.buffer(0)
+
+        is_college = (feat["properties"].get("type") == "college")
+
+        if is_college:
+            # Los campus universitarios permanecen intactos (Campus Wins)
+            if geom.is_empty or geom.area < 1.0:
+                continue
+            if geom.geom_type not in ("Polygon", "MultiPolygon"):
+                parts = [g for g in getattr(geom, 'geoms', []) if g.geom_type in ("Polygon", "MultiPolygon")]
+                if not parts:
+                    continue
+                geom = unary_union(parts) if len(parts) > 1 else parts[0]
+            feat["geometry"] = mapping(geom)
+            kept.append(feat)
+            continue
+
+        # Distritos comerciales: sustraer aeródromos y campus universitarios
+        if aerodrome_mask is not None and not aerodrome_mask.is_empty:
+            if geom.intersects(aerodrome_mask):
+                geom = geom.difference(aerodrome_mask)
+                if not geom.is_valid:
+                    geom = geom.buffer(0)
+
+        # Regla Campus Wins: sustraer campus universitarios
+        if college_mask is not None and not college_mask.is_empty:
+            if geom.intersects(college_mask):
+                geom = geom.difference(college_mask)
+                if not geom.is_valid:
+                    geom = geom.buffer(0)
+
+        if geom.is_empty or geom.area < 1.0:
+            continue
+
+        if geom.geom_type not in ("Polygon", "MultiPolygon"):
+            parts = [g for g in getattr(geom, 'geoms', []) if g.geom_type in ("Polygon", "MultiPolygon")]
+            if not parts:
+                continue
+            geom = unary_union(parts) if len(parts) > 1 else parts[0]
+
+        feat["geometry"] = mapping(geom)
+        kept.append(feat)
+
+    return kept
 
 
 def is_wsl_available() -> Tuple[bool, str, Dict[str, bool]]:

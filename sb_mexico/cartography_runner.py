@@ -87,7 +87,12 @@ def run_cartography(
     building_simplification: float = 0.2,
     include_ocean: bool = False
 ) -> int:
-    """Ejecuta la compilación con depot.maps.MapGen en el entorno Linux/WSL."""
+    try:
+        from tools.patch_depot_wsl import patch_depot_maps
+        patch_depot_maps()
+    except Exception:
+        pass
+
     try:
         from depot.maps import MapGen
     except ImportError as e:
