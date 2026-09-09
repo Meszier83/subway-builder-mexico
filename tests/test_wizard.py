@@ -419,7 +419,9 @@ class TestWizard(unittest.TestCase):
         self.assertAlmostEqual(p_cun["til_1_state"], 0.45, places=1)
         self.assertAlmostEqual(p_cun["gravity_beta"], 0.120, places=3)
         self.assertEqual(p_cun["max_distance_km"], 50.0)
-        self.assertEqual(p_cun["max_pop_size"], 150)
+        self.assertEqual(p_cun["min_pop_size"], 25)
+        self.assertEqual(p_cun["target_pop_size"], 150)
+        self.assertEqual(p_cun["max_pop_size"], 200)
 
         # Nivel 1: Mérida (con archivo ENOE real en data/merida)
         if os.path.exists("cities/merida.yaml"):

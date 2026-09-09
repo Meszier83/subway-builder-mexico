@@ -311,8 +311,7 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
                 cdata = load_city_data(cand_yaml)
             except Exception:
                 pass
-    if not cdata:
-        cdata = {}
+    exclusion_zones = cdata.get("exclusion_zones", []) if cdata else []
 
     def _clean_and_filter(pts: List[Dict[str, Any]], box: Optional[List[float]]) -> List[Dict[str, Any]]:
         clean_pts = []
@@ -330,6 +329,13 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
             if box and len(box) == 4:
                 if not (box[0] <= loc[0] <= box[2] and box[1] <= loc[1] <= box[3]):
                     continue
+            if exclusion_zones:
+                try:
+                    from sb_mexico.gravity import is_point_in_exclusion_zone
+                    if is_point_in_exclusion_zone(loc[0], loc[1], exclusion_zones):
+                        continue
+                except Exception:
+                    pass
             raw_j = p.get("raw_jobs")
             clean_pts.append({
                 "id": p_id,

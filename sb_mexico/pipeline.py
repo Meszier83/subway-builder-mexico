@@ -388,6 +388,11 @@ def execute_pipeline(
             )
         console.print(tabla_az)
 
+    exclusion_zones = cfg.get("exclusion_zones", [])
+    if exclusion_zones:
+        enabled_excl = [z for z in exclusion_zones if z.get("enabled", True)]
+        console.print(f"-> Zonas de Exclusión detectadas: [bold red]{len(enabled_excl)}[/bold red] activas ({len(exclusion_zones)} totales) - Sin simulación de demanda en sus perímetros.")
+
     demand_points, poi_audit = build_demand_grid(
         df_denue=df_denue,
         df_cpv=df_cpv,
@@ -397,7 +402,8 @@ def execute_pipeline(
         min_residents=city_info.get("min_residents", 10),
         min_jobs=city_info.get("min_jobs", 3),
         seed=seed,
-        affluence_zones=affluence_zones
+        affluence_zones=affluence_zones,
+        exclusion_zones=exclusion_zones
     )
 
     console.print(f"-> Nodos de demanda consolidados: [green]{len(demand_points):,}[/green]")
@@ -426,17 +432,17 @@ def execute_pipeline(
 
     total_pea = sum(p.get("pea_15ymas", 0) for p in demand_points)
 
-    target_pop_size = macro.get("target_pop_size")
-    if target_pop_size is None:
-        target_pop_size = 180
+    target_pop_size = macro.get("target_pop_size", 180)
     max_pop_size = macro.get("max_pop_size", 200)
+    min_pop_size = macro.get("min_pop_size", 25)
 
-    console.print(f"-> Escala canónica de cohortes: [cyan]target_pop_size = {target_pop_size} | max_pop_size = {max_pop_size} | seed = {seed}[/cyan] (PEA Total: {total_pea:,})")
+    console.print(f"-> Escala canónica de cohortes: [cyan]min_pop_size = {min_pop_size} | target_pop_size = {target_pop_size} | max_pop_size = {max_pop_size} | seed = {seed}[/cyan] (PEA Total: {total_pea:,})")
 
     raw_pops = simulate_gravity_demand(
         demand_points=demand_points,
         beta=macro.get("gravity_beta", 0.12),
         max_distance_km=macro.get("max_distance_km", 55.0),
+        min_pop_size=min_pop_size,
         max_pop_size=max_pop_size,
         target_pop_size=target_pop_size,
         seed=seed,
@@ -454,10 +460,10 @@ def execute_pipeline(
     demand_points, pops = cluster_demand_points(demand_points, raw_pops)
 
     # 2. Consolidación de micro-flujos residuales hacia nodos principales
-    demand_points, pops = consolidate_small_pops(demand_points, pops, max_pop_size=max_pop_size)
+    demand_points, pops = consolidate_small_pops(demand_points, pops, min_pop_size=min_pop_size, max_pop_size=max_pop_size)
 
     # 3. Fusión de viajes idénticos
-    pops = merge_identical_commutes(pops, max_pop_size=max_pop_size)
+    pops = merge_identical_commutes(pops, min_pop_size=min_pop_size, max_pop_size=max_pop_size)
 
     # 4. Sincronización 1:1 entre display (residents, jobs) y simulación real
     demand_points, pops = sync_demand_points_and_pops(demand_points, pops, remove_orphans=True)

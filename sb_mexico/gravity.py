@@ -71,6 +71,19 @@ def is_point_in_zone(lon: float, lat: float, zone: Dict[str, Any]) -> bool:
     return False
 
 
+def is_point_in_exclusion_zone(lon: float, lat: float, exclusion_zones: Optional[List[Dict[str, Any]]]) -> bool:
+    """
+    Verifica si una coordenada [lon, lat] cae dentro de alguna de las zonas de exclusión activas.
+    Las zonas de exclusión descartan la simulación de demanda (población y empleo) en el área.
+    """
+    if not exclusion_zones:
+        return False
+    for zone in exclusion_zones:
+        if zone and zone.get("enabled", True) and is_point_in_zone(lon, lat, zone):
+            return True
+    return False
+
+
 def get_zone_multipliers_for_point(
     lon: float,
     lat: float,
@@ -85,30 +98,25 @@ def get_zone_multipliers_for_point(
     if not affluence_zones:
         return 1.0, 0.0, None
 
-    max_mult = 1.0
-    max_reach = 0.0
-    matched_id = None
+    active_mults = []
+    active_reaches = []
+    matched_ids = []
 
     for zone in affluence_zones:
         if is_point_in_zone(lon, lat, zone):
-            try:
-                z_mult = float(zone.get("multiplier", 1.0))
-            except (ValueError, TypeError):
-                z_mult = 1.0
-            try:
-                z_reach = float(zone.get("reach_bonus", 0.0))
-            except (ValueError, TypeError):
-                z_reach = 0.0
+            mult = float(zone.get("multiplier", 1.0))
+            reach = float(zone.get("reach_bonus", 0.0))
+            active_mults.append(mult)
+            active_reaches.append(reach)
+            matched_ids.append(zone.get("id"))
 
-            if z_mult > max_mult:
-                max_mult = z_mult
-                matched_id = zone.get("id")
-            if z_reach > max_reach:
-                max_reach = z_reach
-                if matched_id is None:
-                    matched_id = zone.get("id")
+    if not active_mults:
+        return 1.0, 0.0, None
 
-    return max_mult, max_reach, matched_id
+    final_mult = max(active_mults)
+    final_reach = max(active_reaches)
+    chosen_id = matched_ids[active_mults.index(final_mult)]
+    return final_mult, final_reach, chosen_id
 
 
 def build_demand_grid(
@@ -120,7 +128,8 @@ def build_demand_grid(
     min_residents: int = 10,
     min_jobs: int = 3,
     seed: int = 42,
-    affluence_zones: Optional[List[Dict]] = None
+    affluence_zones: Optional[List[Dict]] = None,
+    exclusion_zones: Optional[List[Dict]] = None
 ) -> Tuple[List[Dict], List[Dict]]:
     """
     Agrega datos de población y empleo en celdas espaciales,
@@ -142,6 +151,8 @@ def build_demand_grid(
 
     pois_resolved = []
     for poi in special_pois:
+        if exclusion_zones and is_point_in_exclusion_zone(poi["loc"][0], poi["loc"][1], exclusion_zones):
+            continue
         p_id = poi["id"]
         radius_m = poi.get("radius_m")
         if radius_m is None:
@@ -178,6 +189,8 @@ def build_demand_grid(
     for rec in denue_records:
         r_lon = float(rec['lon'])
         r_lat = float(rec['lat'])
+        if exclusion_zones and is_point_in_exclusion_zone(r_lon, r_lat, exclusion_zones):
+            continue
         r_jobs = float(rec['calibrated_jobs'])
         
         # Verificar si cae dentro de algún POI especial (con prefiltro rápido de bounding box)
@@ -250,6 +263,8 @@ def build_demand_grid(
     for rec in cpv_records:
         r_lon = float(rec['lon'])
         r_lat = float(rec['lat'])
+        if exclusion_zones and is_point_in_exclusion_zone(r_lon, r_lat, exclusion_zones):
+            continue
         k = get_grid_key(r_lon, r_lat)
         if k not in grid:
             grid[k] = {
@@ -828,6 +843,7 @@ def simulate_gravity_demand(
     demand_points: List[Dict],
     beta: float = 0.12,
     max_distance_km: float = 55.0,
+    min_pop_size: int = 25,
     max_pop_size: int = 200,
     target_pop_size: int = 180,
     seed: int = 42,
@@ -1099,29 +1115,37 @@ def simulate_gravity_demand(
                 else:
                     dist_m, driving_seconds = calculate_commute_impedance(d_km)
 
-                while pax_count > 0:
-                    chunk = min(pax_count, max_pop_size)
-                    pid = f"pop_{pop_id:06d}"
-                    pops.append({
-                        "id": pid,
-                        "size": chunk,
-                        "residenceId": orig["id"],
-                        "jobId": dest["id"],
-                        "drivingSeconds": driving_seconds,
-                        "drivingDistance": dist_m
-                    })
-                    orig["popIds"].append(pid)
-                    dest["popIds"].append(pid)
-                    pop_id += 1
-                    pax_count -= chunk
+                if pax_count > 0:
+                    if pax_count <= max_pop_size:
+                        chunks = [pax_count]
+                    else:
+                        num_chunks = int(math.ceil(pax_count / max_pop_size))
+                        base = pax_count // num_chunks
+                        rem = pax_count % num_chunks
+                        chunks = [base + 1 if j < rem else base for j in range(num_chunks)]
+
+                    for chunk in chunks:
+                        pid = f"pop_{pop_id:06d}"
+                        pops.append({
+                            "id": pid,
+                            "size": chunk,
+                            "residenceId": orig["id"],
+                            "jobId": dest["id"],
+                            "drivingSeconds": driving_seconds,
+                            "drivingDistance": dist_m
+                        })
+                        orig["popIds"].append(pid)
+                        dest["popIds"].append(pid)
+                        pop_id += 1
 
     return pops
 
 
-def merge_identical_commutes(pops: List[Dict], max_pop_size: int = 200) -> List[Dict]:
+def merge_identical_commutes(pops: List[Dict], min_pop_size: int = 25, max_pop_size: int = 200) -> List[Dict]:
     """
     Agrupa y fusiona cohortes con los mismos nodos de origen y destino exactos (residenceId, jobId).
-    Si la suma de personas supera max_pop_size, genera trozos ordenados de hasta max_pop_size.
+    Si la suma de personas supera max_pop_size, genera trozos balanceados de hasta max_pop_size,
+    asegurando que ninguna cohorte dividida sea menor a min_pop_size.
     Calcula distancias y tiempos de manejo ponderados por tamaño de cohorte.
     """
     from collections import defaultdict
@@ -1147,9 +1171,16 @@ def merge_identical_commutes(pops: List[Dict], max_pop_size: int = 200) -> List[
             avg_dist = pop_list[0].get("drivingDistance", 0)
 
         path = next((p["drivingPath"] for p in pop_list if "drivingPath" in p and p["drivingPath"]), None)
-        rem = total_size
-        while rem > 0:
-            sz = min(rem, max_pop_size)
+
+        if total_size <= max_pop_size:
+            chunks = [total_size]
+        else:
+            num_chunks = int(math.ceil(total_size / max_pop_size))
+            base = total_size // num_chunks
+            rem = total_size % num_chunks
+            chunks = [base + 1 if j < rem else base for j in range(num_chunks)]
+
+        for sz in chunks:
             item = {
                 "id": f"pop_{pop_counter:06d}",
                 "size": sz,
@@ -1158,11 +1189,10 @@ def merge_identical_commutes(pops: List[Dict], max_pop_size: int = 200) -> List[
                 "drivingSeconds": avg_sec,
                 "drivingDistance": avg_dist
             }
-            if path is not None:
+            if path:
                 item["drivingPath"] = path
             merged_pops.append(item)
             pop_counter += 1
-            rem -= sz
 
     return merged_pops
 
@@ -1170,6 +1200,7 @@ def merge_identical_commutes(pops: List[Dict], max_pop_size: int = 200) -> List[
 def consolidate_small_pops(
     demand_points: List[Dict],
     pops: List[Dict],
+    min_pop_size: int = 25,
     max_pop_size: int = 200,
     consolidate_max_sizes: Optional[List[int]] = None,
     consolidate_distances: Optional[List[float]] = None
@@ -1188,7 +1219,8 @@ def consolidate_small_pops(
         return demand_points, pops
 
     if consolidate_max_sizes is None:
-        consolidate_max_sizes = [25, 10, 5, 2]
+        thresholds = {max(2, min_pop_size), max(2, int(min_pop_size * 0.6)), max(2, int(min_pop_size * 0.3)), 2}
+        consolidate_max_sizes = sorted(list(thresholds), reverse=True)
     if consolidate_distances is None:
         consolidate_distances = [2000.0, 4000.0, 8000.0, 16000.0]
 

@@ -23,8 +23,9 @@ macroeconomics:
   default_growth_factor: 1.05         # Factor de proyección demográfica base (1.00 = Censo 2020 puro)
   gravity_beta: 0.12                  # Coeficiente de fricción espacial (0.10 a 0.14 recomendado)
   max_distance_km: 55.0               # Límite máximo de distancia para viajes urbanos
+  min_pop_size: 25                    # Tamaño mínimo de cohorte (evita micro-pops ineficientes de 1-10 pax)
+  target_pop_size: 150                # Tamaño objetivo de empaquetado de cohortes (150-180 pax)
   max_pop_size: 200                   # Tamaño máximo por cohorte de viaje (estándar nativo Subway Builder: 200)
-  target_pop_size: 180                # Tamaño objetivo de empaquetado de cohortes (150-200 pax)
 
   # --- MÓDULO EXPERIMENTAL (Opcional): Competitividad Modal (Auto vs. Metro) ---
   # Simula congestión vial urbana y usuarios cautivos de transporte colectivo.
@@ -64,6 +65,26 @@ affluence_zones:
       - [-86.835, 21.145]
       - [-86.845, 21.145]
       - [-86.845, 21.155]
+
+# ==============================================================================
+# ZONAS DE EXCLUSIÓN (EXCLUSION ZONES - CERO DEMANDA, CARTOGRAFÍA INTACTA)
+# ==============================================================================
+# Delimita polígonos o cuadros (BBOX) donde se omite toda simulación de población
+# y empleo (cero residentes, empleos o viajes 'pops'). Toda la red vial, vías y
+# edificios 3D continúan mostrándose 100% intactos en el motor del juego.
+# exclusion_zones:
+#   - id: "excl_cuerpo_agua"
+#     name: "Laguna / Reserva Natural"
+#     type: "polygon"
+#     reason: "water_body"             # water_body, ecological_reserve, unpopulated_island, military_restricted
+#     color: "#EF4444"
+#     enabled: true
+#     coordinates:
+#       - [-86.850, 21.140]
+#       - [-86.830, 21.140]
+#       - [-86.830, 21.120]
+#       - [-86.850, 21.120]
+#       - [-86.850, 21.140]
 
 # ==============================================================================
 # ZONAS TOPOLÓGICAS AISLADAS (ISOLATED ZONES - OPCIONAL)

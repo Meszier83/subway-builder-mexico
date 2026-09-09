@@ -429,11 +429,11 @@ class TestGravity(unittest.TestCase):
             {"id": "p1", "residenceId": "dp1", "jobId": "dp2", "size": 180, "drivingSeconds": 300, "drivingDistance": 4000},
             {"id": "p2", "residenceId": "dp1", "jobId": "dp2", "size": 150, "drivingSeconds": 300, "drivingDistance": 4000},
         ]
-        # Total = 330, con max_pop_size=200 debe partir en 200 y 130
-        merged = merge_identical_commutes(pops, max_pop_size=200)
+        # Total = 330, con max_pop_size=200 debe partir balanceadamente en 165 y 165 (evita colas pequenas)
+        merged = merge_identical_commutes(pops, max_pop_size=200, min_pop_size=25)
         self.assertEqual(len(merged), 2)
         sizes = sorted([p["size"] for p in merged], reverse=True)
-        self.assertEqual(sizes, [200, 130])
+        self.assertEqual(sizes, [165, 165])
         self.assertEqual(sum(sizes), 330)
 
     def test_consolidate_small_pops(self):

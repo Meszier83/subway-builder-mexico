@@ -284,8 +284,24 @@
         <i data-lucide="save" class="w-4 h-4"></i>
         <span>Guardar YAML</span>
       </button>
-    </div>
   </header>
+
+  <!-- BANNER DE RECUPERACIÓN DE BORRADOR LOCAL -->
+  <div id="draftRestoreBanner" class="hidden bg-amber-50 border-b border-amber-300 px-6 py-2 flex items-center justify-between text-xs text-amber-950 z-30 shrink-0 shadow-sm">
+    <div class="flex items-center space-x-2.5">
+      <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-600 shrink-0"></i>
+      <span>Se detectó un borrador local no guardado en tu navegador (<strong id="draftAgeText">hace un momento</strong>). ¿Deseas recuperarlo o descartarlo para usar la versión de disco?</span>
+    </div>
+    <div class="flex items-center space-x-2 shrink-0">
+      <button onclick="restorePendingDraft()" class="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold text-xs shadow transition flex items-center space-x-1">
+        <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+        <span>Recuperar</span>
+      </button>
+      <button onclick="discardPendingDraft()" class="px-3 py-1 bg-white hover:bg-stone-100 border border-stone-300 text-stone-700 rounded-lg font-medium text-xs transition">
+        <span>Descartar</span>
+      </button>
+    </div>
+  </div>
 
   <!-- ========================================================================= -->
   <!-- 2. BARRA DE PASOS (WIZARD STEPPER) -->
@@ -682,18 +698,100 @@
             </p>
           </div>
 
-          <div class="grid grid-cols-2 gap-3">
-            <div class="bg-metro-panel p-3 rounded-lg border border-metro-border">
-              <label class="block text-stone-900 font-bold text-xs mb-1">Distancia Máx. de Viaje (km)</label>
-              <input type="number" id="cfg_max_distance_km" value="50.0" class="w-full bg-white border border-metro-border rounded-lg px-3 py-1.5 text-stone-900 font-mono text-xs">
-              <p class="text-[10px] text-stone-600 mt-1">Límite de corte: se descartan viajes cotidianos más allá de este radio.</p>
+          <!-- Distancia Máx. de Viaje -->
+          <div class="bg-metro-panel p-3 rounded-lg border border-metro-border">
+            <div class="flex justify-between items-center mb-1">
+              <label class="block text-stone-900 font-bold text-xs">Distancia Máx. de Viaje Metropolitano (km)</label>
+              <span class="text-[10px] px-1.5 py-0.5 bg-stone-200 text-stone-700 rounded font-mono font-semibold">Radio de Corte</span>
             </div>
-            <div class="bg-metro-panel p-3 rounded-lg border border-metro-border">
-              <label class="block text-stone-900 font-bold text-xs mb-1">Máx. Cohorte de Pasajeros</label>
-              <input type="number" id="cfg_max_pop_size" value="150" class="w-full bg-white border border-metro-border rounded-lg px-3 py-1.5 text-stone-900 font-mono text-xs">
-              <p class="text-[10px] text-stone-600 mt-1">Tamaño máximo de cada grupo de pasajeros generado en el motor del juego.</p>
+            <input type="number" id="cfg_max_distance_km" value="50.0" min="10" max="150" step="1" class="w-full bg-white border border-metro-border rounded-lg px-3 py-1.5 text-stone-900 font-mono text-xs">
+            <p class="text-[10px] text-stone-600 mt-1">Límite de corte: se descartan viajes cotidianos más allá de este radio (40 a 70 km recomendado).</p>
+          </div>
+
+          <!-- Control de Cohortes Demográficas (Pops) -->
+          <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border space-y-2">
+            <div class="flex justify-between items-center">
+              <div class="flex items-center space-x-2">
+                <span class="text-stone-900 font-bold text-xs">Rango de Cohortes de Pasajeros (Pops)</span>
+                <span class="text-[10px] px-1.5 py-0.5 bg-blue-100 border border-blue-200 text-blue-800 rounded font-semibold font-mono">Conserva PEA</span>
+              </div>
+              <span class="text-[10px] text-stone-500 font-mono">Partición balanceada</span>
+            </div>
+            <p class="text-[11px] text-stone-600 leading-relaxed">
+              Define el tamaño mínimo y máximo de cada grupo de viajeros generado para Subway Builder. Evita micro-cohortes ineficientes (ej. 1–5 personas) sin perder masa demográfica total.
+            </p>
+            <div class="grid grid-cols-3 gap-2 pt-1">
+              <div>
+                <label class="block text-stone-700 font-semibold text-[11px] mb-1">Mínimo (min_pop)</label>
+                <input type="number" id="cfg_min_pop_size" value="25" min="1" max="100" step="5" class="w-full bg-white border border-metro-border rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs font-bold text-center">
+                <span class="text-[9px] text-stone-500 block text-center mt-0.5">Mín: 1 (Estándar: 25)</span>
+              </div>
+              <div>
+                <label class="block text-stone-700 font-semibold text-[11px] mb-1">Objetivo (target_pop)</label>
+                <input type="number" id="cfg_target_pop_size" value="150" min="10" max="300" step="10" class="w-full bg-white border border-metro-border rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs font-bold text-center">
+                <span class="text-[9px] text-stone-500 block text-center mt-0.5">Referencia (150)</span>
+              </div>
+              <div>
+                <label class="block text-stone-700 font-semibold text-[11px] mb-1">Máximo (max_pop)</label>
+                <input type="number" id="cfg_max_pop_size" value="200" min="20" max="500" step="10" class="w-full bg-white border border-metro-border rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs font-bold text-center">
+                <span class="text-[9px] text-stone-500 block text-center mt-0.5">Tope chunk (200)</span>
+              </div>
             </div>
           </div>
+
+          <!-- Ajustes Avanzados de Filtros Censales y Algoritmo Furness (Collapsible) -->
+          <details class="bg-stone-50 rounded-xl border border-stone-200 p-3 text-xs space-y-2 group">
+            <summary class="font-bold text-stone-800 cursor-pointer flex items-center justify-between select-none">
+              <div class="flex items-center space-x-2">
+                <i data-lucide="sliders-horizontal" class="w-4 h-4 text-stone-500"></i>
+                <span>Ajustes Avanzados: Filtros de Malla y Modelo Gravitatorio</span>
+              </div>
+              <span class="text-[10px] text-stone-500 group-open:rotate-180 transition-transform">▼</span>
+            </summary>
+            <div class="pt-2 space-y-3">
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Mín. Residentes por Manzana</label>
+                  <input type="number" id="cfg_min_residents" value="10" min="0" step="1" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
+                  <span class="text-[9px] text-stone-500">Descarta manzanas censales con menos de N habitantes.</span>
+                </div>
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Mín. Empleos por Manzana</label>
+                  <input type="number" id="cfg_min_jobs" value="3" min="0" step="1" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
+                  <span class="text-[9px] text-stone-500">Descarta celdas con menos de N empleos DENUE.</span>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Filtro Área Edificios (m²)</label>
+                  <input type="number" id="cfg_building_filter_size" value="15.0" min="0" step="1" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
+                  <span class="text-[9px] text-stone-500">Omite cobertizos y casetas menores a este metraje en MapGen.</span>
+                </div>
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Simplificación Edificios</label>
+                  <input type="number" id="cfg_building_simplification" value="0.2" min="0" max="1" step="0.05" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
+                  <span class="text-[9px] text-stone-500">Tolerancia Ramer-Douglas-Peucker en vector tiles.</span>
+                </div>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Umbral Muestreo</label>
+                  <input type="number" id="cfg_sample_threshold" value="500" min="50" step="50" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
+                  <span class="text-[9px] text-stone-500">sample_threshold</span>
+                </div>
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Iteraciones Furness</label>
+                  <input type="number" id="cfg_furness_iterations" value="15" min="5" max="100" step="5" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
+                  <span class="text-[9px] text-stone-500">furness_iterations</span>
+                </div>
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Tolerancia Furness</label>
+                  <input type="number" id="cfg_furness_tol" value="0.02" min="0.001" max="0.1" step="0.005" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
+                  <span class="text-[9px] text-stone-500">furness_tol</span>
+                </div>
+              </div>
+            </div>
+          </details>
 
           <!-- Semilla Aleatoria (Seed) -->
           <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border">
@@ -901,6 +999,10 @@
           <button id="poiTabBtn-zones" onclick="switchPoiTab('zones')" class="flex-1 py-2 px-1 text-center flex items-center justify-center space-x-1 border-b-2 border-transparent text-stone-600 hover:text-stone-900 transition">
             <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-500"></i>
             <span>Afluencia (<span id="affluenceZoneBadge">0</span>)</span>
+          </button>
+          <button id="poiTabBtn-exclusions" onclick="switchPoiTab('exclusions')" class="flex-1 py-2 px-1 text-center flex items-center justify-center space-x-1 border-b-2 border-transparent text-stone-600 hover:text-stone-900 transition">
+            <i data-lucide="shield-alert" class="w-3.5 h-3.5 text-rose-500"></i>
+            <span>Exclusiones (<span id="exclusionZoneBadge">0</span>)</span>
           </button>
         </div>
 
@@ -1196,6 +1298,51 @@
           <!-- Contenedor de Tarjetas de Zonas -->
           <div id="affluenceZoneListContainer" class="space-y-2 overflow-y-auto flex-1 max-h-[380px]">
             <!-- Renderizado dinámico de zonas -->
+          </div>
+        </div>
+
+        <!-- CONTENIDO PESTAÑA 5: ZONAS DE EXCLUSIÓN (EXCLUSION ZONES) -->
+        <div id="poiTab-exclusions" class="hidden flex-1 overflow-y-auto p-3.5 space-y-3">
+          <div class="flex justify-between items-center border-b border-metro-border pb-2">
+            <div>
+              <h3 class="text-xs font-bold text-metro-text flex items-center space-x-1.5">
+                <i data-lucide="shield-alert" class="w-3.5 h-3.5 text-rose-500"></i>
+                <span>Zonas de Exclusión de Demanda</span>
+              </h3>
+              <p class="text-[10px] text-metro-muted">Omite simulación de población y empleo manteniendo la cartografía base.</p>
+            </div>
+          </div>
+
+          <!-- Banner Informativo -->
+          <div class="p-2.5 bg-rose-50 border border-rose-200 rounded-xl space-y-1 text-[11px] text-rose-900">
+            <div class="flex items-center space-x-1.5 font-bold">
+              <i data-lucide="info" class="w-3.5 h-3.5 text-rose-600"></i>
+              <span>Cero Demanda / Cartografía Intacta</span>
+            </div>
+            <p class="text-[10px] text-rose-700 leading-relaxed">
+              Las áreas delimitadas no generarán residentes, empleos ni viajes ('pops'). Ideal para lagunas, manglares, áreas naturales protegidas, islas que no se deseen poblar o polígonos militares. Las calles, vías y edificios 3D continuarán mostrándose 100% intactos en el juego.
+            </p>
+          </div>
+
+          <!-- Botones de Acción de Trazado -->
+          <div class="grid grid-cols-2 gap-2">
+            <button onclick="startDrawingExclusionZone('polygon')" class="px-2 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-700 text-[11px] font-bold rounded-lg border border-rose-500/30 flex items-center justify-center space-x-1.5 transition">
+              <i data-lucide="pentagon" class="w-3.5 h-3.5 text-rose-600"></i>
+              <span>Trazar Polígono</span>
+            </button>
+            <button onclick="startDrawingExclusionZone('bbox')" class="px-2 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-700 text-[11px] font-bold rounded-lg border border-rose-500/30 flex items-center justify-center space-x-1.5 transition">
+              <i data-lucide="scan" class="w-3.5 h-3.5 text-rose-600"></i>
+              <span>Trazar Cuadro</span>
+            </button>
+          </div>
+
+          <div class="flex justify-between items-center pt-1">
+            <span id="exclusionZoneCountLabel" class="text-[11px] font-mono text-metro-muted">0 exclusiones configuradas</span>
+          </div>
+
+          <!-- Contenedor de Tarjetas de Zonas de Exclusión -->
+          <div id="exclusionZoneListContainer" class="space-y-2 overflow-y-auto flex-1 max-h-[380px]">
+            <!-- Renderizado dinámico de exclusiones -->
           </div>
         </div>
 
@@ -1917,6 +2064,84 @@
     </div>
   </div>
 
+  <!-- Modal Crear / Editar Zona de Exclusión (Exclusion Zone) -->
+  <div id="modalExclusionZone" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white border border-stone-200 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center border-b border-stone-200 pb-3">
+        <div>
+          <h3 id="modalExclusionTitle" class="text-base font-bold text-stone-900 flex items-center space-x-2">
+            <i data-lucide="shield-alert" class="w-5 h-5 text-rose-500"></i>
+            <span>Zona de Exclusión de Demanda</span>
+          </h3>
+          <p class="text-xs text-stone-500 mt-0.5">Omite simulación demográfica y laboral manteniendo toda la cartografía base.</p>
+        </div>
+        <button onclick="closeExclusionZoneModal()" class="text-stone-400 hover:text-stone-800 p-1.5 rounded-lg hover:bg-stone-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <input type="hidden" id="ez_edit_index" value="-1">
+
+      <div class="space-y-3 text-xs">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-stone-700 font-semibold mb-1">Nombre de la Zona</label>
+            <input type="text" id="ez_name" oninput="onEzNameInput()" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-rose-500 focus:outline-none" placeholder="ej. Laguna Nichupté">
+          </div>
+          <div>
+            <label class="block text-stone-700 font-semibold mb-1">ID (Identificador)</label>
+            <input type="text" id="ez_id" class="w-full bg-stone-50 font-mono border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-bold focus:border-rose-500 focus:outline-none" placeholder="excl_laguna">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-stone-700 font-semibold mb-1">Motivo / Categoría de Exclusión</label>
+          <select id="ez_reason" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-rose-500 focus:outline-none">
+            <option value="water_body">🌊 Cuerpo de Agua / Laguna / Océano interior</option>
+            <option value="ecological_reserve">🌳 Área Natural Protegida / Reserva Ecológica / Manglar</option>
+            <option value="unpopulated_island">🏝️ Isla / Territorio sin demanda metropolitana deseada</option>
+            <option value="military_restricted">⛔ Zona Militar / Aeroportuaria Restringida</option>
+            <option value="industrial_uninhabited">🏭 Zona Industrial Inhabitada / Cantera</option>
+            <option value="custom">⚙️ Personalizado / Otro</option>
+          </select>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-stone-700 font-semibold mb-1">Color en Mapa</label>
+            <div class="flex items-center space-x-2">
+              <input type="color" id="ez_color" value="#EF4444" oninput="document.getElementById('ez_color_hex').innerText = this.value" class="w-8 h-8 rounded border border-stone-300 cursor-pointer">
+              <span id="ez_color_hex" class="font-mono text-stone-500 font-bold">#EF4444</span>
+            </div>
+          </div>
+          <div>
+            <label class="block text-stone-700 font-semibold mb-1">Estado</label>
+            <label class="flex items-center space-x-2 mt-2 cursor-pointer">
+              <input type="checkbox" id="ez_enabled" checked class="rounded border-stone-300 text-rose-600 focus:ring-rose-500">
+              <span class="text-stone-800 font-bold">Exclusión Activa</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="p-3 bg-rose-50 rounded-xl border border-rose-200 text-rose-800 space-y-1">
+          <span class="font-bold flex items-center space-x-1.5">
+            <i data-lucide="info" class="w-3.5 h-3.5"></i>
+            <span>Detalle Geométrico</span>
+          </span>
+          <p id="ez_geometry_info" class="font-mono text-[10px] text-rose-700">Polígono / BBOX definido</p>
+        </div>
+      </div>
+
+      <div class="flex justify-end space-x-2 pt-3 border-t border-stone-200">
+        <button onclick="closeExclusionZoneModal()" class="px-4 py-2 bg-stone-100 text-stone-700 text-xs font-bold rounded-lg hover:bg-stone-200 transition">Cancelar</button>
+        <button onclick="submitExclusionZoneModal()" class="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg transition shadow flex items-center space-x-1.5">
+          <i data-lucide="check" class="w-4 h-4"></i>
+          <span>Guardar Zona de Exclusión</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal Agregar Factor Demográfico Municipal (CONAPO) -->
   <div id="modalAddGrowthFactor" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
     <div class="bg-white border border-stone-200 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
@@ -2003,8 +2228,21 @@
     let selectedIsolatedZoneIndex = -1;
     let isDrawingIsolated = false;
     let drawStartLatLng = null;
-    let drawTempRect = null;
     let isolatedCornerMarkers = { NW: null, NE: null, SE: null, SW: null };
+
+    // Zonas de Exclusión y Borrador Local
+    let exclusionZonesGroup = null;
+    let exclusionZonesDemandGroup = null;
+    let selectedExclusionIndex = -1;
+    let isDrawingExclusion = false;
+    let exclusionDrawMode = 'polygon';
+    let exclusionDrawPoints = [];
+    let exclusionTempShape = null;
+    let exclusionDrawMarkers = [];
+    let exclusionBoxStart = null;
+    let currentExclusionDraft = null;
+    window._pendingDraftData = null;
+    window._pendingDraftPath = null;
 
     // Inicialización al cargar la ventana
     window.addEventListener('DOMContentLoaded', async () => {
@@ -2447,9 +2685,11 @@
       mapPoi = L.map('mapPoi', { ...mapOptions, layers: [b2.baseMapDefault] }).setView([21.16, -86.85], 11);
       poiMarkersGroup = L.layerGroup().addTo(mapPoi);
       affluenceZonesGroup = L.featureGroup().addTo(mapPoi);
+      exclusionZonesGroup = L.featureGroup().addTo(mapPoi);
       const poiOverlays = {
         "📍 POIs y Marcadores": poiMarkersGroup,
-        "✨ Zonas de Afluencia": affluenceZonesGroup
+        "✨ Zonas de Afluencia": affluenceZonesGroup,
+        "🚫 Zonas de Exclusión": exclusionZonesGroup
       };
       L.control.layers(b2.layerControl, poiOverlays, { position: 'topright' }).addTo(mapPoi);
       mapPoi.on('mousemove', (e) => { lastMapMouseLatLng = e.latlng; });
@@ -2457,6 +2697,7 @@
 
       setupBoxSelectionForPoi();
       setupAffluenceDrawingEvents();
+      setupExclusionDrawingEvents();
 
       // 3. Mapa Demand Viewer
       const b3 = createBaseLayers();
@@ -2466,13 +2707,15 @@
       demandLayers.pois = L.layerGroup().addTo(mapDemand);
       isolatedZonesDemandGroup = L.layerGroup().addTo(mapDemand);
       affluenceZonesDemandGroup = L.layerGroup().addTo(mapDemand);
+      exclusionZonesDemandGroup = L.layerGroup().addTo(mapDemand);
 
       const demandOverlays = {
         "👥 Población (Azul)": demandLayers.residents,
         "💼 Empleo (Rojo)": demandLayers.jobs,
         "⭐ POIs Especiales (Naranja)": demandLayers.pois,
         "🏝️ Zonas Aisladas (Cian)": isolatedZonesDemandGroup,
-        "✨ Zonas de Afluencia (Ámbar)": affluenceZonesDemandGroup
+        "✨ Zonas de Afluencia (Ámbar)": affluenceZonesDemandGroup,
+        "🚫 Zonas de Exclusión (Rojo)": exclusionZonesDemandGroup
       };
       L.control.layers(b3.layerControl, demandOverlays, { position: 'topright' }).addTo(mapDemand);
     }
@@ -3804,6 +4047,478 @@
     }
 
     // -------------------------------------------------------------------------
+    // ZONAS DE EXCLUSIÓN (EXCLUSION ZONES - CERO DEMANDA, MAPA INTACTO)
+    // -------------------------------------------------------------------------
+    const EXCLUSION_REASONS = {
+      water_body: { name: "Cuerpo de Agua / Laguna", icon: "waves" },
+      ecological_reserve: { name: "Reserva Natural / Manglar", icon: "trees" },
+      unpopulated_island: { name: "Isla Excluida", icon: "palmtree" },
+      military_restricted: { name: "Zona Restringida / Militar", icon: "shield-alert" },
+      industrial_uninhabited: { name: "Área Inhabitada / Cantera", icon: "factory" },
+      custom: { name: "Personalizado / Otro", icon: "slash" }
+    };
+
+    function setupExclusionDrawingEvents() {
+      if (!mapPoi) return;
+
+      mapPoi.on('click', (e) => {
+        if (!isDrawingExclusion || exclusionDrawMode !== 'polygon') return;
+        addExclusionPolygonVertex(e.latlng);
+      });
+
+      mapPoi.on('dblclick', (e) => {
+        if (!isDrawingExclusion || exclusionDrawMode !== 'polygon') return;
+        L.DomEvent.stop(e);
+        finishExclusionPolygonDrawing();
+      });
+
+      mapPoi.on('mousedown', (e) => {
+        if (!isDrawingExclusion || exclusionDrawMode !== 'bbox') return;
+        exclusionBoxStart = e.latlng;
+        if (exclusionTempShape) mapPoi.removeLayer(exclusionTempShape);
+        exclusionTempShape = L.rectangle([exclusionBoxStart, exclusionBoxStart], {
+          color: '#EF4444',
+          weight: 2,
+          dashArray: '6, 6',
+          fillColor: '#EF4444',
+          fillOpacity: 0.25
+        }).addTo(mapPoi);
+      });
+
+      mapPoi.on('mousemove', (e) => {
+        if (!isDrawingExclusion) return;
+        if (exclusionDrawMode === 'bbox' && exclusionBoxStart && exclusionTempShape) {
+          exclusionTempShape.setBounds([exclusionBoxStart, e.latlng]);
+        } else if (exclusionDrawMode === 'polygon' && exclusionDrawPoints.length > 0 && exclusionTempShape) {
+          const currentPts = [...exclusionDrawPoints, e.latlng];
+          exclusionTempShape.setLatLngs([currentPts]);
+        }
+      });
+
+      mapPoi.on('mouseup', (e) => {
+        if (!isDrawingExclusion || exclusionDrawMode !== 'bbox' || !exclusionBoxStart) return;
+        const endLatLng = e.latlng;
+        const minLon = Math.min(exclusionBoxStart.lng, endLatLng.lng);
+        const minLat = Math.min(exclusionBoxStart.lat, endLatLng.lat);
+        const maxLon = Math.max(exclusionBoxStart.lng, endLatLng.lng);
+        const maxLat = Math.max(exclusionBoxStart.lat, endLatLng.lat);
+
+        cancelDrawingExclusionZone();
+
+        if (maxLon - minLon < 0.001 || maxLat - minLat < 0.001) {
+          showToast("Área de exclusión muy pequeña o inválida", "warning");
+          return;
+        }
+
+        const bbox = [
+          parseFloat(minLon.toFixed(5)),
+          parseFloat(minLat.toFixed(5)),
+          parseFloat(maxLon.toFixed(5)),
+          parseFloat(maxLat.toFixed(5))
+        ];
+        const coordinates = [
+          [bbox[0], bbox[1]],
+          [bbox[2], bbox[1]],
+          [bbox[2], bbox[3]],
+          [bbox[0], bbox[3]],
+          [bbox[0], bbox[1]]
+        ];
+
+        openExclusionZoneModal(-1, {
+          type: 'bbox',
+          bbox: bbox,
+          coordinates: coordinates,
+          name: 'Nueva Zona de Exclusión',
+          reason: 'water_body'
+        });
+      });
+
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && isDrawingExclusion) {
+          cancelDrawingExclusionZone();
+        } else if (e.key === 'Enter' && isDrawingExclusion && exclusionDrawMode === 'polygon') {
+          finishExclusionPolygonDrawing();
+        }
+      });
+    }
+
+    function startDrawingExclusionZone(mode = 'polygon') {
+      if (!currentCityFile) {
+        showToast("Selecciona o crea un proyecto primero", "warning");
+        return;
+      }
+      isDrawingExclusion = true;
+      exclusionDrawMode = mode;
+      exclusionDrawPoints = [];
+      exclusionDrawMarkers = [];
+      exclusionBoxStart = null;
+
+      if (mapPoi) {
+        if (mode === 'bbox') mapPoi.dragging.disable();
+        mapPoi.getContainer().style.cursor = 'crosshair';
+      }
+
+      showToast(`Modo trazado de exclusión activo: ${mode === 'polygon' ? 'Polígono libre (doble clic o Enter para cerrar)' : 'Haz clic y arrastra el rectángulo'}`, "info");
+    }
+
+    function cancelDrawingExclusionZone() {
+      isDrawingExclusion = false;
+      exclusionBoxStart = null;
+      exclusionDrawPoints = [];
+
+      if (exclusionTempShape && mapPoi) {
+        mapPoi.removeLayer(exclusionTempShape);
+        exclusionTempShape = null;
+      }
+      if (exclusionDrawMarkers && mapPoi) {
+        exclusionDrawMarkers.forEach(m => mapPoi.removeLayer(m));
+        exclusionDrawMarkers = [];
+      }
+
+      if (mapPoi) {
+        mapPoi.dragging.enable();
+        mapPoi.getContainer().style.cursor = '';
+      }
+    }
+
+    function addExclusionPolygonVertex(latlng) {
+      if (exclusionDrawPoints.length >= 3) {
+        const first = exclusionDrawPoints[0];
+        const dist = mapPoi.distance(first, latlng);
+        if (dist < 35) {
+          finishExclusionPolygonDrawing();
+          return;
+        }
+      }
+
+      exclusionDrawPoints.push(latlng);
+
+      const m = L.circleMarker(latlng, {
+        radius: 5,
+        color: '#EF4444',
+        fillColor: '#FFFFFF',
+        fillOpacity: 1,
+        weight: 2
+      }).addTo(mapPoi);
+      exclusionDrawMarkers.push(m);
+
+      if (exclusionDrawPoints.length === 1) {
+        m.setStyle({ radius: 7, fillColor: '#EF4444', color: '#FFFFFF' });
+      }
+
+      if (!exclusionTempShape) {
+        exclusionTempShape = L.polygon([exclusionDrawPoints], {
+          color: '#EF4444',
+          weight: 2,
+          dashArray: '6, 6',
+          fillColor: '#EF4444',
+          fillOpacity: 0.2
+        }).addTo(mapPoi);
+      } else {
+        exclusionTempShape.setLatLngs([exclusionDrawPoints]);
+      }
+    }
+
+    function finishExclusionPolygonDrawing() {
+      if (exclusionDrawPoints.length < 3) {
+        showToast("Un polígono requiere al menos 3 vértices", "warning");
+        return;
+      }
+
+      const rawCoords = exclusionDrawPoints.map(p => [
+        parseFloat(p.lng.toFixed(5)),
+        parseFloat(p.lat.toFixed(5))
+      ]);
+      if (rawCoords[0][0] !== rawCoords[rawCoords.length - 1][0] || rawCoords[0][1] !== rawCoords[rawCoords.length - 1][1]) {
+        rawCoords.push([...rawCoords[0]]);
+      }
+
+      const lons = rawCoords.map(c => c[0]);
+      const lats = rawCoords.map(c => c[1]);
+      const bbox = [
+        parseFloat(Math.min(...lons).toFixed(5)),
+        parseFloat(Math.min(...lats).toFixed(5)),
+        parseFloat(Math.max(...lons).toFixed(5)),
+        parseFloat(Math.max(...lats).toFixed(5))
+      ];
+
+      cancelDrawingExclusionZone();
+
+      openExclusionZoneModal(-1, {
+        type: 'polygon',
+        coordinates: rawCoords,
+        bbox: bbox,
+        name: 'Nueva Zona de Exclusión',
+        reason: 'ecological_reserve'
+      });
+    }
+
+    function openExclusionZoneModal(index = -1, draftData = null) {
+      selectedExclusionIndex = index;
+      document.getElementById('ez_edit_index').value = index;
+
+      cityData.exclusion_zones = cityData.exclusion_zones || [];
+      const z = (index >= 0 && cityData.exclusion_zones[index]) ? { ...cityData.exclusion_zones[index] } : (draftData || {});
+
+      currentExclusionDraft = {
+        id: z.id || `excl_${Date.now().toString().slice(-4)}`,
+        name: z.name || "Nueva Zona de Exclusión",
+        type: z.type || "polygon",
+        reason: z.reason || "water_body",
+        color: z.color || "#EF4444",
+        enabled: z.enabled !== undefined ? z.enabled : true,
+        coordinates: z.coordinates || [],
+        bbox: z.bbox || null
+      };
+
+      document.getElementById('ez_name').value = currentExclusionDraft.name;
+      document.getElementById('ez_id').value = currentExclusionDraft.id;
+      document.getElementById('ez_reason').value = currentExclusionDraft.reason;
+      document.getElementById('ez_color').value = currentExclusionDraft.color;
+      document.getElementById('ez_color_hex').innerText = currentExclusionDraft.color;
+      document.getElementById('ez_enabled').checked = currentExclusionDraft.enabled;
+
+      const geomInfo = document.getElementById('ez_geometry_info');
+      if (geomInfo) {
+        if (currentExclusionDraft.type === 'polygon' && currentExclusionDraft.coordinates) {
+          geomInfo.innerText = `Polígono (${currentExclusionDraft.coordinates.length} vértices). BBOX: [${currentExclusionDraft.bbox ? currentExclusionDraft.bbox.join(', ') : ''}]`;
+        } else if (currentExclusionDraft.bbox) {
+          geomInfo.innerText = `Rectángulo BBOX: [${currentExclusionDraft.bbox.join(', ')}]`;
+        } else {
+          geomInfo.innerText = "Geometría pendiente";
+        }
+      }
+
+      document.getElementById('modalExclusionTitle').querySelector('span').innerText = index >= 0 ? "Editar Zona de Exclusión" : "Nueva Zona de Exclusión";
+      document.getElementById('modalExclusionZone').classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    function closeExclusionZoneModal() {
+      document.getElementById('modalExclusionZone').classList.add('hidden');
+      currentExclusionDraft = null;
+    }
+
+    function onEzNameInput() {
+      const name = document.getElementById('ez_name').value;
+      if (currentExclusionDraft && selectedExclusionIndex < 0) {
+        const slug = name.trim().toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').slice(0, 20);
+        document.getElementById('ez_id').value = slug ? `excl_${slug}` : `excl_${Date.now().toString().slice(-4)}`;
+      }
+    }
+
+    function submitExclusionZoneModal() {
+      if (!currentExclusionDraft) return;
+
+      const name = document.getElementById('ez_name').value.trim() || "Zona de Exclusión";
+      const id = document.getElementById('ez_id').value.trim() || `excl_${Date.now().toString().slice(-4)}`;
+      const reason = document.getElementById('ez_reason').value;
+      const color = document.getElementById('ez_color').value;
+      const enabled = document.getElementById('ez_enabled').checked;
+
+      cityData.exclusion_zones = cityData.exclusion_zones || [];
+
+      const zoneObj = {
+        ...currentExclusionDraft,
+        name: name,
+        id: id,
+        reason: reason,
+        color: color,
+        enabled: enabled
+      };
+
+      if (selectedExclusionIndex >= 0) {
+        cityData.exclusion_zones[selectedExclusionIndex] = zoneObj;
+        showToast("Zona de exclusión actualizada", "success");
+      } else {
+        cityData.exclusion_zones.push(zoneObj);
+        showToast("Nueva zona de exclusión agregada", "success");
+      }
+
+      closeExclusionZoneModal();
+      renderExclusionZones();
+      triggerAutoSave();
+    }
+
+    function deleteExclusionZone(index) {
+      if (!cityData.exclusion_zones || index < 0 || index >= cityData.exclusion_zones.length) return;
+      const zName = cityData.exclusion_zones[index].name || "Zona";
+      cityData.exclusion_zones.splice(index, 1);
+      renderExclusionZones();
+      triggerAutoSave();
+      showToast(`Zona de exclusión '${zName}' eliminada`, "info");
+    }
+
+    function toggleExclusionZone(index) {
+      if (!cityData.exclusion_zones || index < 0 || index >= cityData.exclusion_zones.length) return;
+      cityData.exclusion_zones[index].enabled = !cityData.exclusion_zones[index].enabled;
+      renderExclusionZones();
+      triggerAutoSave();
+    }
+
+    function centerExclusionZoneOnMap(index) {
+      if (!cityData.exclusion_zones || index < 0 || index >= cityData.exclusion_zones.length) return;
+      const z = cityData.exclusion_zones[index];
+      if (!mapPoi) return;
+
+      if (z.coordinates && z.coordinates.length >= 3) {
+        const bounds = L.latLngBounds(z.coordinates.map(c => [c[1], c[0]]));
+        mapPoi.fitBounds(bounds, { padding: [50, 50] });
+      } else if (z.bbox && z.bbox.length === 4) {
+        mapPoi.fitBounds([[z.bbox[1], z.bbox[0]], [z.bbox[3], z.bbox[2]]], { padding: [50, 50] });
+      }
+    }
+
+    function renderExclusionZones() {
+      renderExclusionZonesList();
+      renderExclusionZonesOnMap();
+      renderExclusionZonesOnDemandMap();
+    }
+
+    function renderExclusionZonesList() {
+      const container = document.getElementById('exclusionZoneListContainer');
+      const badge = document.getElementById('exclusionZoneBadge');
+      const countLabel = document.getElementById('exclusionZoneCountLabel');
+      const zones = cityData.exclusion_zones || [];
+
+      if (badge) badge.innerText = zones.length;
+      if (countLabel) countLabel.innerText = `${zones.length} ${zones.length === 1 ? 'exclusión configurada' : 'exclusiones configuradas'}`;
+      if (!container) return;
+
+      if (zones.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-8 text-stone-400 border border-dashed border-stone-300 rounded-xl space-y-2">
+            <i data-lucide="shield-alert" class="w-8 h-8 mx-auto text-rose-300"></i>
+            <p class="text-xs font-medium text-stone-600">No hay zonas de exclusión trazadas.</p>
+            <p class="text-[10px] text-stone-400 max-w-xs mx-auto">
+              Usa los botones de trazado para delimitar áreas protegidas, cuerpos de agua o islas donde no deseas que se proyecte población ni empleo.
+            </p>
+          </div>
+        `;
+        lucide.createIcons();
+        return;
+      }
+
+      container.innerHTML = zones.map((z, idx) => {
+        const isEnabled = z.enabled !== false;
+        const color = z.color || '#EF4444';
+        const reasonInfo = EXCLUSION_REASONS[z.reason] || { name: z.reason || "Sin Demanda", icon: "shield-alert" };
+
+        return `
+          <div class="p-3 bg-white border ${isEnabled ? 'border-stone-200' : 'border-stone-200 opacity-60 bg-stone-50'} rounded-xl shadow-xs hover:border-rose-300 transition space-y-2">
+            <div class="flex items-start justify-between">
+              <div class="flex items-start space-x-2">
+                <span class="w-3 h-3 rounded-full mt-0.5 shrink-0" style="background-color: ${color}"></span>
+                <div>
+                  <h4 class="text-xs font-bold text-stone-900 leading-tight">${escapeHtml(z.name || z.id)}</h4>
+                  <span class="text-[10px] font-mono text-stone-500">${escapeHtml(z.id)}</span>
+                </div>
+              </div>
+              <div class="flex items-center space-x-1 shrink-0">
+                <button onclick="toggleExclusionZone(${idx})" title="${isEnabled ? 'Desactivar exclusión' : 'Activar exclusión'}" class="p-1 rounded hover:bg-stone-100 ${isEnabled ? 'text-rose-600' : 'text-stone-400'}">
+                  <i data-lucide="${isEnabled ? 'eye' : 'eye-off'}" class="w-3.5 h-3.5"></i>
+                </button>
+                <button onclick="centerExclusionZoneOnMap(${idx})" title="Centrar en mapa" class="p-1 rounded hover:bg-stone-100 text-stone-600">
+                  <i data-lucide="crosshair" class="w-3.5 h-3.5"></i>
+                </button>
+                <button onclick="openExclusionZoneModal(${idx})" title="Editar" class="p-1 rounded hover:bg-stone-100 text-stone-600">
+                  <i data-lucide="edit-2" class="w-3.5 h-3.5"></i>
+                </button>
+                <button onclick="deleteExclusionZone(${idx})" title="Eliminar" class="p-1 rounded hover:bg-stone-100 text-stone-400 hover:text-rose-600">
+                  <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between text-[11px] pt-1 border-t border-stone-100">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-800 border border-rose-200 font-semibold flex items-center space-x-1">
+                <i data-lucide="shield-alert" class="w-3 h-3"></i>
+                <span>${escapeHtml(reasonInfo.name)}</span>
+              </span>
+              <span class="text-[10px] font-mono text-stone-400 uppercase">${z.type === 'bbox' ? 'Cuadro BBOX' : 'Polígono'}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      lucide.createIcons();
+    }
+
+    function renderExclusionZonesOnMap() {
+      if (!exclusionZonesGroup) return;
+      exclusionZonesGroup.clearLayers();
+      const zones = cityData.exclusion_zones || [];
+
+      zones.forEach(z => {
+        if (!z.enabled && z.enabled !== undefined) return;
+        const color = z.color || '#EF4444';
+        let layer = null;
+
+        if (z.coordinates && z.coordinates.length >= 3) {
+          const latlngs = z.coordinates.map(c => [c[1], c[0]]);
+          layer = L.polygon(latlngs, {
+            color: color,
+            weight: 2,
+            fillColor: color,
+            fillOpacity: 0.25,
+            dashArray: '6, 6'
+          });
+        } else if (z.bbox && z.bbox.length === 4) {
+          const bounds = [[z.bbox[1], z.bbox[0]], [z.bbox[3], z.bbox[2]]];
+          layer = L.rectangle(bounds, {
+            color: color,
+            weight: 2,
+            fillColor: color,
+            fillOpacity: 0.25,
+            dashArray: '6, 6'
+          });
+        }
+
+        if (layer) {
+          layer.bindTooltip(`<strong>🚫 ${escapeHtml(z.name || z.id)}</strong><br><span class="text-[10px] text-rose-600 font-semibold">Exclusión: Cero Demanda</span>`, { sticky: true });
+          layer.addTo(exclusionZonesGroup);
+        }
+      });
+    }
+
+    function renderExclusionZonesOnDemandMap() {
+      if (!exclusionZonesDemandGroup) return;
+      exclusionZonesDemandGroup.clearLayers();
+      const zones = cityData.exclusion_zones || [];
+
+      zones.forEach(z => {
+        if (!z.enabled && z.enabled !== undefined) return;
+        const color = z.color || '#EF4444';
+        let layer = null;
+
+        if (z.coordinates && z.coordinates.length >= 3) {
+          const latlngs = z.coordinates.map(c => [c[1], c[0]]);
+          layer = L.polygon(latlngs, {
+            color: color,
+            weight: 2,
+            fillColor: color,
+            fillOpacity: 0.20,
+            dashArray: '6, 6'
+          });
+        } else if (z.bbox && z.bbox.length === 4) {
+          const bounds = [[z.bbox[1], z.bbox[0]], [z.bbox[3], z.bbox[2]]];
+          layer = L.rectangle(bounds, {
+            color: color,
+            weight: 2,
+            fillColor: color,
+            fillOpacity: 0.20,
+            dashArray: '6, 6'
+          });
+        }
+
+        if (layer) {
+          layer.bindTooltip(`<strong>🚫 ${escapeHtml(z.name || z.id)}</strong><br><span class="text-[10px] text-stone-500">Zona de Exclusión</span>`, { sticky: true });
+          layer.addTo(exclusionZonesDemandGroup);
+        }
+      });
+    }
+
+    // -------------------------------------------------------------------------
     // API CITIES Y CARGA DE DATOS
     // -------------------------------------------------------------------------
     async function fetchCitiesList() {
@@ -3862,8 +4577,14 @@
       if (isolatedZonesGroup) isolatedZonesGroup.clearLayers();
       if (isolatedHandlesGroup) isolatedHandlesGroup.clearLayers();
       if (isolatedZonesDemandGroup) isolatedZonesDemandGroup.clearLayers();
+      if (exclusionZonesGroup) exclusionZonesGroup.clearLayers();
+      if (exclusionZonesDemandGroup) exclusionZonesDemandGroup.clearLayers();
       selectedIsolatedZoneIndex = -1;
+      selectedExclusionIndex = -1;
       isDrawingIsolated = false;
+      isDrawingExclusion = false;
+      cancelDrawingExclusionZone();
+      hideDraftBanner();
       const metricPea = document.getElementById('metricTotalPea');
       const metricPts = document.getElementById('metricDemandPoints');
       if (metricPea) metricPea.innerText = "0";
@@ -3879,14 +4600,21 @@
         if (!res.ok) throw new Error("No se pudo cargar la ciudad");
         cityData = await res.json();
 
-        // Verificar si existe un borrador de emergencia en localStorage (por apagón o cierre abrupto)
+        // Verificar si existe un borrador de emergencia en localStorage (sin sobreescribir silenciosamente)
         try {
           const draftStr = localStorage.getItem(`sb_draft_${filePath}`);
           if (draftStr) {
             const draft = JSON.parse(draftStr);
             if (draft && draft.data) {
-              cityData = draft.data;
-              showToast("⚡ Sesión restaurada: Se recuperaron tus cambios no guardados", "info");
+              const draftAgeMinutes = Math.max(0, Math.round((Date.now() - (draft.savedAt || Date.now())) / 60000));
+              const banner = document.getElementById('draftRestoreBanner');
+              const ageText = document.getElementById('draftAgeText');
+              if (banner) {
+                if (ageText) ageText.innerText = draftAgeMinutes < 2 ? "hace un momento" : `hace ${draftAgeMinutes} min`;
+                banner.classList.remove('hidden');
+                window._pendingDraftData = draft.data;
+                window._pendingDraftPath = filePath;
+              }
             }
           }
         } catch (err) {
@@ -3905,11 +4633,38 @@
       }
     }
 
+    function restorePendingDraft() {
+      if (window._pendingDraftData) {
+        cityData = window._pendingDraftData;
+        populateFormFields();
+        hideDraftBanner();
+        showToast("⚡ Borrador local restaurado con éxito", "success");
+      }
+    }
+
+    function discardPendingDraft() {
+      if (window._pendingDraftPath) {
+        try {
+          localStorage.removeItem(`sb_draft_${window._pendingDraftPath}`);
+        } catch (e) {}
+      }
+      hideDraftBanner();
+      showToast("Borrador local descartado. Se mantiene la versión del disco.", "info");
+    }
+
+    function hideDraftBanner() {
+      const banner = document.getElementById('draftRestoreBanner');
+      if (banner) banner.classList.add('hidden');
+      window._pendingDraftData = null;
+      window._pendingDraftPath = null;
+    }
+
     function syncStateFromInputs() {
-      if (!cityData) cityData = { city: {}, macroeconomics: {}, pois: [], places: [], isolated_zones: [] };
+      if (!cityData) cityData = { city: {}, macroeconomics: {}, pois: [], places: [], isolated_zones: [], exclusion_zones: [] };
       if (!cityData.city) cityData.city = {};
       if (!cityData.macroeconomics) cityData.macroeconomics = {};
       if (!cityData.isolated_zones) cityData.isolated_zones = [];
+      if (!cityData.exclusion_zones) cityData.exclusion_zones = [];
 
       const nameEl = document.getElementById('cfg_city_name');
       if (nameEl) cityData.city.name = nameEl.value;
@@ -3931,6 +4686,18 @@
 
       const oceanEl = document.getElementById('cfg_include_ocean');
       if (oceanEl) cityData.city.include_ocean = oceanEl.checked;
+
+      const minResidentsEl = document.getElementById('cfg_min_residents');
+      if (minResidentsEl) cityData.city.min_residents = parseInt(minResidentsEl.value, 10) || 10;
+
+      const minJobsEl = document.getElementById('cfg_min_jobs');
+      if (minJobsEl) cityData.city.min_jobs = parseInt(minJobsEl.value, 10) || 3;
+
+      const bldgFilterEl = document.getElementById('cfg_building_filter_size');
+      if (bldgFilterEl) cityData.city.building_filter_size = parseFloat(bldgFilterEl.value) || 15.0;
+
+      const bldgSimpEl = document.getElementById('cfg_building_simplification');
+      if (bldgSimpEl) cityData.city.building_simplification = parseFloat(bldgSimpEl.value) || 0.2;
 
       const b0 = parseFloat(document.getElementById('cfg_bbox_0').value) || 0;
       const b1 = parseFloat(document.getElementById('cfg_bbox_1').value) || 0;
@@ -3955,8 +4722,23 @@
       const distEl = document.getElementById('cfg_max_distance_km');
       if (distEl) cityData.macroeconomics.max_distance_km = parseFloat(distEl.value);
 
+      const minPopEl = document.getElementById('cfg_min_pop_size');
+      if (minPopEl) cityData.macroeconomics.min_pop_size = parseInt(minPopEl.value, 10) || 25;
+
+      const targetPopEl = document.getElementById('cfg_target_pop_size');
+      if (targetPopEl) cityData.macroeconomics.target_pop_size = parseInt(targetPopEl.value, 10) || 150;
+
       const popEl = document.getElementById('cfg_max_pop_size');
-      if (popEl) cityData.macroeconomics.max_pop_size = parseInt(popEl.value);
+      if (popEl) cityData.macroeconomics.max_pop_size = parseInt(popEl.value, 10) || 200;
+
+      const sampleThreshEl = document.getElementById('cfg_sample_threshold');
+      if (sampleThreshEl) cityData.macroeconomics.sample_threshold = parseInt(sampleThreshEl.value, 10) || 500;
+
+      const furnessIterEl = document.getElementById('cfg_furness_iterations');
+      if (furnessIterEl) cityData.macroeconomics.furness_iterations = parseInt(furnessIterEl.value, 10) || 15;
+
+      const furnessTolEl = document.getElementById('cfg_furness_tol');
+      if (furnessTolEl) cityData.macroeconomics.furness_tol = parseFloat(furnessTolEl.value) || 0.02;
 
       const seedEl = document.getElementById('cfg_seed');
       if (seedEl && seedEl.value.trim() !== '') {
@@ -4017,6 +4799,18 @@
       document.getElementById('cfg_initial_zoom').value = c.initial_zoom || 11.5;
       document.getElementById('cfg_include_ocean').checked = Boolean(c.include_ocean);
 
+      const mrEl = document.getElementById('cfg_min_residents');
+      if (mrEl) mrEl.value = c.min_residents !== undefined ? c.min_residents : 10;
+
+      const mjEl = document.getElementById('cfg_min_jobs');
+      if (mjEl) mjEl.value = c.min_jobs !== undefined ? c.min_jobs : 3;
+
+      const bfsEl = document.getElementById('cfg_building_filter_size');
+      if (bfsEl) bfsEl.value = c.building_filter_size !== undefined ? c.building_filter_size : 15.0;
+
+      const bsimEl = document.getElementById('cfg_building_simplification');
+      if (bsimEl) bsimEl.value = c.building_simplification !== undefined ? c.building_simplification : 0.2;
+
       const rawBbox = c.bbox || [-87.05, 21.0, -86.72, 21.31];
       const normBbox = [
         parseFloat(Math.min(rawBbox[0], rawBbox[2]).toFixed(4)),
@@ -4045,7 +4839,18 @@
       document.getElementById('val_gravity_beta').innerText = beta.toFixed(3);
 
       document.getElementById('cfg_max_distance_km').value = m.max_distance_km || 50.0;
-      document.getElementById('cfg_max_pop_size').value = m.max_pop_size || 150;
+      document.getElementById('cfg_min_pop_size').value = m.min_pop_size || 25;
+      document.getElementById('cfg_target_pop_size').value = m.target_pop_size || 150;
+      document.getElementById('cfg_max_pop_size').value = m.max_pop_size || 200;
+
+      const stEl = document.getElementById('cfg_sample_threshold');
+      if (stEl) stEl.value = m.sample_threshold !== undefined ? m.sample_threshold : 500;
+
+      const fiEl = document.getElementById('cfg_furness_iterations');
+      if (fiEl) fiEl.value = m.furness_iterations !== undefined ? m.furness_iterations : 15;
+
+      const ftEl = document.getElementById('cfg_furness_tol');
+      if (ftEl) ftEl.value = m.furness_tol !== undefined ? m.furness_tol : 0.02;
 
       const seedVal = (c.seed !== undefined && c.seed !== null) ? c.seed : ((m.seed !== undefined && m.seed !== null) ? m.seed : 42);
       const seedEl = document.getElementById('cfg_seed');
@@ -4084,9 +4889,12 @@
       const inputIds = [
         'cfg_city_name', 'cfg_city_code', 'cfg_city_creator', 'cfg_city_desc',
         'cfg_grid_size', 'cfg_initial_zoom', 'cfg_include_ocean',
+        'cfg_min_residents', 'cfg_min_jobs',
+        'cfg_building_filter_size', 'cfg_building_simplification',
         'cfg_bbox_0', 'cfg_bbox_1', 'cfg_bbox_2', 'cfg_bbox_3',
         'cfg_tasa_pea', 'cfg_til_1', 'cfg_gravity_beta',
-        'cfg_max_distance_km', 'cfg_max_pop_size', 'cfg_seed',
+        'cfg_max_distance_km', 'cfg_min_pop_size', 'cfg_target_pop_size', 'cfg_max_pop_size', 'cfg_seed',
+        'cfg_sample_threshold', 'cfg_furness_iterations', 'cfg_furness_tol',
         'cfg_modal_experiment_enabled', 'cfg_modal_experiment_preset',
         'cfg_modal_traffic_speed', 'cfg_modal_motorization_rate'
       ];
@@ -4111,6 +4919,10 @@
         cityData.affluence_zones = [];
       }
       renderAffluenceZones();
+      if (!cityData.exclusion_zones) {
+        cityData.exclusion_zones = [];
+      }
+      renderExclusionZones();
     }
 
     // -------------------------------------------------------------------------
@@ -4131,6 +4943,7 @@
           try {
             localStorage.removeItem(`sb_draft_${currentCityFile}`);
           } catch (e) {}
+          hideDraftBanner();
 
           const statusText = document.getElementById('saveStatusText');
           const statusIcon = document.getElementById('saveStatusIcon');
@@ -4867,7 +5680,7 @@
 
     function switchPoiTab(tabName) {
       if (tabName === 'absorption') tabName = 'editor';
-      const tabs = ['list', 'editor', 'places', 'zones'];
+      const tabs = ['list', 'editor', 'places', 'zones', 'exclusions'];
       tabs.forEach(t => {
         const btn = document.getElementById(`poiTabBtn-${t}`);
         const content = document.getElementById(`poiTab-${t}`);
@@ -4882,6 +5695,7 @@
       if (tabName === 'places') renderPlacesList();
       if (tabName === 'editor') updatePoiPreviewFromForm();
       if (tabName === 'zones') renderAffluenceZones();
+      if (tabName === 'exclusions') renderExclusionZones();
       lucide.createIcons();
     }
 
@@ -6198,7 +7012,7 @@
           return;
         }
 
-        if (isBoxSelectActive) return;
+        if (isBoxSelectActive || isDrawingAffluence || isDrawingExclusion) return;
 
         isPickingLocation = false;
         mapPoi.getContainer().style.cursor = '';

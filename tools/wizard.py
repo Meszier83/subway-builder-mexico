@@ -161,6 +161,34 @@ def load_city_data(rel_or_abs_path: str) -> Dict[str, Any]:
             data["isolated_zones"] = []
     if not isinstance(data.get("affluence_zones"), list):
         data["affluence_zones"] = []
+    if not isinstance(data.get("exclusion_zones"), list):
+        data["exclusion_zones"] = []
+
+    # Valores por defecto para ciudad y macroeconomía si faltan
+    city = data["city"]
+    if "min_residents" not in city:
+        city["min_residents"] = 10
+    if "min_jobs" not in city:
+        city["min_jobs"] = 3
+    if "building_filter_size" not in city:
+        city["building_filter_size"] = 15.0
+    if "building_simplification" not in city:
+        city["building_simplification"] = 0.2
+
+    if "min_pop_size" not in macro:
+        macro["min_pop_size"] = 25
+    if "target_pop_size" not in macro:
+        macro["target_pop_size"] = 150
+    if "max_pop_size" not in macro:
+        macro["max_pop_size"] = 200
+    if "sample_threshold" not in macro:
+        macro["sample_threshold"] = 500
+    if "default_growth_factor" not in macro:
+        macro["default_growth_factor"] = 1.05
+    if "furness_iterations" not in macro:
+        macro["furness_iterations"] = 15
+    if "furness_tol" not in macro:
+        macro["furness_tol"] = 0.02
 
     return data
 
@@ -192,6 +220,7 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
     places_cfg = data.get("places") or []
     isolated_zones_cfg = data.get("isolated_zones") or city_cfg.get("isolated_zones") or []
     affluence_zones_cfg = data.get("affluence_zones") or []
+    exclusion_zones_cfg = data.get("exclusion_zones") or []
     data_dir_cfg = str(data.get("data_dir", "")).strip()
     data_exclusions_cfg = data.get("data_exclusions", [])
 
@@ -247,8 +276,9 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         f'  default_growth_factor: {float(macro_cfg.get("default_growth_factor", 1.05))}',
         f'  gravity_beta: {float(macro_cfg.get("gravity_beta", 0.12))}',
         f'  max_distance_km: {float(macro_cfg.get("max_distance_km", 50.0))}',
+        f'  min_pop_size: {int(macro_cfg.get("min_pop_size", 25))}',
+        f'  target_pop_size: {int(macro_cfg.get("target_pop_size", 150))}',
         f'  max_pop_size: {int(macro_cfg.get("max_pop_size", 200))}',
-        f'  target_pop_size: {int(macro_cfg.get("target_pop_size", 180))}',
         f'  furness_iterations: {int(macro_cfg.get("furness_iterations", 15))}',
         f'  furness_tol: {float(macro_cfg.get("furness_tol", 0.02))}',
         ""
@@ -331,6 +361,46 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
                         lines.append(f'      - [{float(c[0]):.5f}, {float(c[1]):.5f}]')
 
             raw_b = az.get("bbox")
+            if isinstance(raw_b, (list, tuple)) and len(raw_b) == 4:
+                try:
+                    norm_b = [
+                        round(min(float(raw_b[0]), float(raw_b[2])), 4),
+                        round(min(float(raw_b[1]), float(raw_b[3])), 4),
+                        round(max(float(raw_b[0]), float(raw_b[2])), 4),
+                        round(max(float(raw_b[1]), float(raw_b[3])), 4)
+                    ]
+                    lines.append(f'    bbox: {norm_b}')
+                except Exception:
+                    pass
+            lines.append("")
+
+    # Bloque de Zonas de Exclusión (Exclusion Zones - Sin Demanda ni Simulación)
+    if exclusion_zones_cfg and isinstance(exclusion_zones_cfg, list):
+        lines.append("# Zonas de Exclusión (Exclusion Zones - Sin Demanda ni Simulación)")
+        lines.append("exclusion_zones:")
+        for ez in exclusion_zones_cfg:
+            z_id = str(ez.get("id", "excl_1")).strip()
+            z_name = str(ez.get("name", z_id)).strip()
+            z_type = str(ez.get("type", "polygon")).strip()
+            z_reason = str(ez.get("reason", "inhabitable")).strip()
+            z_enabled = bool(ez.get("enabled", True))
+            z_color = str(ez.get("color", "#EF4444")).strip()
+
+            lines.append(f'  - id: "{z_id}"')
+            lines.append(f'    name: "{z_name}"')
+            lines.append(f'    type: "{z_type}"')
+            lines.append(f'    reason: "{z_reason}"')
+            lines.append(f'    color: "{z_color}"')
+            lines.append(f'    enabled: {"true" if z_enabled else "false"}')
+
+            coords = ez.get("coordinates")
+            if isinstance(coords, list) and len(coords) >= 3:
+                lines.append("    coordinates:")
+                for c in coords:
+                    if isinstance(c, (list, tuple)) and len(c) >= 2:
+                        lines.append(f'      - [{float(c[0]):.5f}, {float(c[1]):.5f}]')
+
+            raw_b = ez.get("bbox")
             if isinstance(raw_b, (list, tuple)) and len(raw_b) == 4:
                 try:
                     norm_b = [
@@ -439,13 +509,16 @@ def create_new_project(name: str, code: str, creator: str = "Creador", data_dir:
             "default_growth_factor": 1.05,
             "gravity_beta": 0.12,
             "max_distance_km": 50.0,
-            "max_pop_size": 150,
-            "target_pop_size": 35,
+            "min_pop_size": 25,
+            "target_pop_size": 150,
+            "max_pop_size": 200,
             "furness_iterations": 15,
             "furness_tol": 0.02,
             "growth_factors": {}
         },
         "isolated_zones": [],
+        "affluence_zones": [],
+        "exclusion_zones": [],
         "pois": [],
         "places": []
     }
@@ -1071,7 +1144,9 @@ def detect_macro_parameters(city_file: str) -> Dict[str, Any]:
             "til_1_state": round(float(til_1), 4),
             "gravity_beta": 0.120,
             "max_distance_km": 50.0,
-            "max_pop_size": 150,
+            "min_pop_size": 25,
+            "target_pop_size": 150,
+            "max_pop_size": 200,
             "seed": 42
         }
     }
@@ -1182,8 +1257,30 @@ def validate_city_configuration(city_file: str) -> Dict[str, Any]:
         except Exception:
             errors.append("La semilla aleatoria ('seed') debe ser un número entero.")
 
+    # Validación de Cohortes Demográficas (min_pop_size, target_pop_size, max_pop_size)
+    min_pop = macro_cfg.get("min_pop_size", 25)
+    target_pop = macro_cfg.get("target_pop_size", 150)
+    max_pop = macro_cfg.get("max_pop_size", 200)
+    try:
+        min_p = int(min_pop)
+        target_p = int(target_pop)
+        max_p = int(max_pop)
+        if min_p < 1:
+            errors.append(f"min_pop_size ({min_p}) debe ser un entero >= 1.")
+        if max_p < min_p:
+            errors.append(f"max_pop_size ({max_p}) no puede ser menor que min_pop_size ({min_p}).")
+        if target_p < min_p or target_p > max_p:
+            warnings.append(f"target_pop_size ({target_p}) debería estar entre min_pop_size ({min_p}) y max_pop_size ({max_p}).")
+        if min_p < 10:
+            warnings.append(f"min_pop_size bajo ({min_p}): cohortes muy pequeñas pueden generar miles de pops y degradar el rendimiento.")
+        if max_p > 500:
+            warnings.append(f"max_pop_size alto ({max_p}): cohortes masivas pueden provocar picos repentinos en estaciones individuales.")
+        summary["cohort_bounds"] = {"min": min_p, "target": target_p, "max": max_p}
+    except Exception:
+        errors.append("min_pop_size, target_pop_size y max_pop_size deben ser enteros válidos.")
+
     # 3. Validación de Zonas Aisladas (isolated_zones)
-    isolated_zones = cdata.get("isolated_zones", city_cfg.get("isolated_zones", []))
+    isolated_zones = cdata.get("isolated_zones") or city_cfg.get("isolated_zones") or []
     summary["isolated_zones_count"] = len(isolated_zones)
     for idx, z in enumerate(isolated_zones):
         z_id = z.get("id", "")
@@ -1200,8 +1297,37 @@ def validate_city_configuration(city_file: str) -> Dict[str, Any]:
             except Exception:
                 errors.append(f"Coordenadas de BBOX de zona aislada '{z_id}' no numéricas.")
 
-    # 4. Auditoría de POIs (Estándares de Nomenclatura)
-    pois = cdata.get("pois", [])
+    # 4. Validación de Zonas de Exclusión (exclusion_zones)
+    exclusion_zones = cdata.get("exclusion_zones") or city_cfg.get("exclusion_zones") or []
+    summary["exclusion_zones_count"] = len(exclusion_zones)
+    for idx, ez in enumerate(exclusion_zones):
+        ez_id = ez.get("id", f"excl_{idx+1}")
+        ez_bbox = ez.get("bbox")
+        ez_poly = ez.get("polygon")
+        if not ez_bbox and not ez_poly:
+            errors.append(f"Zona de exclusión '{ez_id}' debe definir un 'bbox' o un 'polygon'.")
+        if ez_bbox:
+            if not isinstance(ez_bbox, (list, tuple)) or len(ez_bbox) != 4:
+                errors.append(f"Zona de exclusión '{ez_id}': 'bbox' debe tener 4 valores [min_lon, min_lat, max_lon, max_lat].")
+            else:
+                try:
+                    b = [float(x) for x in ez_bbox]
+                    if b[0] >= b[2] or b[1] >= b[3]:
+                        errors.append(f"Zona de exclusión '{ez_id}': BBOX inválido (min >= max).")
+                except Exception:
+                    errors.append(f"Zona de exclusión '{ez_id}': Coordenadas de BBOX no numéricas.")
+        if ez_poly:
+            if not isinstance(ez_poly, (list, tuple)) or len(ez_poly) < 3:
+                errors.append(f"Zona de exclusión '{ez_id}': 'polygon' debe tener al menos 3 vértices [[lon, lat], ...].")
+            else:
+                try:
+                    for pt in ez_poly:
+                        _ = float(pt[0]), float(pt[1])
+                except Exception:
+                    errors.append(f"Zona de exclusión '{ez_id}': Vértices de polígono deben contener coordenadas [lon, lat] numéricas.")
+
+    # 5. Auditoría de POIs (Estándares de Nomenclatura)
+    pois = cdata.get("pois") or []
     summary["pois_count"] = len(pois)
     for idx, poi in enumerate(pois):
         p_id = str(poi.get("id", "")).strip()
@@ -1234,7 +1360,7 @@ def validate_city_configuration(city_file: str) -> Dict[str, Any]:
         if p_jobs is None or int(p_jobs) <= 0:
             warnings.append(f"POI '{p_id}': Número de empleos ('jobs') nulo o menor a 1.")
 
-    # 5. Estado de Archivos de Datos
+    # 6. Estado de Archivos de Datos
     status = inspect_data_files(city_name=name, city_code=code, city_file=city_file)
     summary["data_files"] = {
         "denue_count": len(status.get("denue", {}).get("files", [])),
