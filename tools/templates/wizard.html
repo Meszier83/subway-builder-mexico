@@ -2211,6 +2211,7 @@
     // Estado de la aplicación (Sin proyecto por defecto al inicio a menos que venga en la URL)
     let currentCityFile = null;
     let cityData = { city: {}, macroeconomics: {}, pois: [], places: [] };
+    let autoSaveTimer = null;
     let currentStep = 1;
     let mapBbox = null, mapPoi = null, mapDemand = null;
     let bboxRectangle = null;
@@ -2243,6 +2244,40 @@
     let currentExclusionDraft = null;
     window._pendingDraftData = null;
     window._pendingDraftPath = null;
+
+    async function flushPendingAutoSave() {
+      if (autoSaveTimer) {
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
+        if (currentCityFile) {
+          await saveCurrentCity(true);
+        }
+      }
+    }
+
+    // Guardado de emergencia al cerrar la pestaña o recargar (F5)
+    window.addEventListener('beforeunload', () => {
+      if (autoSaveTimer) {
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
+        if (currentCityFile) {
+          syncStateFromInputs();
+          try {
+            const payload = JSON.stringify({ file: currentCityFile, ...cityData });
+            if (navigator.sendBeacon) {
+              navigator.sendBeacon('/api/city/save', new Blob([payload], { type: 'application/json' }));
+            } else {
+              fetch('/api/city/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: payload,
+                keepalive: true
+              });
+            }
+          } catch (err) {}
+        }
+      }
+    });
 
     // Inicialización al cargar la ventana
     window.addEventListener('DOMContentLoaded', async () => {
@@ -2363,6 +2398,7 @@
     }
 
     async function selectAndLoadProject(filePath) {
+      await flushPendingAutoSave();
       currentCityFile = filePath;
       window.history.replaceState({}, '', `?city=${encodeURIComponent(filePath)}`);
       await fetchCitiesList();
@@ -2563,6 +2599,7 @@
     // NAVEGACIÓN ENTRE PASOS
     // -------------------------------------------------------------------------
     function goToStep(step) {
+      syncStateFromInputs();
       currentStep = step;
       document.querySelectorAll('.step-view').forEach((el, idx) => {
         el.classList.toggle('hidden', idx + 1 !== step);
@@ -4540,11 +4577,10 @@
     }
 
     async function onCitySelected(filePath) {
+      await flushPendingAutoSave();
       currentCityFile = filePath;
       await loadCityData(filePath);
     }
-
-    let autoSaveTimer = null;
 
     function resetProjectSession() {
       densityPoints = [];
@@ -4591,6 +4627,14 @@
       if (metricPts) metricPts.innerText = "0";
 
       activeEditingPoiIndex = -1;
+      currentPoiFilter = 'ALL';
+      const searchInput = document.getElementById('poiSearchInput');
+      if (searchInput) searchInput.value = '';
+      document.querySelectorAll('.poi-filter-chip').forEach(el => {
+        el.className = "poi-filter-chip px-2 py-0.5 rounded bg-metro-panel text-metro-muted hover:text-metro-text transition";
+      });
+      const activeFilterBtn = document.getElementById('poiFilter-ALL');
+      if (activeFilterBtn) activeFilterBtn.className = "poi-filter-chip px-2 py-0.5 rounded bg-metro-orange text-white transition";
     }
 
     async function loadCityData(filePath) {
@@ -4657,6 +4701,60 @@
       if (banner) banner.classList.add('hidden');
       window._pendingDraftData = null;
       window._pendingDraftPath = null;
+    }
+
+    function syncActivePoiFromEditor(allowNew = false) {
+      if (!cityData) cityData = { city: {}, macroeconomics: {}, pois: [], places: [], isolated_zones: [], exclusion_zones: [] };
+      if (!cityData.pois) cityData.pois = [];
+
+      const baseInput = document.getElementById('editPoiBaseName');
+      if (!baseInput) return false;
+      const baseName = baseInput.value.trim();
+      if (!baseName) return false;
+
+      const pCat = document.getElementById('editPoiCategory')?.value || 'CUSTOM';
+      const meta = (typeof TAXONOMY_META !== 'undefined' && TAXONOMY_META[pCat]) ? TAXONOMY_META[pCat] : { prefix: '' };
+      const pId = meta.prefix ? `${meta.prefix}${baseName}` : baseName;
+      const esName = (document.getElementById('editPoiNameEs')?.value || '').trim();
+      const enName = (document.getElementById('editPoiNameEn')?.value || '').trim();
+      const pMode = document.getElementById('editPoiMode')?.value || 'MAX';
+      const pJobs = parseInt(document.getElementById('editPoiJobs')?.value, 10) || 5000;
+      const pRad = parseInt(document.getElementById('editPoiRadiusNum')?.value || document.getElementById('editPoiRadius')?.value, 10) || 750;
+      const lon = parseFloat(document.getElementById('editPoiLon')?.value);
+      const lat = parseFloat(document.getElementById('editPoiLat')?.value);
+
+      if (isNaN(lon) || isNaN(lat)) return false;
+
+      let nameVal = esName || baseName;
+      if (enName) {
+        nameVal = { es: esName || baseName, en: enName };
+      }
+
+      const poiObj = {
+        id: pId,
+        name: nameVal,
+        type: pCat.toLowerCase(),
+        mode: pMode,
+        jobs: pJobs,
+        radius_m: pRad,
+        loc: [lon, lat]
+      };
+
+      if (activeEditingPoiIndex >= 0 && activeEditingPoiIndex < cityData.pois.length) {
+        const isDup = cityData.pois.some((p, i) => i !== activeEditingPoiIndex && p.id === pId);
+        if (!isDup) {
+          cityData.pois[activeEditingPoiIndex] = poiObj;
+          return true;
+        }
+      } else if (allowNew && activeEditingPoiIndex === -1) {
+        const isDup = cityData.pois.some(p => p.id === pId);
+        if (!isDup) {
+          cityData.pois.push(poiObj);
+          activeEditingPoiIndex = cityData.pois.length - 1;
+          return true;
+        }
+      }
+      return false;
     }
 
     function syncStateFromInputs() {
@@ -4760,6 +4858,12 @@
 
       const modalMotorEl = document.getElementById('cfg_modal_motorization_rate');
       if (modalMotorEl) cityData.macroeconomics.modal_experiment.motorization_rate = parseFloat(modalMotorEl.value);
+
+      // Sincronizar POI activo si el editor de POIs está abierto o hay un POI en edición
+      const isEditorTabOpen = document.getElementById('poiTab-editor') && !document.getElementById('poiTab-editor').classList.contains('hidden');
+      if (isEditorTabOpen || activeEditingPoiIndex >= 0) {
+        syncActivePoiFromEditor(true);
+      }
     }
 
     function triggerAutoSave() {
@@ -4929,6 +5033,11 @@
     // GUARDADO GLOBAL EN DISCO
     // -------------------------------------------------------------------------
     async function saveCurrentCity(isSilent = false) {
+      if (!currentCityFile) return;
+      if (autoSaveTimer) {
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
+      }
       syncStateFromInputs();
 
       try {
@@ -4944,6 +5053,9 @@
             localStorage.removeItem(`sb_draft_${currentCityFile}`);
           } catch (e) {}
           hideDraftBanner();
+
+          renderPoiList();
+          renderPoiMarkersOnMap();
 
           const statusText = document.getElementById('saveStatusText');
           const statusIcon = document.getElementById('saveStatusIcon');
@@ -5610,7 +5722,11 @@
       renderPoiMarkersOnMap();
       openPoiEditor(newIdx);
       // No llamar a focusPoiOnMap para evitar saltos o sacudidas de cámara
-      triggerAutoSave();
+      if (autoSaveTimer) {
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
+      }
+      saveCurrentCity(true);
       showToast(`📋 POI duplicado como '${cloned.id}'`, "success");
     }
 
@@ -5666,7 +5782,11 @@
       renderPoiMarkersOnMap();
       openPoiEditor(newIdx);
       // Cero sacudidas de cámara: el POI ya aparece en tu campo visual
-      triggerAutoSave();
+      if (autoSaveTimer) {
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
+      }
+      saveCurrentCity(true);
       showToast(`📋 POI pegado como '${cloned.id}'`, "success");
     }
 
@@ -5861,8 +5981,8 @@
       activeEditingPoiIndex = -1;
       document.getElementById('editorTitleLabel').innerText = "Nuevo POI Especial";
       document.getElementById('editPoiCategory').value = "AIR";
-      document.getElementById('editPoiBaseName').value = "Cancún";
-      document.getElementById('editPoiId').value = "AIR_Cancún";
+      document.getElementById('editPoiBaseName').value = "";
+      document.getElementById('editPoiId').value = "";
       document.getElementById('editPoiNameEs').value = "";
       document.getElementById('editPoiNameEn').value = "";
       document.getElementById('editPoiJobs').value = 25000;
@@ -5962,7 +6082,8 @@
         if (baseInput) baseInput.value = baseVal;
       }
 
-      const fullId = meta.prefix ? `${meta.prefix}${baseVal.trim()}` : baseVal.trim();
+      const cleanBase = baseVal.trim();
+      const fullId = cleanBase ? (meta.prefix ? `${meta.prefix}${cleanBase}` : cleanBase) : '';
       const idInput = document.getElementById('editPoiId');
       if (idInput) idInput.value = fullId;
 
@@ -5972,7 +6093,7 @@
       // Banner de nombre en el juego
       const gameNameEl = document.getElementById('poiGameDisplayName');
       const redundancyWarn = document.getElementById('poiRedundancyWarning');
-      const cleanDisplay = baseVal.trim() || 'Sin nombre';
+      const cleanDisplay = cleanBase || 'Sin nombre';
 
       if (cat === 'AIR') {
         const hasAirportWord = /aeropuerto|airport/i.test(baseVal);
@@ -5994,7 +6115,7 @@
 
       // Validación de unicidad de ID en tiempo real
       const dupWarningEl = document.getElementById('poiIdDuplicateWarning');
-      const isDuplicate = (cityData?.pois || []).some((p, i) => i !== activeEditingPoiIndex && p.id === fullId);
+      const isDuplicate = fullId ? (cityData?.pois || []).some((p, i) => i !== activeEditingPoiIndex && p.id === fullId) : false;
       if (dupWarningEl) {
         dupWarningEl.classList.toggle('hidden', !isDuplicate);
       }
@@ -6193,6 +6314,14 @@
           });
         }
       }
+
+      // Si estamos editando un POI existente, sincronizarlo en memoria y auto-guardar
+      if (activeEditingPoiIndex >= 0 && cityData && cityData.pois && cityData.pois[activeEditingPoiIndex]) {
+        const synced = syncActivePoiFromEditor(false);
+        if (synced) {
+          triggerAutoSave();
+        }
+      }
     }
 
     function getDistanceMeters(lon1, lat1, lon2, lat2) {
@@ -6267,7 +6396,12 @@
       if (editorPreviewLayer) editorPreviewLayer.clearLayers();
       renderPoiList();
       renderPoiMarkersOnMap();
-      triggerAutoSave();
+
+      if (autoSaveTimer) {
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
+      }
+      saveCurrentCity(true);
       showToast(`POI '${pId}' guardado correctamente`, "success");
       switchPoiTab('list');
     }
@@ -6303,7 +6437,12 @@
       renderPoiMarkersOnMap();
       openPoiEditor(insertIdx);
       focusPoiOnMap(insertIdx);
-      triggerAutoSave();
+
+      if (autoSaveTimer) {
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
+      }
+      saveCurrentCity(true);
       showToast(`↺ POI '${item.poi.id}' restaurado`, "success");
     }
 
@@ -6323,7 +6462,12 @@
       if (editorPreviewLayer) editorPreviewLayer.clearLayers();
       renderPoiList();
       renderPoiMarkersOnMap();
-      triggerAutoSave();
+
+      if (autoSaveTimer) {
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = null;
+      }
+      saveCurrentCity(true);
       switchPoiTab('list');
 
       if (activeUndoToast) {
@@ -7301,12 +7445,15 @@
       const suggestedJobs = Math.max(3000, currentAreaStats.jobs);
 
       openPoiEditorForNew();
-      document.getElementById('editPoiId').value = "POI_Cluster_Area";
+      document.getElementById('editPoiCategory').value = "CUSTOM";
+      document.getElementById('editPoiBaseName').value = "Cluster Comercial";
+      document.getElementById('editPoiId').value = "Cluster Comercial";
       document.getElementById('editPoiNameEs').value = "Cluster Comercial";
       document.getElementById('editPoiLon').value = center.lng.toFixed(5);
       document.getElementById('editPoiLat').value = center.lat.toFixed(5);
       setPoiRadiusValue(suggestedRadius);
       document.getElementById('editPoiJobs').value = suggestedJobs;
+      onPoiTaxonomyChanged('CUSTOM');
 
       clearAreaSelection();
       updatePoiPreviewFromForm();

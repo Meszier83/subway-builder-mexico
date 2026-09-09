@@ -127,6 +127,55 @@ class TestWizardPersistence(unittest.TestCase):
             self.assertIn("data_exclusions", reloaded)
             self.assertIn("archivo_desvinculado.csv", reloaded["data_exclusions"])
 
+            # POIs
+            self.assertIn("pois", reloaded)
+            self.assertEqual(len(reloaded["pois"]), 1)
+            self.assertEqual(reloaded["pois"][0]["id"], "AIR_Cancun")
+            self.assertEqual(reloaded["pois"][0]["jobs"], 30000)
+            self.assertEqual(reloaded["pois"][0]["radius_m"], 2500)
+            self.assertEqual(reloaded["pois"][0]["mode"], "MAX")
+            self.assertEqual(reloaded["pois"][0]["loc"], [-86.87, 21.03])
+
+        finally:
+            if os.path.exists(tmp_yaml):
+                os.remove(tmp_yaml)
+
+    def test_poi_persistence_and_modification_roundtrip(self):
+        """Verifica que modificaciones, adiciones y eliminaciones de POIs persistan fielmente en YAML."""
+        tmp_yaml = os.path.join(os.path.dirname(__file__), "tmp_poi_persist_test.yaml")
+        try:
+            initial_data = {
+                "city": {"code": "POI", "name": "POI City", "bbox": [-87.0, 21.0, -86.8, 21.2]},
+                "pois": [
+                    {"id": "AIR_City", "name": "Aeropuerto", "type": "air", "loc": [-86.9, 21.1], "jobs": 20000, "radius_m": 2500, "mode": "MAX"},
+                    {"id": "UNI_Campus", "name": "Universidad", "type": "uni", "loc": [-86.85, 21.15], "jobs": 8000, "radius_m": 800, "mode": "MAX"}
+                ]
+            }
+            save_full_city_data(tmp_yaml, initial_data)
+            loaded = load_city_data(tmp_yaml)
+            self.assertEqual(len(loaded.get("pois", [])), 2)
+
+            # Modificar POI 0 y agregar nuevo POI 2
+            loaded["pois"][0]["jobs"] = 35000
+            loaded["pois"][0]["radius_m"] = 3000
+            loaded["pois"].append({
+                "id": "SPO_Arena",
+                "name": "Arena Central",
+                "type": "spo",
+                "loc": [-86.88, 21.12],
+                "jobs": 12000,
+                "radius_m": 1000,
+                "mode": "BOOST"
+            })
+            save_full_city_data(tmp_yaml, loaded)
+
+            reloaded = load_city_data(tmp_yaml)
+            pois = reloaded.get("pois", [])
+            self.assertEqual(len(pois), 3)
+            self.assertEqual(pois[0]["jobs"], 35000)
+            self.assertEqual(pois[0]["radius_m"], 3000)
+            self.assertEqual(pois[2]["id"], "SPO_Arena")
+            self.assertEqual(pois[2]["mode"], "BOOST")
         finally:
             if os.path.exists(tmp_yaml):
                 os.remove(tmp_yaml)
