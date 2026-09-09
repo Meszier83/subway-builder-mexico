@@ -126,6 +126,15 @@ def run_cartography(
     build_output_dir = os.path.join(native_build_dir, city_code)
     os.makedirs(build_output_dir, exist_ok=True)
 
+    # Sincronización previa de caché de batimetría si existe en work_dir
+    if include_ocean:
+        ocean_cache_main = os.path.join(work_dir, "ocean_depth_index.json.gz")
+        ocean_cache_contours = os.path.join(work_dir, "ocean_depth_index_contours.json.gz")
+        if os.path.exists(ocean_cache_main) and os.path.exists(ocean_cache_contours):
+            print("-> [Caché] Restaurando batimetría previamente calculada para reutilización inmediata (0s)...")
+            shutil.copyfile(ocean_cache_main, os.path.join(build_output_dir, "ocean_depth_index.json.gz"))
+            shutil.copyfile(ocean_cache_contours, os.path.join(build_output_dir, "ocean_depth_index_contours.json.gz"))
+
     cores, ram_mb = get_optimal_hardware_resources()
     print(f"-> Inicializando MapGen (Cores: {cores}, RAM asignada: {ram_mb} MB)...")
 
@@ -160,7 +169,8 @@ def run_cartography(
         "buildings_index.bin.gz",
         "roads.geojson",
         "runways_taxiways.geojson",
-        "ocean_depth_index.json.gz"
+        "ocean_depth_index.json.gz",
+        "ocean_depth_index_contours.json.gz"
     ]
 
     copied_count = 0
@@ -174,6 +184,8 @@ def run_cartography(
             print(f"  ✓ Archivo cartográfico transferido: {filename} ({size_kb:,.1f} KB)")
             copied_count += 1
         else:
+            if filename in ("ocean_depth_index.json.gz", "ocean_depth_index_contours.json.gz") and not include_ocean:
+                continue
             print(f"  ⚠ Advertencia: no se encontró {filename} en {native_build_dir}")
 
     print(f"-> {copied_count}/{len(expected_files)} artefactos cartográficos generados exitosamente.")

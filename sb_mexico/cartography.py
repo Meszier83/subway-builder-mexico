@@ -280,7 +280,7 @@ def build_city_map_wsl(
 
     work_dir = os.path.abspath(output_dir)
     generated_files = {}
-    for filename in [f"{city_code}.pmtiles", "roads.geojson", "buildings_index.bin.gz", "runways_taxiways.geojson", "ocean_depth_index.json.gz"]:
+    for filename in [f"{city_code}.pmtiles", "roads.geojson", "buildings_index.bin.gz", "runways_taxiways.geojson", "ocean_depth_index.json.gz", "ocean_depth_index_contours.json.gz"]:
         cand = os.path.join(work_dir, filename)
         if os.path.exists(cand):
             generated_files[filename] = cand
@@ -386,6 +386,15 @@ def build_city_map(
     build_output_dir = os.path.join(native_build_dir, city_code)
     os.makedirs(build_output_dir, exist_ok=True)
 
+    # Sincronización previa de caché de batimetría si existe en work_dir
+    if include_ocean:
+        ocean_cache_main = os.path.join(work_dir, "ocean_depth_index.json.gz")
+        ocean_cache_contours = os.path.join(work_dir, "ocean_depth_index_contours.json.gz")
+        if os.path.exists(ocean_cache_main) and os.path.exists(ocean_cache_contours):
+            print("-> [Caché] Restaurando batimetría previamente calculada para reutilización inmediata (0s)...")
+            shutil.copyfile(ocean_cache_main, os.path.join(build_output_dir, "ocean_depth_index.json.gz"))
+            shutil.copyfile(ocean_cache_contours, os.path.join(build_output_dir, "ocean_depth_index_contours.json.gz"))
+
     print(f"-> Inicializando MapGen para {city_code} (Cores: {cores}, RAM: {ram_mb} MB)...")
 
     prev_cwd = os.getcwd()
@@ -419,7 +428,8 @@ def build_city_map(
         "buildings_index.bin.gz",
         "roads.geojson",
         "runways_taxiways.geojson",
-        "ocean_depth_index.json.gz"
+        "ocean_depth_index.json.gz",
+        "ocean_depth_index_contours.json.gz"
     ]
 
     for filename in expected_files:
@@ -431,7 +441,7 @@ def build_city_map(
             generated_files[filename] = dst
             print(f"  [OK] Archivo cartográfico copiado: {filename}")
         else:
-            if filename == "ocean_depth_index.json.gz" and not include_ocean:
+            if filename in ("ocean_depth_index.json.gz", "ocean_depth_index_contours.json.gz") and not include_ocean:
                 continue
             if filename == "runways_taxiways.geojson":
                 continue
