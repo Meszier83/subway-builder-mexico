@@ -115,6 +115,66 @@ def load_city_config(config_path: str) -> Dict[str, Any]:
     return config
 
 
+def validate_cohort_spatial_integrity(
+    pops: List[Dict[str, Any]],
+    demand_points: List[Dict[str, Any]]
+) -> None:
+    """
+    Auditoría estricta pre-exportación para garantizar que ninguna cohorte (pop)
+    contenga distancias físicamente imposibles, micro-atajos anómalos o tiempos no válidos.
+    Lanza ValueError y aborta el pipeline si se detecta cualquier anomalía.
+    """
+    import math
+    dp_locs = {p["id"]: p["location"] for p in demand_points if "id" in p and "location" in p}
+    anomalies = []
+
+    for p in pops:
+        pid = p.get("id", "unknown")
+        r_id = p.get("residenceId")
+        j_id = p.get("jobId")
+        d_road = p.get("drivingDistance", 0)
+        d_sec = p.get("drivingSeconds", 0)
+
+        if d_sec <= 0:
+            anomalies.append(f"{pid}: drivingSeconds={d_sec} <= 0")
+            continue
+
+        o_loc = dp_locs.get(r_id)
+        d_loc = dp_locs.get(j_id)
+        if not o_loc or not d_loc:
+            continue
+
+        if r_id == j_id:
+            continue
+
+        cos_lat = math.cos(math.radians((o_loc[1] + d_loc[1]) / 2.0))
+        dx_m = (d_loc[0] - o_loc[0]) * 111_320.0 * cos_lat
+        dy_m = (d_loc[1] - o_loc[1]) * 110_574.0
+        euclid_m = math.hypot(dx_m, dy_m)
+
+        # Regla 1: Distancia euclidiana > 500m pero drivingDistance < 70% euclidiana
+        if euclid_m > 500.0 and d_road < (0.70 * euclid_m):
+            anomalies.append(
+                f"{pid}: {r_id}->{j_id} Euclid={euclid_m:.0f}m but drivingDistance={d_road}m (< 0.70x)"
+            )
+
+        # Regla 2: Puntos distintos (> 250m euclidiano) pero drivingDistance < 150m
+        elif euclid_m > 250.0 and d_road < 150:
+            anomalies.append(
+                f"{pid}: {r_id}->{j_id} Euclid={euclid_m:.0f}m but drivingDistance={d_road}m (< 150m)"
+            )
+
+    if anomalies:
+        err_msg = (
+            f"Fallo de integridad espacial: Se detectaron {len(anomalies)} cohortes con distancias "
+            f"físicamente imposibles antes de exportar demand_data.json:\n"
+            + "\n".join(f"  - {a}" for a in anomalies[:10])
+        )
+        if len(anomalies) > 10:
+            err_msg += f"\n  ... y {len(anomalies) - 10} más."
+        raise ValueError(err_msg)
+
+
 def execute_pipeline(
     config_path: str,
     skip_map: bool = False,
@@ -592,7 +652,7 @@ def execute_pipeline(
         p_motor = modal_exp_cfg.get("motorization_rate", 0.40)
         console.print(f"\n[bold magenta]• Laboratorio Experimental de Competitividad Modal Activo:[/bold magenta]")
         console.print(
-            f"   [magenta]↳ Preset: [bold]{preset_name}[/bold] | "
+            f"   [magenta]-> Preset: [bold]{preset_name}[/bold] | "
             f"Velocidad Tráfico: [bold]{v_speed} km/h[/bold] | "
             f"Tasa Motorización: [bold]{int(round(float(p_motor)*100))}%[/bold][/magenta]"
         )
@@ -601,6 +661,9 @@ def execute_pipeline(
     # 6. SANITIZACIÓN NATIVA CON DEPOT Y EXPORTACIÓN
     # =========================================================================
     console.print(f"\n[bold yellow]6. Sanitización y Generación de Archivos[/bold yellow]")
+
+    # Auditoría estricta de integridad física y espacial antes de tocar disco
+    validate_cohort_spatial_integrity(pops, demand_points)
 
     # Cálculo del Baricentro Urbano Ponderado por Actividad Humana (Cámara)
     total_mass = sum(p["residents"] + 1.5 * p["jobs"] for p in demand_points)

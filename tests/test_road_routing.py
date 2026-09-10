@@ -384,5 +384,148 @@ class TestCanonicalOSRMIntegration(unittest.TestCase):
         self.assertEqual(synced_pops[0]["drivingPath"], coords)
 
 
+class TestPermanentRoutingSafeguards(unittest.TestCase):
+    """
+    Pruebas unitarias para las salvaguardas permanentes de ruteo:
+    1. Huella criptográfica (fingerprint) e invalidación de caché ante cambios de BBOX/PBF.
+    2. Cortafuegos de snapping extremo en OSRM (rechazo de waypoints distantes).
+    3. Cortafuegos de invariantes físicas (rechazo de atajos físicamente imposibles).
+    4. Auditoría pre-exportación en el pipeline (falla ante distancias anómalas).
+    """
+
+    def test_fingerprint_invalidation_on_bbox_change(self):
+        from sb_mexico.osrm import compute_osrm_fingerprint
+
+        bbox_cancun_only = [-86.95, 21.05, -86.75, 21.25]
+        bbox_riviera_maya = [-87.63, 20.12, -86.36, 21.61]
+
+        fp1 = compute_osrm_fingerprint("CUN", bbox_cancun_only, "non_existent.pbf")
+        fp2 = compute_osrm_fingerprint("CUN", bbox_riviera_maya, "non_existent.pbf")
+        fp3 = compute_osrm_fingerprint("CUN", bbox_cancun_only, "non_existent.pbf")
+
+        # Distintos BBOX deben generar distintas huellas
+        self.assertNotEqual(fp1, fp2)
+        # Idénticos parámetros deben generar la misma huella
+        self.assertEqual(fp1, fp3)
+
+    def test_osrm_extreme_snapping_firewall_rejects_out_of_bounds(self):
+        from unittest.mock import patch, MagicMock
+        from sb_mexico.osrm import enrich_pops_with_osrm
+
+        # Puntos separados ~5 km en Playa del Carmen
+        dps = [
+            {"id": "dp_north", "location": [-87.05002, 20.67734], "residents": 100, "jobs": 0},
+            {"id": "dp_south", "location": [-87.07449, 20.62612], "residents": 0, "jobs": 100}
+        ]
+        pops = [{
+            "id": "pop_pdc",
+            "residenceId": "dp_north",
+            "jobId": "dp_south",
+            "size": 50
+        }]
+
+        # Simular exactamente la respuesta errónea de OSRM cuando la red está truncada:
+        # waypoints a 9.2 km y 15.3 km de distancia (Punta Maroma) con ruta de 72m
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "code": "Ok",
+            "routes": [{
+                "distance": 71.6,
+                "duration": 10.3,
+                "geometry": {"coordinates": [[-87.028151, 20.757917], [-87.028812, 20.758097]]}
+            }],
+            "waypoints": [
+                {"distance": 9206.7, "location": [-87.028151, 20.757917]},
+                {"distance": 15366.4, "location": [-87.028812, 20.758097]}
+            ]
+        }
+
+        with patch("requests.Session.get", return_value=mock_resp):
+            osrm_ok, osrm_fb = enrich_pops_with_osrm(pops, dps, osrm_url="http://127.0.0.1:5000")
+
+        # Debe ser rechazado por snapping excesivo y pasar al fallback canónico
+        self.assertEqual(osrm_ok, 0)
+        self.assertEqual(osrm_fb, 1)
+        # La distancia no debe ser 72m, sino el fallback canónico (~6-8 km)
+        self.assertGreater(pops[0]["drivingDistance"], 4000)
+        self.assertGreater(pops[0]["drivingSeconds"], 300)
+        # No debe contener el drivingPath anómalo de Punta Maroma
+        self.assertNotIn("drivingPath", pops[0])
+
+    def test_osrm_physical_invariant_firewall_rejects_impossible_shortcuts(self):
+        from unittest.mock import patch, MagicMock
+        from sb_mexico.osrm import enrich_pops_with_osrm
+
+        # Puntos separados ~5 km
+        dps = [
+            {"id": "dp_1", "location": [-87.05, 20.67], "residents": 100, "jobs": 0},
+            {"id": "dp_2", "location": [-87.07, 20.62], "residents": 0, "jobs": 100}
+        ]
+        pops = [{
+            "id": "pop_shortcut",
+            "residenceId": "dp_1",
+            "jobId": "dp_2",
+            "size": 50
+        }]
+
+        # Simular OSRM con snapping bajo pero distancia corrupta (72 metros para 5 km)
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "code": "Ok",
+            "routes": [{
+                "distance": 72.0,
+                "duration": 10.0,
+                "geometry": {"coordinates": [[-87.05, 20.67], [-87.05, 20.6701]]}
+            }],
+            "waypoints": [
+                {"distance": 10.0, "location": [-87.05, 20.67]},
+                {"distance": 10.0, "location": [-87.07, 20.62]}
+            ]
+        }
+
+        with patch("requests.Session.get", return_value=mock_resp):
+            osrm_ok, osrm_fb = enrich_pops_with_osrm(pops, dps, osrm_url="http://127.0.0.1:5000")
+
+        # Debe ser rechazado por violación de invariante física y pasar al fallback
+        self.assertEqual(osrm_ok, 0)
+        self.assertEqual(osrm_fb, 1)
+        self.assertGreater(pops[0]["drivingDistance"], 4000)
+
+    def test_pipeline_integrity_audit_halts_on_corrupt_pops(self):
+        from sb_mexico.pipeline import validate_cohort_spatial_integrity
+
+        dps = [
+            {"id": "dp_a", "location": [-87.05, 20.67]},
+            {"id": "dp_b", "location": [-87.07, 20.62]}
+        ]
+
+        # Caso corrupto: 72m en un viaje de ~5 km
+        corrupt_pops = [{
+            "id": "pop_bad",
+            "residenceId": "dp_a",
+            "jobId": "dp_b",
+            "drivingDistance": 72,
+            "drivingSeconds": 235
+        }]
+
+        with self.assertRaises(ValueError) as ctx:
+            validate_cohort_spatial_integrity(corrupt_pops, dps)
+        self.assertIn("Fallo de integridad espacial", str(ctx.exception))
+        self.assertIn("Euclid=", str(ctx.exception))
+
+        # Caso limpio: distancia física válida (~6.5 km)
+        clean_pops = [{
+            "id": "pop_good",
+            "residenceId": "dp_a",
+            "jobId": "dp_b",
+            "drivingDistance": 6500,
+            "drivingSeconds": 585
+        }]
+        # No debe lanzar excepción
+        validate_cohort_spatial_integrity(clean_pops, dps)
+
+
 if __name__ == "__main__":
     unittest.main()

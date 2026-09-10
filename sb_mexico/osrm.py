@@ -14,6 +14,7 @@ import sys
 import time
 import json
 import shutil
+import hashlib
 import subprocess
 import urllib.request
 import urllib.error
@@ -24,6 +25,34 @@ from sb_mexico.cartography import to_wsl_path
 
 CANONICAL_SPEED_KMH = 40.0
 CANONICAL_CIRCUITY = 1.3
+MAX_WAYPOINT_SNAPPING_METERS = 1500.0
+MIN_CIRCUITY_RATIO = 0.70
+MIN_INTER_NODE_ROAD_METERS = 150
+
+
+def compute_osrm_fingerprint(
+    city_code: str,
+    bbox: List[float],
+    osm_pbf_path: str
+) -> str:
+    """
+    Calcula una firma criptográfica única (SHA-256) basada en:
+    - Clave de ciudad normalizada
+    - BBOX redondeado a 5 decimales
+    - Tamaño en bytes y mtime del archivo OSM PBF
+    - Versión del perfil car.lua
+    Garantiza que cualquier expansión territorial o actualización de mapa invalide el caché.
+    """
+    norm_bbox = [round(float(x), 5) for x in bbox]
+    pbf_size = 0
+    pbf_mtime = 0
+    if os.path.exists(osm_pbf_path):
+        st = os.stat(osm_pbf_path)
+        pbf_size = st.st_size
+        pbf_mtime = int(st.st_mtime)
+
+    raw = f"{city_code.upper()}:{norm_bbox}:{pbf_size}:{pbf_mtime}:car.lua:v1"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def calculate_canonical_driving_fallback(dist_euclid_m: float) -> Tuple[int, int]:
@@ -121,6 +150,8 @@ def prepare_osrm_network_wsl(
     """
     Recorta el archivo PBF al BBOX de la ciudad (con osmium) y genera los archivos
     compilados de OSRM (.osrm, .osrm.partition, .osrm.cells) en la partición ext4 de WSL.
+    Valida la huella criptográfica (.osrm_fingerprint) del BBOX y PBF para prevenir
+    reutilizar cachés desactualizados con redes incompletas.
     Retorna (exitoso, directorio_de_compilacion_wsl).
     """
     city_slug = city_code.lower()
@@ -128,6 +159,7 @@ def prepare_osrm_network_wsl(
     wsl_build_dir = f"{home_dir}/osrm_{city_slug}"
 
     wsl_pbf = to_wsl_path(os.path.abspath(osm_pbf_path))
+    fingerprint = compute_osrm_fingerprint(city_code, bbox, osm_pbf_path)
 
     # Script bash para ejecutar dentro de WSL 2
     margin = 0.05
@@ -143,12 +175,22 @@ cd "{wsl_build_dir}"
 
 TARGET_PBF="{wsl_build_dir}/{city_slug}.osm.pbf"
 OSRM_BASE="{wsl_build_dir}/{city_slug}.osrm"
+FP_FILE="{wsl_build_dir}/.osrm_fingerprint"
+REQUIRED_FP="{fingerprint}"
 
-# Si ya está compilado y no se fuerza reconstrucción, omitir
-if [ "{str(force_rebuild).lower()}" = "false" ] && [ -f "${{OSRM_BASE}}.cells" ] && [ -f "${{OSRM_BASE}}.partition" ]; then
-    echo "OSRM_CACHE_VALID"
-    exit 0
+# Verificación estricta de huella criptográfica de BBOX y PBF
+if [ "{str(force_rebuild).lower()}" = "false" ] && [ -f "$FP_FILE" ] && [ -f "${{OSRM_BASE}}.cells" ] && [ -f "${{OSRM_BASE}}.partition" ]; then
+    CURRENT_FP=$(cat "$FP_FILE" 2>/dev/null || echo "")
+    if [ "$CURRENT_FP" = "$REQUIRED_FP" ]; then
+        echo "OSRM_CACHE_VALID"
+        exit 0
+    else
+        echo "-> [OSRM] BBOX o PBF modificado (huella desactualizada). Recompilando red completa..."
+    fi
 fi
+
+# Limpieza preventiva para evitar mezclas con versiones anteriores
+rm -rf "{wsl_build_dir}"/* "{wsl_build_dir}"/.* 2>/dev/null || true
 
 # Recorte BBOX eficiente con osmium si es mayor a 20MB
 FILE_SIZE_MB=$(du -m "{wsl_pbf}" | cut -f1)
@@ -169,6 +211,7 @@ docker run --rm -v "{wsl_build_dir}:/data" osrm/osrm-backend osrm-partition "/da
 echo "-> [OSRM] Ejecutando osrm-customize..."
 docker run --rm -v "{wsl_build_dir}:/data" osrm/osrm-backend osrm-customize "/data/{city_slug}.osrm"
 
+echo "$REQUIRED_FP" > "$FP_FILE"
 echo "OSRM_BUILD_SUCCESS"
 """
 
@@ -365,10 +408,33 @@ def enrich_pops_with_osrm(
             if resp.status_code == 200:
                 data = resp.json()
                 if data.get("code") == "Ok" and data.get("routes"):
+                    # Salvaguarda 1: Verificación de snapping excesivo (puntos fuera de cobertura vial)
+                    waypoints = data.get("waypoints", [])
+                    max_snap_m = max([float(w.get("distance", 0.0)) for w in waypoints], default=0.0)
+                    if max_snap_m > MAX_WAYPOINT_SNAPPING_METERS:
+                        # Uno o ambos puntos quedaron demasiado lejos de la red vial mapeada
+                        fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
+                        routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
+                        fallback_count += 1
+                        continue
+
                     best = data["routes"][0]
                     duration_sec = int(round(best["duration"]))
                     distance_m = int(round(best["distance"]))
                     path_coords = best.get("geometry", {}).get("coordinates", [])
+
+                    # Salvaguarda 2: Verificación de invariantes físicos (atajos imposibles por fallo topológico)
+                    if euclid_m > 500.0 and distance_m < (MIN_CIRCUITY_RATIO * euclid_m):
+                        fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
+                        routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
+                        fallback_count += 1
+                        continue
+
+                    if euclid_m > 250.0 and distance_m < MIN_INTER_NODE_ROAD_METERS:
+                        fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
+                        routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
+                        fallback_count += 1
+                        continue
 
                     routes_cache[(res_id, job_id)] = (distance_m, duration_sec, path_coords)
                     osrm_success += 1
