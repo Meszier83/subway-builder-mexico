@@ -419,8 +419,8 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
     for poi in pois_cfg:
         p_id = poi.get("id", "POI_Nuevo")
         loc = poi.get("loc", [0.0, 0.0])
-        jobs = int(poi.get("jobs", 5000))
-        rad = int(poi.get("radius_m", 750))
+        jobs = int(poi["jobs"]) if poi.get("jobs") is not None else 0
+        rad = int(poi["radius_m"]) if poi.get("radius_m") is not None else 100
         mode = poi.get("mode", "MAX").upper()
 
         lines.append(f'  - id: "{p_id}"')
@@ -2001,12 +2001,12 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
         log_q = queue.Queue()
         active_build["log_queues"].append(log_q)
 
-        for past_log in active_build["logs"][-50:]:
-            data_str = json.dumps(past_log, ensure_ascii=False)
-            self.wfile.write(f"data: {data_str}\n\n".encode('utf-8'))
-        self.wfile.flush()
-
         try:
+            for past_log in active_build["logs"][-50:]:
+                data_str = json.dumps(past_log, ensure_ascii=False)
+                self.wfile.write(f"data: {data_str}\n\n".encode('utf-8'))
+            self.wfile.flush()
+
             while True:
                 try:
                     msg = log_q.get(timeout=15.0)
@@ -2016,7 +2016,7 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 except queue.Empty:
                     self.wfile.write(b": heartbeat\n\n")
                     self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, ConnectionError, OSError):
             pass
         finally:
             if log_q in active_build["log_queues"]:
