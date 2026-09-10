@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "versions": [
+    {
+      "version": "1.0.0",
+      "game_version": ">=1.0.0",
+      "date": "2026-09-09",
+      "changelog": "Initial release of Cancun / Riviera Maya (CUR). High-fidelity demographic and employment model based on INEGI CPV 2020 manzana microdata, CONAPO municipal projections, DENUE economic establishment data, and canonical OSRM road travel times.",
+      "download": "https://github.com/Meszier83/subway-builder-mexico/releases/download/v1.0.0/CUR.zip",
+      "sha256": "27b0d394617b500b95272ae4e8b856bc0745b8a6df91b7908936c2ba51b58d27"
+    }
+  ]
+}
