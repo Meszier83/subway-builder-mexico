@@ -1,6 +1,7 @@
 import sys
 import os
 import json
+import html
 import argparse
 
 def generate_html_viewer(demand_json_path, config_json_path, output_html="preview.html"):
@@ -17,6 +18,8 @@ def generate_html_viewer(demand_json_path, config_json_path, output_html="previe
 
     city_name = cfg.get("name", "Mapa de Demanda")
     city_code = cfg.get("code", "DEMO")
+    safe_city_name = html.escape(str(city_name))
+    safe_city_code = html.escape(str(city_code))
     view_state = cfg.get("initialViewState", {})
     center_lat = view_state.get("latitude", 21.15)
     center_lon = view_state.get("longitude", -86.85)
@@ -28,16 +31,16 @@ def generate_html_viewer(demand_json_path, config_json_path, output_html="previe
     total_residents = sum(p.get("residents", 0) for p in points)
     total_jobs = sum(p.get("jobs", 0) for p in points)
 
-    # Convert to JSON strings for embedding in HTML
-    points_json = json.dumps(points)
-    pops_json = json.dumps(pops[:2000])  # Top 2000 flow lines for fast rendering
+    # Convert to JSON strings for embedding in HTML, escaping closing script tags
+    points_json = json.dumps(points).replace("</", "<\\/")
+    pops_json = json.dumps(pops[:2000]).replace("</", "<\\/")  # Top 2000 flow lines for fast rendering
 
     html_content = f"""<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Subway Builder México - Visor de Demanda ({city_code})</title>
+    <title>Subway Builder México - Visor de Demanda ({safe_city_code})</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
@@ -62,7 +65,7 @@ def generate_html_viewer(demand_json_path, config_json_path, output_html="previe
 <body>
     <div id="map"></div>
     <div class="hud-panel">
-        <div class="hud-title">{city_name} ({city_code})</div>
+        <div class="hud-title">{safe_city_name} ({safe_city_code})</div>
         <div class="hud-subtitle">Subway Builder México v7.1 - Visor de Interacción</div>
         <div class="stat-grid">
             <div class="stat-box"><div>Población</div><div class="stat-num">{total_residents:,}</div></div>
@@ -140,7 +143,7 @@ def generate_html_viewer(demand_json_path, config_json_path, output_html="previe
 </body>
 </html>
 """
-    with open(output_html, "w", encoding="utf-8") as f:
+    with open(output_html, "w", encoding="utf-8", newline="\n") as f:
         f.write(html_content)
     print(f"Visor interactivo generado con exito en: {output_html}")
 

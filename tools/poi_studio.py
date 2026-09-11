@@ -13,6 +13,7 @@ Uso:
 
 import os
 import sys
+import re
 import glob
 import json
 import yaml
@@ -20,7 +21,7 @@ import argparse
 import webbrowser
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 CITIES_DIR = os.path.join(ROOT_DIR, "cities")
@@ -157,6 +158,51 @@ def _format_affluence_zones_yaml(zones: List[Dict[str, Any]]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _split_yaml_top_level_blocks(content: str) -> Tuple[str, List[Tuple[str, str]]]:
+    """
+    Divide un YAML en (encabezado_inicial, [(clave, bloque_texto), ...])
+    asociando los comentarios precedentes a cada clave correspondiente.
+    Previene la pérdida destructiva de secciones ubicadas después de pois: o places:.
+    """
+    pattern = re.compile(r'^[a-zA-Z0-9_-]+:', re.MULTILINE)
+    matches = list(pattern.finditer(content))
+    if not matches:
+        return content, []
+
+    lines_offsets = []
+    curr = 0
+    for line in content.splitlines(keepends=True):
+        lines_offsets.append((curr, line))
+        curr += len(line)
+
+    block_cut_points = []
+    for m in matches:
+        m_pos = m.start()
+        line_idx = 0
+        for idx, (offset, _) in enumerate(lines_offsets):
+            if offset == m_pos:
+                line_idx = idx
+                break
+
+        start_idx = line_idx
+        while start_idx > 0:
+            prev_line = lines_offsets[start_idx - 1][1].strip()
+            if prev_line.startswith("#") or (not prev_line and start_idx > 1 and lines_offsets[start_idx - 2][1].strip().startswith("#")):
+                start_idx -= 1
+            else:
+                break
+        block_cut_points.append((lines_offsets[start_idx][0], m.group(0)[:-1]))
+
+    header = content[:block_cut_points[0][0]]
+    blocks = []
+    for i in range(len(block_cut_points)):
+        start_pos, k = block_cut_points[i]
+        end_pos = block_cut_points[i + 1][0] if i + 1 < len(block_cut_points) else len(content)
+        blocks.append((k, content[start_pos:end_pos]))
+
+    return header, blocks
+
+
 def save_city_data(
     rel_or_abs_path: str,
     new_pois: List[Dict[str, Any]],
@@ -165,7 +211,8 @@ def save_city_data(
 ) -> None:
     """
     Guarda los POIs, las Colonias/Toponimia (places) y Zonas de Alta Afluencia en el archivo YAML
-    preservando la estructura y comentarios base del archivo.
+    preservando la estructura, comentarios y todas las secciones adicionales (isolated_zones,
+    exclusion_zones, macroeconomics, etc.) sin truncamiento destructivo.
     """
     fpath = _resolve_city_path(rel_or_abs_path)
 
@@ -182,6 +229,11 @@ def save_city_data(
 
     target_az = new_affluence_zones if new_affluence_zones is not None else current_data.get("affluence_zones", [])
 
+    def _safe_q(val: Any) -> str:
+        if val is None:
+            return '""'
+        return json.dumps(str(val), ensure_ascii=False)
+
     # 1. Formatear el bloque de POIs en YAML limpio
     pois_yaml_lines = ["pois:"]
     for poi in new_pois:
@@ -191,31 +243,31 @@ def save_city_data(
         rad = int(poi.get("radius_m", 750))
         mode = poi.get("mode", "MAX").upper()
 
-        pois_yaml_lines.append(f'  - id: "{p_id}"')
+        pois_yaml_lines.append(f'  - id: {_safe_q(p_id)}')
         name_val = poi.get("name")
         if isinstance(name_val, dict):
             pois_yaml_lines.append('    name:')
             if "es" in name_val:
-                pois_yaml_lines.append(f'      es: "{name_val["es"]}"')
+                pois_yaml_lines.append(f'      es: {_safe_q(name_val["es"])}')
             if "en" in name_val:
-                pois_yaml_lines.append(f'      en: "{name_val["en"]}"')
+                pois_yaml_lines.append(f'      en: {_safe_q(name_val["en"])}')
         elif isinstance(name_val, str) and name_val:
-            pois_yaml_lines.append(f'    name: "{name_val}"')
+            pois_yaml_lines.append(f'    name: {_safe_q(name_val)}')
 
         if poi.get("type"):
-            pois_yaml_lines.append(f'    type: "{poi["type"]}"')
+            pois_yaml_lines.append(f'    type: {_safe_q(poi["type"])}')
         if poi.get("sub_type"):
-            pois_yaml_lines.append(f'    sub_type: "{poi["sub_type"]}"')
+            pois_yaml_lines.append(f'    sub_type: {_safe_q(poi["sub_type"])}')
 
         pois_yaml_lines.append(f'    loc: [{loc[0]:.5f}, {loc[1]:.5f}]')
         pois_yaml_lines.append(f'    jobs: {jobs}')
         pois_yaml_lines.append(f'    radius_m: {rad}')
-        pois_yaml_lines.append(f'    mode: "{mode}"')
+        pois_yaml_lines.append(f'    mode: {_safe_q(mode)}')
 
         if isinstance(poi.get("metadata"), dict) and poi["metadata"]:
             pois_yaml_lines.append('    metadata:')
             for mk, mv in poi["metadata"].items():
-                pois_yaml_lines.append(f'      {mk}: "{mv}"')
+                pois_yaml_lines.append(f'      {mk}: {_safe_q(mv)}')
         pois_yaml_lines.append('')
 
     new_pois_block = "\n".join(pois_yaml_lines).rstrip() + "\n"
@@ -223,37 +275,57 @@ def save_city_data(
     # 2. Formatear el bloque opcional de Places/Toponimia en YAML
     new_places_block = ""
     if new_places is not None and len(new_places) > 0:
-        places_yaml_lines = ["\n# Toponimia y Colonias Curadas (Inyección de etiquetas en .pmtiles)", "places:"]
+        places_yaml_lines = ["# Toponimia y Colonias Curadas (Inyección de etiquetas en .pmtiles)", "places:"]
         for pl in new_places:
             pl_name = pl.get("name", "Colonia")
             pl_loc = pl.get("loc", [0.0, 0.0])
             pl_type = pl.get("type", "suburb")
-            places_yaml_lines.append(f'  - name: "{pl_name}"')
+            places_yaml_lines.append(f'  - name: {_safe_q(pl_name)}')
             places_yaml_lines.append(f'    loc: [{pl_loc[0]:.5f}, {pl_loc[1]:.5f}]')
-            places_yaml_lines.append(f'    type: "{pl_type}"')
+            places_yaml_lines.append(f'    type: {_safe_q(pl_type)}')
         new_places_block = "\n".join(places_yaml_lines) + "\n"
 
-    # 3. Remover bloques anteriores de pois: y places: del contenido original
-    # Cortar a partir de la primera aparición de pois: o places:
-    cut_idx = len(content)
-    for marker in ["\npois:", "pois:", "\nplaces:", "places:"]:
-        pos = content.find(marker)
-        if pos != -1 and pos < cut_idx:
-            cut_idx = pos
+    # 3. Preservación modular de bloques evitando cualquier truncamiento destructivo
+    header, blocks = _split_yaml_top_level_blocks(content)
 
-    base_content = content[:cut_idx].rstrip() + "\n\n"
+    if not blocks:
+        updated_content = content + "\n\n" + new_pois_block
+        if new_places_block:
+            updated_content += "\n" + new_places_block
+    else:
+        block_keys = {k for k, _ in blocks}
+        new_blocks = []
+        for k, text in blocks:
+            if k == "pois":
+                new_blocks.append(new_pois_block)
+            elif k == "places":
+                if new_places_block:
+                    new_blocks.append(new_places_block)
+                elif new_places is None:
+                    new_blocks.append(text)
+            elif k == "affluence_zones":
+                if new_affluence_zones is not None:
+                    if target_az:
+                        new_blocks.append(_format_affluence_zones_yaml(target_az) + "\n")
+                else:
+                    new_blocks.append(text)
+            else:
+                new_blocks.append(text)
 
-    # 4. Asegurar preservación de affluence_zones:
-    # Si affluence_zones no quedó en base_content (porque estaba después de pois/places),
-    # o si se especificaron new_affluence_zones explícitamente, se formatea e inyecta.
-    az_block = ""
-    if target_az and isinstance(target_az, list) and len(target_az) > 0:
-        if "affluence_zones:" not in base_content:
-            az_block = _format_affluence_zones_yaml(target_az) + "\n\n"
+        if "pois" not in block_keys:
+            new_blocks.append(new_pois_block)
 
-    updated_content = base_content + az_block + new_pois_block + new_places_block
+        if new_places is not None and len(new_places) > 0 and "places" not in block_keys:
+            new_blocks.append(new_places_block)
 
-    with open(fpath, "w", encoding="utf-8") as f:
+        if target_az and "affluence_zones" not in block_keys:
+            new_blocks.append(_format_affluence_zones_yaml(target_az) + "\n")
+
+        prefix = header.rstrip() + ("\n\n" if header.strip() else "")
+        body = "\n\n".join([b.strip() for b in new_blocks if b.strip()]) + "\n"
+        updated_content = prefix + body
+
+    with open(fpath, "w", encoding="utf-8", newline="\n") as f:
         f.write(updated_content)
 
 

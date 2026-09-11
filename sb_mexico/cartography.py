@@ -269,14 +269,25 @@ def build_city_map_wsl(
         bufsize=1
     )
 
-    if proc.stdout:
-        for line in iter(proc.stdout.readline, ""):
-            print(line, end="", flush=True)
-        proc.stdout.close()
+    try:
+        if proc.stdout:
+            for line in iter(proc.stdout.readline, ""):
+                print(line, end="", flush=True)
+            proc.stdout.close()
 
-    ret = proc.wait()
-    if ret != 0:
-        raise RuntimeError(f"La compilación cartográfica en WSL falló con código de salida {ret}.")
+        ret = proc.wait()
+        if ret != 0:
+            raise RuntimeError(f"La compilación cartográfica en WSL falló con código de salida {ret}.")
+    finally:
+        if proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=3)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
 
     work_dir = os.path.abspath(output_dir)
     generated_files = {}

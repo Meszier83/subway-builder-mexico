@@ -44,7 +44,13 @@ class OSMPlaceExtractor:
             {"id": 12, "name": "CERRADA PALMILLA", "place": "neighbourhood", "lon": -86.845, "lat": 21.092},
             {"id": 13, "name": "FRACCIONAMIENTO EL VALENCIA", "place": "neighbourhood", "lon": -86.915, "lat": 21.138},
         ]
-        return known_osm
+        if self.bbox and len(self.bbox) == 4:
+            min_lon, min_lat, max_lon, max_lat = self.bbox
+            return [
+                p for p in known_osm
+                if min_lon <= p["lon"] <= max_lon and min_lat <= p["lat"] <= max_lat
+            ]
+        return []
 
 
 def format_clean_settlement_name(nomb_raw: str, tipo_raw: str) -> Tuple[str, str]:

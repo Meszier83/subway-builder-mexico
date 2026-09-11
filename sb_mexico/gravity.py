@@ -1010,11 +1010,11 @@ def simulate_gravity_demand(
         dest_id_to_idx = {d["id"]: idx for idx, d in enumerate(regular_dests)}
         dest_zones = assign_zones(dest_coords_deg, isolated_zones)
 
-        # Matriz NxM de distancias Haversine
+        # Matriz NxM de distancias Haversine (en float32 para optimizar consumo de RAM)
         dlat = dest_coords[:, 1][np.newaxis, :] - orig_coords[:, 1][:, np.newaxis]
         dlon = dest_coords[:, 0][np.newaxis, :] - orig_coords[:, 0][:, np.newaxis]
         a = np.sin(dlat / 2.0)**2 + np.cos(orig_coords[:, 1][:, np.newaxis]) * np.cos(dest_coords[:, 1][np.newaxis, :]) * np.sin(dlon / 2.0)**2
-        dist_km_mat = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
+        dist_km_mat = (6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))).astype(np.float32)
 
         # Vectorizar bonos de alcance por destino según Zonas de Alta Afluencia
         reach_bonuses = np.zeros(len(regular_dests), dtype=np.float64)
@@ -1025,7 +1025,7 @@ def simulate_gravity_demand(
                 )
                 reach_bonuses[d_idx] = r_bonus
 
-        prob_matrix = np.zeros((len(origins), len(regular_dests)), dtype=np.float64)
+        prob_matrix = np.zeros((len(origins), len(regular_dests)), dtype=np.float32)
 
         # Balanceo de Furness / IPFP ejecutado de forma estanca por cada zona topológica
         unique_orig_zones = np.unique(orig_zones)
@@ -1096,7 +1096,8 @@ def simulate_gravity_demand(
             cohort_sizes = [b + 1 if j < r else b for j in range(k)]
 
             # Sorteo multinomial de las k cohortes
-            pvals = prob_matrix[i] / prob_matrix[i].sum()
+            pvals = (prob_matrix[i] / prob_matrix[i].sum()).astype(np.float64)
+            pvals /= pvals.sum()
             assignments = rng.multinomial(k, pvals)
             active_dest_indices = np.where(assignments > 0)[0]
 

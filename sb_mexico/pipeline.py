@@ -534,8 +534,9 @@ def execute_pipeline(
     console.print(f"   • Nodos de demanda activos: [green]{len(demand_points):,}[/green] puntos (display 1:1 sincronizado).")
     console.print(f"   • Total de Pasajeros Activos: [bold green]{total_viajeros:,}[/bold green] (PEA Total: {total_pea:,})")
 
-    # Aserción de conservación estricta de masa
-    assert total_viajeros == total_pea, f"Inconsistencia de masa: {total_viajeros} viajeros vs {total_pea} PEA"
+    # Validación de conservación estricta de masa
+    if total_viajeros != total_pea:
+        raise ValueError(f"Inconsistencia de masa: {total_viajeros} viajeros vs {total_pea} PEA")
 
     # Desglose Tabular por Masa Territorial y Zonas Aisladas
     if isolated_zones:

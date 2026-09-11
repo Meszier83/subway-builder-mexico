@@ -126,19 +126,28 @@ def is_docker_available() -> Tuple[bool, str]:
 
 
 def get_wsl_home_dir() -> str:
-    """Obtiene la ruta home del usuario en WSL 2."""
-    try:
-        res = subprocess.run(
-            ["wsl.exe", "-d", "Ubuntu", "-e", "bash", "-c", "echo $HOME"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if res.returncode == 0 and res.stdout.strip():
-            return res.stdout.strip()
-    except Exception:
-        pass
-    return "/home/keppl"
+    """
+    Determina dinámicamente la ruta HOME del usuario por defecto dentro de WSL 2 (Ubuntu).
+    Evita rutas quemadas/hardcoded (como /home/keppl).
+    """
+    commands_to_try = [
+        ["wsl.exe", "-d", "Ubuntu", "-e", "bash", "-c", "echo -n $HOME"],
+        ["wsl.exe", "-e", "bash", "-c", "echo -n $HOME"],
+        ["wsl.exe", "-d", "Ubuntu", "-e", "whoami"],
+        ["wsl.exe", "-e", "whoami"]
+    ]
+    for cmd in commands_to_try:
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if res.returncode == 0 and res.stdout.strip():
+                val = res.stdout.strip()
+                if "whoami" in cmd:
+                    return "/root" if val == "root" else f"/home/{val}"
+                return val
+        except Exception:
+            continue
+
+    raise RuntimeError("No se pudo determinar el directorio de usuario en WSL 2. Verifique la distribución de WSL 2.")
 
 
 def prepare_osrm_network_wsl(
@@ -358,103 +367,106 @@ def enrich_pops_with_osrm(
     fallback_count = 0
 
     session = requests.Session()
-    # Permitir hasta 2 reintentos transparentes cuando OSRM renueva el keep-alive (Keep-Alive: max=512)
-    retries = Retry(total=2, backoff_factor=0.05, status_forcelist=[500, 502, 503, 504])
-    session.mount("http://", HTTPAdapter(max_retries=retries, pool_connections=1, pool_maxsize=10))
+    try:
+        # Permitir hasta 2 reintentos transparentes cuando OSRM renueva el keep-alive (Keep-Alive: max=512)
+        retries = Retry(total=2, backoff_factor=0.05, status_forcelist=[500, 502, 503, 504])
+        session.mount("http://", HTTPAdapter(max_retries=retries, pool_connections=1, pool_maxsize=10))
 
-    total_pairs = len(unique_pairs)
-    processed = 0
-    consecutive_connection_errors = 0
-    service_aborted = False
+        total_pairs = len(unique_pairs)
+        processed = 0
+        consecutive_connection_errors = 0
+        service_aborted = False
 
-    for res_id, job_id in unique_pairs:
-        processed += 1
-        if processed == 1:
-            print(f"   • Conexión OSRM activa. Consultando {total_pairs:,} pares viales...", flush=True)
-        elif processed % 500 == 0 or processed == total_pairs:
-            print(f"   • OSRM progreso: {processed:,} / {total_pairs:,} ({processed / total_pairs:.0%})...", flush=True)
+        for res_id, job_id in unique_pairs:
+            processed += 1
+            if processed == 1:
+                print(f"   • Conexión OSRM activa. Consultando {total_pairs:,} pares viales...", flush=True)
+            elif processed % 500 == 0 or processed == total_pairs:
+                print(f"   • OSRM progreso: {processed:,} / {total_pairs:,} ({processed / total_pairs:.0%})...", flush=True)
 
-        orig_loc = dp_locs.get(res_id)
-        dest_loc = dp_locs.get(job_id)
+            orig_loc = dp_locs.get(res_id)
+            dest_loc = dp_locs.get(job_id)
 
-        if not orig_loc or not dest_loc:
-            continue
+            if not orig_loc or not dest_loc:
+                continue
 
-        # Distancia euclidiana base para fallback
-        import math
-        cos_lat = math.cos(math.radians((orig_loc[1] + dest_loc[1]) / 2.0))
-        dx_m = (dest_loc[0] - orig_loc[0]) * 111_320.0 * cos_lat
-        dy_m = (dest_loc[1] - orig_loc[1]) * 110_574.0
-        euclid_m = math.hypot(dx_m, dy_m)
+            # Distancia euclidiana base para fallback
+            import math
+            cos_lat = math.cos(math.radians((orig_loc[1] + dest_loc[1]) / 2.0))
+            dx_m = (dest_loc[0] - orig_loc[0]) * 111_320.0 * cos_lat
+            dy_m = (dest_loc[1] - orig_loc[1]) * 110_574.0
+            euclid_m = math.hypot(dx_m, dy_m)
 
-        # Si origen y destino son el mismo punto (viaje local intra-celda)
-        if res_id == job_id or euclid_m < 20.0:
-            fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
-            routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
-            continue
+            # Si origen y destino son el mismo punto (viaje local intra-celda)
+            if res_id == job_id or euclid_m < 20.0:
+                fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
+                routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
+                continue
 
-        # Si el microservicio OSRM se abortó por desconexión previa, aplicar fallback directo sin latencia
-        if service_aborted:
+            # Si el microservicio OSRM se abortó por desconexión previa, aplicar fallback directo sin latencia
+            if service_aborted:
+                fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
+                routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
+                fallback_count += 1
+                continue
+
+            # Consulta HTTP a OSRM
+            url = f"{osrm_url}/route/v1/driving/{orig_loc[0]},{orig_loc[1]};{dest_loc[0]},{dest_loc[1]}?overview=full&geometries=geojson"
+            try:
+                resp = session.get(url, timeout=(1.0, 3.0))
+                consecutive_connection_errors = 0  # El servidor respondió, está activo
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("code") == "Ok" and data.get("routes"):
+                        # Salvaguarda 1: Verificación de snapping excesivo (puntos fuera de cobertura vial)
+                        waypoints = data.get("waypoints", [])
+                        max_snap_m = max([float(w.get("distance", 0.0)) for w in waypoints], default=0.0)
+                        if max_snap_m > MAX_WAYPOINT_SNAPPING_METERS:
+                            # Uno o ambos puntos quedaron demasiado lejos de la red vial mapeada
+                            fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
+                            routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
+                            fallback_count += 1
+                            continue
+
+                        best = data["routes"][0]
+                        duration_sec = int(round(best["duration"]))
+                        distance_m = int(round(best["distance"]))
+                        path_coords = best.get("geometry", {}).get("coordinates", [])
+
+                        # Salvaguarda 2: Verificación de invariantes físicos (atajos imposibles por fallo topológico)
+                        if euclid_m > 500.0 and distance_m < (MIN_CIRCUITY_RATIO * euclid_m):
+                            fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
+                            routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
+                            fallback_count += 1
+                            continue
+
+                        if euclid_m > 250.0 and distance_m < MIN_INTER_NODE_ROAD_METERS:
+                            fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
+                            routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
+                            fallback_count += 1
+                            continue
+
+                        routes_cache[(res_id, job_id)] = (distance_m, duration_sec, path_coords)
+                        osrm_success += 1
+                        continue
+            except (requests.exceptions.ConnectionError, requests.exceptions.ConnectTimeout):
+                consecutive_connection_errors += 1
+                if consecutive_connection_errors >= 5:
+                    print(
+                        f"   [WARN] Conexión OSRM interrumpida (5 fallos consecutivos). "
+                        f"Aplicando fallback canónico Colin al resto ({total_pairs - processed:,} pares)...",
+                        flush=True
+                    )
+                    service_aborted = True
+            except Exception:
+                pass
+
+            # Fallback canónico oficial de Colin si OSRM no conecta el par (ej. Isla Mujeres sin puente)
             fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
             routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
             fallback_count += 1
-            continue
-
-        # Consulta HTTP a OSRM
-        url = f"{osrm_url}/route/v1/driving/{orig_loc[0]},{orig_loc[1]};{dest_loc[0]},{dest_loc[1]}?overview=full&geometries=geojson"
-        try:
-            resp = session.get(url, timeout=(1.0, 3.0))
-            consecutive_connection_errors = 0  # El servidor respondió, está activo
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("code") == "Ok" and data.get("routes"):
-                    # Salvaguarda 1: Verificación de snapping excesivo (puntos fuera de cobertura vial)
-                    waypoints = data.get("waypoints", [])
-                    max_snap_m = max([float(w.get("distance", 0.0)) for w in waypoints], default=0.0)
-                    if max_snap_m > MAX_WAYPOINT_SNAPPING_METERS:
-                        # Uno o ambos puntos quedaron demasiado lejos de la red vial mapeada
-                        fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
-                        routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
-                        fallback_count += 1
-                        continue
-
-                    best = data["routes"][0]
-                    duration_sec = int(round(best["duration"]))
-                    distance_m = int(round(best["distance"]))
-                    path_coords = best.get("geometry", {}).get("coordinates", [])
-
-                    # Salvaguarda 2: Verificación de invariantes físicos (atajos imposibles por fallo topológico)
-                    if euclid_m > 500.0 and distance_m < (MIN_CIRCUITY_RATIO * euclid_m):
-                        fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
-                        routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
-                        fallback_count += 1
-                        continue
-
-                    if euclid_m > 250.0 and distance_m < MIN_INTER_NODE_ROAD_METERS:
-                        fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
-                        routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
-                        fallback_count += 1
-                        continue
-
-                    routes_cache[(res_id, job_id)] = (distance_m, duration_sec, path_coords)
-                    osrm_success += 1
-                    continue
-        except (requests.exceptions.ConnectionError, requests.exceptions.ConnectTimeout):
-            consecutive_connection_errors += 1
-            if consecutive_connection_errors >= 5:
-                print(
-                    f"   [WARN] Conexión OSRM interrumpida (5 fallos consecutivos). "
-                    f"Aplicando fallback canónico Colin al resto ({total_pairs - processed:,} pares)...",
-                    flush=True
-                )
-                service_aborted = True
-        except Exception:
-            pass
-
-        # Fallback canónico oficial de Colin si OSRM no conecta el par (ej. Isla Mujeres sin puente)
-        fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
-        routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
-        fallback_count += 1
+    finally:
+        session.close()
 
     # Inyectar métricas en los objetos pop
     for p in pops:

@@ -54,6 +54,7 @@ os.chdir(ROOT_DIR)
 
 # Estado global de compilación
 build_lock = threading.Lock()
+queue_lock = threading.Lock()
 active_build = {
     "running": False,
     "progress": 0,
@@ -193,6 +194,13 @@ def load_city_data(rel_or_abs_path: str) -> Dict[str, Any]:
     return data
 
 
+def _yaml_quote(val: Any) -> str:
+    """Escapa y formatea de forma segura un valor como escalar entrecomillado en YAML."""
+    if val is None:
+        return '""'
+    return json.dumps(str(val), ensure_ascii=False)
+
+
 def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
     """Guarda la configuración completa de la ciudad respetando el esquema oficial."""
     fpath = _resolve_city_path(rel_or_abs_path)
@@ -243,11 +251,11 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
             pass
 
     lines.extend([
-        f'  code: "{city_cfg.get("code", "XXX")}"',
-        f'  name: "{city_cfg.get("name", "Nueva Ciudad")}"',
-        f'  description: "{city_cfg.get("description", "")}"',
+        f'  code: {_yaml_quote(city_cfg.get("code", "XXX"))}',
+        f'  name: {_yaml_quote(city_cfg.get("name", "Nueva Ciudad"))}',
+        f'  description: {_yaml_quote(city_cfg.get("description", ""))}',
         f'  bbox: {city_cfg.get("bbox", [-87.0, 21.0, -86.7, 21.3])}',
-        f'  creator: "{city_cfg.get("creator", "Creador")}"',
+        f'  creator: {_yaml_quote(city_cfg.get("creator", "Creador"))}',
         f'  grid_size: {float(city_cfg.get("grid_size", 0.0025))}',
         f'  min_residents: {int(city_cfg.get("min_residents", 10))}',
         f'  min_jobs: {int(city_cfg.get("min_jobs", 3))}',
@@ -259,13 +267,13 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
     ])
 
     if data_dir_cfg:
-        lines.append(f'data_dir: "{data_dir_cfg}"')
+        lines.append(f'data_dir: {_yaml_quote(data_dir_cfg)}')
         lines.append("")
 
     if data_exclusions_cfg and isinstance(data_exclusions_cfg, list):
         lines.append("data_exclusions:")
         for ex in data_exclusions_cfg:
-            lines.append(f'  - "{ex}"')
+            lines.append(f'  - {_yaml_quote(ex)}')
         lines.append("")
 
     lines.extend([
@@ -290,7 +298,7 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         lines.append("  # Laboratorio Experimental: Competitividad Modal (Auto vs. Metro)")
         lines.append("  modal_experiment:")
         lines.append(f'    enabled: {is_en}')
-        lines.append(f'    preset: "{modal_exp.get("preset", "canonical")}"')
+        lines.append(f'    preset: {_yaml_quote(modal_exp.get("preset", "canonical"))}')
         lines.append(f'    traffic_speed_kmh: {float(modal_exp.get("traffic_speed_kmh", 22.0))}')
         lines.append(f'    motorization_rate: {float(modal_exp.get("motorization_rate", 0.40))}')
         lines.append("")
@@ -299,7 +307,7 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
     if isinstance(growth_factors, dict) and growth_factors:
         lines.append("  growth_factors:")
         for k, v in growth_factors.items():
-            lines.append(f'    "{k}": {float(v)}')
+            lines.append(f'    {_yaml_quote(k)}: {float(v)}')
         lines.append("")
 
     # Bloque de Zonas Aisladas
@@ -321,8 +329,8 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
                     norm_b = raw_b
             else:
                 norm_b = raw_b
-            lines.append(f'  - id: "{z_id}"')
-            lines.append(f'    name: "{z_name}"')
+            lines.append(f'  - id: {_yaml_quote(z_id)}')
+            lines.append(f'    name: {_yaml_quote(z_name)}')
             lines.append(f'    bbox: {norm_b}')
         lines.append("")
 
@@ -341,16 +349,16 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
             z_color = str(az.get("color", "#F59E0B")).strip()
             z_target_mode = str(az.get("target_mode", "MULTIPLIER")).strip()
 
-            lines.append(f'  - id: "{z_id}"')
-            lines.append(f'    name: "{z_name}"')
-            lines.append(f'    type: "{z_type}"')
-            lines.append(f'    archetype: "{z_archetype}"')
+            lines.append(f'  - id: {_yaml_quote(z_id)}')
+            lines.append(f'    name: {_yaml_quote(z_name)}')
+            lines.append(f'    type: {_yaml_quote(z_type)}')
+            lines.append(f'    archetype: {_yaml_quote(z_archetype)}')
             lines.append(f'    multiplier: {z_mult:.2f}')
             lines.append(f'    reach_bonus: {z_reach:.2f}')
-            lines.append(f'    target_mode: "{z_target_mode}"')
+            lines.append(f'    target_mode: {_yaml_quote(z_target_mode)}')
             if az.get("target_jobs") is not None and int(az.get("target_jobs", 0)) > 0:
                 lines.append(f'    target_jobs: {int(az["target_jobs"])}')
-            lines.append(f'    color: "{z_color}"')
+            lines.append(f'    color: {_yaml_quote(z_color)}')
             lines.append(f'    enabled: {"true" if z_enabled else "false"}')
 
             coords = az.get("coordinates")
@@ -386,11 +394,11 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
             z_enabled = bool(ez.get("enabled", True))
             z_color = str(ez.get("color", "#EF4444")).strip()
 
-            lines.append(f'  - id: "{z_id}"')
-            lines.append(f'    name: "{z_name}"')
-            lines.append(f'    type: "{z_type}"')
-            lines.append(f'    reason: "{z_reason}"')
-            lines.append(f'    color: "{z_color}"')
+            lines.append(f'  - id: {_yaml_quote(z_id)}')
+            lines.append(f'    name: {_yaml_quote(z_name)}')
+            lines.append(f'    type: {_yaml_quote(z_type)}')
+            lines.append(f'    reason: {_yaml_quote(z_reason)}')
+            lines.append(f'    color: {_yaml_quote(z_color)}')
             lines.append(f'    enabled: {"true" if z_enabled else "false"}')
 
             coords = ez.get("coordinates")
@@ -423,31 +431,31 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         rad = int(poi["radius_m"]) if poi.get("radius_m") is not None else 100
         mode = poi.get("mode", "MAX").upper()
 
-        lines.append(f'  - id: "{p_id}"')
+        lines.append(f'  - id: {_yaml_quote(p_id)}')
         name_val = poi.get("name")
         if isinstance(name_val, dict):
             lines.append("    name:")
             if "es" in name_val:
-                lines.append(f'      es: "{name_val["es"]}"')
+                lines.append(f'      es: {_yaml_quote(name_val["es"])}')
             if "en" in name_val:
-                lines.append(f'      en: "{name_val["en"]}"')
+                lines.append(f'      en: {_yaml_quote(name_val["en"])}')
         elif isinstance(name_val, str) and name_val:
-            lines.append(f'    name: "{name_val}"')
+            lines.append(f'    name: {_yaml_quote(name_val)}')
 
         if poi.get("type"):
-            lines.append(f'    type: "{poi["type"]}"')
+            lines.append(f'    type: {_yaml_quote(poi["type"])}')
         if poi.get("sub_type"):
-            lines.append(f'    sub_type: "{poi["sub_type"]}"')
+            lines.append(f'    sub_type: {_yaml_quote(poi["sub_type"])}')
 
         lines.append(f'    loc: [{loc[0]:.5f}, {loc[1]:.5f}]')
         lines.append(f'    jobs: {jobs}')
         lines.append(f'    radius_m: {rad}')
-        lines.append(f'    mode: "{mode}"')
+        lines.append(f'    mode: {_yaml_quote(mode)}')
 
         if isinstance(poi.get("metadata"), dict) and poi["metadata"]:
             lines.append("    metadata:")
             for mk, mv in poi["metadata"].items():
-                lines.append(f'      {mk}: "{mv}"')
+                lines.append(f'      {mk}: {_yaml_quote(mv)}')
         lines.append("")
 
     # Bloque de Places / Toponimia
@@ -458,13 +466,13 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
             pl_name = pl.get("name", "Colonia")
             pl_loc = pl.get("loc", [0.0, 0.0])
             pl_type = pl.get("type", "suburb")
-            lines.append(f'  - name: "{pl_name}"')
+            lines.append(f'  - name: {_yaml_quote(pl_name)}')
             lines.append(f'    loc: [{pl_loc[0]:.5f}, {pl_loc[1]:.5f}]')
-            lines.append(f'    type: "{pl_type}"')
+            lines.append(f'    type: {_yaml_quote(pl_type)}')
         lines.append("")
 
     content = "\n".join(lines).rstrip() + "\n"
-    with open(fpath, "w", encoding="utf-8") as f:
+    with open(fpath, "w", encoding="utf-8", newline="\n") as f:
         f.write(content)
 
     return fpath
@@ -634,12 +642,22 @@ def relink_data_file(city_file: str, filename: str) -> Dict[str, Any]:
 
 
 def set_project_data_dir(city_file: str, new_dir: str) -> Dict[str, Any]:
-    """Actualiza la carpeta de datos personalizada del proyecto."""
+    """Actualiza la carpeta de datos personalizada del proyecto con verificación estricta de seguridad."""
     if not city_file:
         raise ValueError("Parámetro 'file' requerido")
 
+    if not new_dir or not new_dir.strip():
+        raise ValueError("Parámetro 'data_dir' requerido")
+
+    cleaned = new_dir.strip()
+    target_abs = os.path.abspath(cleaned if os.path.isabs(cleaned) else os.path.join(ROOT_DIR, cleaned))
+    norm_data = os.path.normcase(os.path.realpath(DATA_DIR))
+    norm_target = os.path.normcase(os.path.realpath(target_abs))
+    if not (norm_target == norm_data or norm_target.startswith(norm_data + os.sep)):
+        raise PermissionError(f"Acceso denegado: carpeta de datos fuera de data/ ({new_dir})")
+
     cdata = load_city_data(city_file)
-    cdata["data_dir"] = new_dir.strip()
+    cdata["data_dir"] = cleaned
     save_full_city_data(city_file, cdata)
     return {"status": "ok", "data_dir": cdata["data_dir"]}
 
@@ -1392,26 +1410,33 @@ def broadcast_log(line: str, progress: Optional[int] = None, step_name: Optional
         "timestamp": time.strftime("%H:%M:%S"),
         "line": line
     }
-    if progress is not None:
-        active_build["progress"] = progress
-        msg["progress"] = progress
-    if step_name is not None:
-        active_build["step_name"] = step_name
-        msg["step_name"] = step_name
+    with build_lock:
+        if progress is not None:
+            active_build["progress"] = progress
+            msg["progress"] = progress
+        if step_name is not None:
+            active_build["step_name"] = step_name
+            msg["step_name"] = step_name
 
-    active_build["logs"].append(msg)
-    if len(active_build["logs"]) > 2000:
-        active_build["logs"].pop(0)
+        active_build["logs"].append(msg)
+        if len(active_build["logs"]) > 2000:
+            active_build["logs"].pop(0)
+
+    with queue_lock:
+        queues_copy = list(active_build["log_queues"])
 
     dead_queues = []
-    for q in active_build["log_queues"]:
+    for q in queues_copy:
         try:
             q.put_nowait(msg)
         except Exception:
             dead_queues.append(q)
-    for dq in dead_queues:
-        if dq in active_build["log_queues"]:
-            active_build["log_queues"].remove(dq)
+
+    if dead_queues:
+        with queue_lock:
+            for dq in dead_queues:
+                if dq in active_build["log_queues"]:
+                    active_build["log_queues"].remove(dq)
 
 
 class LogCaptureStream:
@@ -1511,11 +1536,22 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+    def _get_allowed_origin(self) -> str:
+        headers = getattr(self, "headers", None)
+        origin = headers.get("Origin", "") if headers and hasattr(headers, "get") else ""
+        if origin:
+            parsed = urlparse(origin)
+            if parsed.hostname in ["localhost", "127.0.0.1", "::1"]:
+                return origin
+        port = getattr(self.server, "server_port", 8080) if hasattr(self, "server") and self.server else 8080
+        return f"http://127.0.0.1:{port}"
+
     def do_OPTIONS(self):
         self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", self._get_allowed_origin())
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Vary", "Origin")
         self.end_headers()
 
     def do_GET(self):
@@ -1625,7 +1661,17 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
         elif path == "/api/build/stream":
             self.serve_sse_stream()
         elif path == "/api/build/status":
-            self.serve_json(active_build)
+            with build_lock:
+                status_copy = {
+                    "running": active_build["running"],
+                    "progress": active_build["progress"],
+                    "step_name": active_build["step_name"],
+                    "status": active_build["status"],
+                    "error": active_build["error"],
+                    "city_code": active_build["city_code"],
+                    "logs": list(active_build["logs"][-100:])
+                }
+            self.serve_json(status_copy)
         elif path == "/api/download":
             city_file = query.get("file", [""])[0]
             city_base = os.path.splitext(os.path.basename(city_file))[0].lower() if city_file else ""
@@ -1878,7 +1924,18 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
         elif path == "/api/upload":
             try:
                 content_type = self.headers.get('Content-Type', '')
-                content_len = int(self.headers.get('Content-Length', 0))
+                try:
+                    content_len = int(self.headers.get('Content-Length', 0))
+                except (ValueError, TypeError):
+                    content_len = 0
+
+                MAX_UPLOAD_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
+                if content_len > MAX_UPLOAD_SIZE:
+                    self.serve_error("El archivo excede el tamaño máximo permitido de 2 GB", 413)
+                    return
+                if content_len <= 0:
+                    self.serve_error("El archivo está vacío o Content-Length es inválido", 400)
+                    return
 
                 if "multipart/form-data" not in content_type:
                     self.serve_error("Se esperaba multipart/form-data", 400)
@@ -1908,6 +1965,12 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                     elif city_file_param:
                         target_sub = os.path.splitext(os.path.basename(city_file_param))[0].lower()
                     target_dir = os.path.join(DATA_DIR, target_sub) if target_sub else DATA_DIR
+
+                norm_data = os.path.normcase(os.path.realpath(DATA_DIR))
+                norm_target = os.path.normcase(os.path.realpath(os.path.abspath(target_dir)))
+                if not (norm_target == norm_data or norm_target.startswith(norm_data + os.sep)):
+                    self.serve_error("Acceso denegado: carpeta de subida fuera de data/", 403)
+                    return
 
                 os.makedirs(target_dir, exist_ok=True)
 
@@ -1971,9 +2034,16 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                     self.serve_error("Falta el parámetro 'file'", 400)
                     return
 
-                if active_build["running"]:
-                    self.serve_error("Ya hay una compilación en progreso", 409)
-                    return
+                with build_lock:
+                    if active_build["running"]:
+                        self.serve_error("Ya hay una compilación en progreso", 409)
+                        return
+                    active_build["running"] = True
+                    active_build["status"] = "running"
+                    active_build["progress"] = 5
+                    active_build["step_name"] = "Iniciando Pipeline"
+                    active_build["logs"].clear()
+                    active_build["error"] = None
 
                 thread = threading.Thread(
                     target=run_pipeline_task,
@@ -1995,14 +2065,18 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "keep-alive")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", self._get_allowed_origin())
+        self.send_header("Vary", "Origin")
         self.end_headers()
 
-        log_q = queue.Queue()
-        active_build["log_queues"].append(log_q)
+        log_q = queue.Queue(maxsize=500)
+        with queue_lock:
+            active_build["log_queues"].append(log_q)
 
         try:
-            for past_log in active_build["logs"][-50:]:
+            with build_lock:
+                recent_logs = list(active_build["logs"][-50:])
+            for past_log in recent_logs:
                 data_str = json.dumps(past_log, ensure_ascii=False)
                 self.wfile.write(f"data: {data_str}\n\n".encode('utf-8'))
             self.wfile.flush()
@@ -2019,8 +2093,9 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, ConnectionError, OSError):
             pass
         finally:
-            if log_q in active_build["log_queues"]:
-                active_build["log_queues"].remove(log_q)
+            with queue_lock:
+                if log_q in active_build["log_queues"]:
+                    active_build["log_queues"].remove(log_q)
 
     def serve_html(self):
         if not os.path.exists(TEMPLATE_HTML_PATH):
@@ -2034,7 +2109,8 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", self._get_allowed_origin())
+        self.send_header("Vary", "Origin")
         self.end_headers()
         self.wfile.write(body)
 
@@ -2047,9 +2123,10 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", self._get_allowed_origin())
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("Vary", "Origin")
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.end_headers()
         self.wfile.write(body)
