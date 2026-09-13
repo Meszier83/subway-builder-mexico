@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Subway Builder México - Wizard v6.3</title>
+  <title>Subway Builder México - Wizard v7.1</title>
   
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -246,7 +246,7 @@
         <div class="flex items-center space-x-2">
           <span class="font-black text-lg tracking-wider text-white">SUBWAY BUILDER</span>
           <span class="text-xs bg-metro-orange text-white font-bold px-1.5 py-0.5 rounded tracking-widest">MÉXICO</span>
-          <span class="text-xs text-gray-400 font-mono">v6.3</span>
+          <span class="text-xs text-gray-400 font-mono">v7.1</span>
         </div>
         <p class="text-[11px] text-gray-400">Suite Visual de Modelación Demográfica y Gravitatoria</p>
       </div>
@@ -465,11 +465,11 @@
             </div>
           </div>
 
-          <!-- Preview de Zoom y Encuadre de Cámara (16:9) -->
-          <div class="bg-purple-50/80 p-2.5 rounded-lg border border-purple-200 space-y-1.5">
+          <!-- Preview de Zoom y Encuadre de Cámara (16:9 / Día 1) -->
+          <div class="bg-purple-50/90 p-3 rounded-xl border border-purple-200 space-y-2.5 shadow-2xs">
             <div class="flex items-center justify-between">
               <label class="flex items-center space-x-1.5 cursor-pointer text-xs font-bold text-purple-900">
-                <input type="checkbox" id="cfg_show_zoom_preview" checked class="w-3.5 h-3.5 accent-purple-600 rounded">
+                <input type="checkbox" id="cfg_show_zoom_preview" checked onchange="updateZoomPreviewLayer()" class="w-3.5 h-3.5 accent-purple-600 rounded">
                 <span>Marco Cámara 16:9 (Día 1)</span>
               </label>
               <button type="button" onclick="previewGameCamera()" class="px-2 py-0.5 bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-bold rounded flex items-center space-x-1 shadow-xs transition" title="Simular la vista inicial de cámara del juego">
@@ -478,8 +478,37 @@
               </button>
             </div>
             <p class="text-[10px] text-purple-700 leading-tight">
-              Muestra el rectángulo 16:9 que encuadrará el juego al iniciar la partida con este nivel de zoom.
+              Muestra el marco 16:9 que encuadrará la pantalla al iniciar la partida en Subway Builder.
             </p>
+
+            <!-- Botón de captura rápida de encuadre actual -->
+            <button type="button" onclick="captureCurrentViewport()" class="w-full py-1.5 px-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white text-xs font-bold rounded-lg flex items-center justify-center space-x-1.5 shadow-sm transition active:scale-[0.98]">
+              <i data-lucide="crosshair" class="w-3.5 h-3.5"></i>
+              <span>Capturar Vista Actual (Centro + Zoom)</span>
+            </button>
+
+            <!-- Inputs de Centro de Cámara -->
+            <div class="grid grid-cols-2 gap-2 text-stone-800">
+              <div>
+                <label class="block text-[10px] text-purple-800 font-bold mb-0.5">Lon Centro (X)</label>
+                <input type="number" step="0.0001" id="cfg_initial_lon" placeholder="Auto BBOX" oninput="onCameraParamChange()" class="w-full bg-white border border-purple-200 rounded-md px-2 py-1 text-stone-900 font-mono text-xs focus:ring-1 focus:ring-purple-400">
+              </div>
+              <div>
+                <label class="block text-[10px] text-purple-800 font-bold mb-0.5">Lat Centro (Y)</label>
+                <input type="number" step="0.0001" id="cfg_initial_lat" placeholder="Auto BBOX" oninput="onCameraParamChange()" class="w-full bg-white border border-purple-200 rounded-md px-2 py-1 text-stone-900 font-mono text-xs focus:ring-1 focus:ring-purple-400">
+              </div>
+            </div>
+
+            <!-- Acciones secundarias -->
+            <div class="flex items-center justify-between pt-1 border-t border-purple-200/60 text-[10px]">
+              <span class="text-purple-600 italic flex items-center space-x-1">
+                <i data-lucide="move" class="w-3 h-3"></i>
+                <span>Tirador morado arrastrable en mapa</span>
+              </span>
+              <button type="button" onclick="resetCameraToBboxCenter()" class="text-purple-700 hover:text-purple-900 font-bold hover:underline">
+                ↺ Centrar en BBOX
+              </button>
+            </div>
           </div>
 
           <!-- Opciones Cartográficas -->
@@ -503,12 +532,12 @@
             <div class="flex items-center justify-between">
               <div class="flex items-center space-x-1.5">
                 <i data-lucide="layers" class="w-4 h-4 text-amber-600"></i>
-                <span class="font-bold text-stone-800">Núcleo Urbano (LOD / AOI)</span>
+                <span class="font-bold text-stone-800">Núcleo Urbano (LOD / Demanda)</span>
               </div>
               <span id="urbanCoreBadge" class="text-[10px] bg-stone-200 border border-stone-300 text-stone-700 px-2 py-0.5 rounded-full font-bold">100% BBOX</span>
             </div>
             <p class="text-[11px] text-stone-500 leading-tight">
-              Delimita la mancha urbana para apagar edificios 3D y calles menores en la periferia (mar, selva, montañas), manteniendo el horizonte continuo.
+              Delimita la mancha urbana metropolitana útil. Fuera del contorno, la demanda se anula y la cartografía se simplifica para mantener horizontes fluidos a 60 FPS.
             </p>
             <div class="grid grid-cols-2 gap-2">
               <button type="button" onclick="startDrawingUrbanCore()" id="btnDrawUrbanCore" class="bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold py-1.5 px-2 rounded-lg flex items-center justify-center space-x-1 transition shadow-2xs">
@@ -523,6 +552,69 @@
             <button type="button" id="btnClearUrbanCore" onclick="clearUrbanCorePolygon()" class="hidden w-full text-center text-[11px] text-rose-600 font-bold hover:underline py-0.5">
               Eliminar Polígono Núcleo
             </button>
+
+            <!-- Restringir Demanda al Núcleo Urbano -->
+            <div class="pt-2 border-t border-stone-200/80 flex items-center justify-between">
+              <div class="pr-2">
+                <span class="text-stone-800 font-semibold text-xs block">Restringir Demanda al Núcleo</span>
+                <span class="text-[10px] text-stone-500 block leading-tight">Excluye habitantes y empleos fuera del polígono (cero viajes en periferia)</span>
+              </div>
+              <input type="checkbox" id="cfg_restrict_demand_to_urban_core" checked class="w-4 h-4 accent-metro-orange rounded cursor-pointer">
+            </div>
+
+            <!-- Panel de Personalización Avanzada de LOD -->
+            <details class="bg-white/90 rounded-lg border border-amber-200/80 p-2.5 text-xs space-y-2 group mt-1.5 shadow-2xs">
+              <summary class="font-bold text-amber-950 cursor-pointer flex items-center justify-between select-none text-[11px]">
+                <div class="flex items-center space-x-1.5">
+                  <i data-lucide="sliders" class="w-3.5 h-3.5 text-amber-600"></i>
+                  <span>Ajustes Avanzados de LOD y Cartografía</span>
+                </div>
+                <span class="text-[9px] text-amber-700 group-open:rotate-180 transition-transform">▼</span>
+              </summary>
+              <div class="pt-2 space-y-2.5">
+                <!-- Vías Periféricas -->
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[10px] mb-0.5">Red Vial en Periferia (Horizonte)</label>
+                  <select id="cfg_lod_peripheral_roads" class="w-full bg-stone-50 border border-stone-300 rounded px-2 py-1 text-stone-800 text-[11px] font-medium">
+                    <option value="ultralight">Ultraligero (Solo autopistas y troncales - Máx. FPS)</option>
+                    <option value="standard" selected>Estándar (Autopistas + Primarias + Secundarias)</option>
+                    <option value="detailed">Detallado (Incluye carreteras terciarias rurales)</option>
+                  </select>
+                  <span class="text-[9px] text-stone-500 block leading-tight mt-0.5">Controla la densidad de líneas viales visibles en el horizonte fuera del núcleo.</span>
+                </div>
+
+                <!-- Andadores Peatonales -->
+                <div class="flex items-center justify-between pt-1 border-t border-stone-100">
+                  <div class="pr-2">
+                    <span class="text-stone-700 font-semibold text-[10px] block">Omitir Andadores y Veredas en Núcleo</span>
+                    <span class="text-[9px] text-stone-500 block leading-tight">Excluye footway, path y cycleway para aligerar la malla urbana un 30%</span>
+                  </div>
+                  <input type="checkbox" id="cfg_omit_pedestrian_paths" class="w-3.5 h-3.5 accent-metro-orange rounded cursor-pointer">
+                </div>
+
+                <!-- Toponimia Periférica -->
+                <div class="pt-1 border-t border-stone-100">
+                  <label class="block text-stone-700 font-semibold text-[10px] mb-0.5">Toponimia y Etiquetas en Periferia</label>
+                  <select id="cfg_lod_peripheral_labels" class="w-full bg-stone-50 border border-stone-300 rounded px-2 py-1 text-stone-800 text-[11px] font-medium">
+                    <option value="none" selected>Periferia Limpia (Sin letreros fuera del núcleo - Recomendado)</option>
+                    <option value="cities_only">Solo Ciudades Principales (Cabeceras metropolitanas)</option>
+                    <option value="all">Todas las Etiquetas (Comportamiento OSM normal)</option>
+                  </select>
+                  <span class="text-[9px] text-stone-500 block leading-tight mt-0.5">Evita que pueblos rurales lejanos llenen el mapa de nombres.</span>
+                </div>
+
+                <!-- Edificios 3D en Periferia -->
+                <div class="pt-1 border-t border-stone-100">
+                  <label class="block text-stone-700 font-semibold text-[10px] mb-0.5">Edificios 3D en Periferia</label>
+                  <select id="cfg_lod_peripheral_buildings" class="w-full bg-stone-50 border border-stone-300 rounded px-2 py-1 text-stone-800 text-[11px] font-medium">
+                    <option value="none" selected>Apagados al 100% (60 FPS fluidos - Recomendado)</option>
+                    <option value="large_only">Solo Complejos Masivos (&gt; 1,000 m²)</option>
+                    <option value="all">Sin Restricción (Renderizar en todo el BBOX)</option>
+                  </select>
+                  <span class="text-[9px] text-stone-500 block leading-tight mt-0.5">Los edificios dentro del núcleo se filtran con el tamaño de área general.</span>
+                </div>
+              </div>
+            </details>
           </div>
 
           <!-- Zonas Topológicas Aisladas (Islas / Cuencas) -->
@@ -3101,23 +3193,52 @@
       return [21.16, -86.85];
     }
 
+    function getCameraCenter() {
+      const latEl = document.getElementById('cfg_initial_lat');
+      const lonEl = document.getElementById('cfg_initial_lon');
+      if (latEl && lonEl && latEl.value.trim() !== '' && lonEl.value.trim() !== '') {
+        const lat = parseFloat(latEl.value);
+        const lon = parseFloat(lonEl.value);
+        if (!isNaN(lat) && !isNaN(lon)) {
+          return [lat, lon];
+        }
+      }
+      if (cityData && cityData.city && Array.isArray(cityData.city.initial_center) && cityData.city.initial_center.length === 2) {
+        const lon = parseFloat(cityData.city.initial_center[0]);
+        const lat = parseFloat(cityData.city.initial_center[1]);
+        if (!isNaN(lat) && !isNaN(lon)) {
+          return [lat, lon];
+        }
+      }
+      return getBboxCenter();
+    }
+
+    let cameraCenterMarker = null;
+
     function updateZoomPreviewLayer() {
       if (!mapBbox || !zoomPreviewGroup) return;
       zoomPreviewGroup.clearLayers();
+      cameraCenterMarker = null;
 
       const showPreview = document.getElementById('cfg_show_zoom_preview')?.checked ?? true;
       if (!showPreview) return;
 
-      const center = getBboxCenter();
+      const center = getCameraCenter();
       const centerLatLng = L.latLng(center[0], center[1]);
       const zoomInput = document.getElementById('cfg_initial_zoom');
       const zoom = zoomInput ? (parseFloat(zoomInput.value) || 11.5) : 11.5;
 
-      // Pantalla estándar 16:9 de referencia (1920 x 1080 px en el canvas del juego)
+      // Actualizar inputs si estaban vacios
+      const latEl = document.getElementById('cfg_initial_lat');
+      const lonEl = document.getElementById('cfg_initial_lon');
+      if (latEl && !latEl.value) latEl.value = center[0].toFixed(5);
+      if (lonEl && !lonEl.value) lonEl.value = center[1].toFixed(5);
+
+      // Pantalla estandar 16:9 de referencia (1920 x 1080 px en el canvas del juego)
       const screenW = 1920;
       const screenH = 1080;
 
-      // Proyectar coordenadas geográficas a píxeles mundiales Web Mercator al nivel de zoom configurado
+      // Proyectar coordenadas geograficas a pixeles mundiales Web Mercator al nivel de zoom configurado
       const centerPoint = mapBbox.project(centerLatLng, zoom);
       const swPoint = L.point(centerPoint.x - (screenW / 2), centerPoint.y + (screenH / 2));
       const nePoint = L.point(centerPoint.x + (screenW / 2), centerPoint.y - (screenH / 2));
@@ -3132,23 +3253,132 @@
         dashArray: '5, 5',
         fillColor: '#8B5CF6',
         fillOpacity: 0.08,
-        interactive: true
+        interactive: false
       }).addTo(zoomPreviewGroup);
 
       zoomPreviewRectangle.bindTooltip(
         `<strong>🖥️ Encuadre de Cámara Día 1 (16:9)</strong><br>` +
-        `<span class="text-[11px]">Zoom inicial configurado: <b>${zoom}</b> &bull; Cobertura en pantalla completa</span>`,
+        `<span class="text-[11px]">Centro: [${center[1].toFixed(4)}, ${center[0].toFixed(4)}] &bull; Zoom: <b>${zoom}</b></span>`,
         { sticky: true, direction: 'top', className: 'poi-custom-tooltip' }
       );
+
+      // Marcador de mira interactivo arrastrable
+      const cameraIcon = L.divIcon({
+        className: 'custom-camera-center-icon',
+        html: `<div title="Arrastra para reubicar la cámara inicial del juego" style="width:30px;height:30px;background:rgba(124,58,237,0.92);border:2.5px solid #ffffff;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,0.4);cursor:grab;transition:transform 0.15s ease;">
+                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                   <circle cx="12" cy="12" r="3"></circle>
+                   <path d="M3 12h4m10 0h4M12 3v4m0 10v4"></path>
+                 </svg>
+               </div>`,
+        iconSize: [30, 30],
+        iconAnchor: [15, 15]
+      });
+
+      cameraCenterMarker = L.marker(centerLatLng, {
+        icon: cameraIcon,
+        draggable: true,
+        zIndexOffset: 1000
+      }).addTo(zoomPreviewGroup);
+
+      cameraCenterMarker.bindTooltip("<b>🎯 Centro de Cámara Día 1</b><br><span class='text-[10px]'>Arrastra para encuadrar la ciudad</span>", {
+        direction: 'top',
+        offset: [0, -15]
+      });
+
+      cameraCenterMarker.on('drag', function(e) {
+        const newPos = e.target.getLatLng();
+        if (latEl) latEl.value = newPos.lat.toFixed(5);
+        if (lonEl) lonEl.value = newPos.lng.toFixed(5);
+        if (cityData && cityData.city) {
+          cityData.city.initial_center = [parseFloat(newPos.lng.toFixed(5)), parseFloat(newPos.lat.toFixed(5))];
+        }
+        // Actualizar el rectangulo de camara en tiempo real
+        const cp = mapBbox.project(newPos, zoom);
+        const swP = L.point(cp.x - (screenW / 2), cp.y + (screenH / 2));
+        const neP = L.point(cp.x + (screenW / 2), cp.y - (screenH / 2));
+        const cb = L.latLngBounds(mapBbox.unproject(swP, zoom), mapBbox.unproject(neP, zoom));
+        if (zoomPreviewRectangle) {
+          zoomPreviewRectangle.setBounds(cb);
+          zoomPreviewRectangle.setTooltipContent(
+            `<strong>🖥️ Encuadre de Cámara Día 1 (16:9)</strong><br>` +
+            `<span class="text-[11px]">Centro: [${newPos.lng.toFixed(4)}, ${newPos.lat.toFixed(4)}] &bull; Zoom: <b>${zoom}</b></span>`
+          );
+        }
+      });
+
+      cameraCenterMarker.on('dragend', function(e) {
+        const newPos = e.target.getLatLng();
+        triggerAutoSave();
+        showToast(`Centro de cámara fijado: [${newPos.lng.toFixed(4)}, ${newPos.lat.toFixed(4)}]`, "info");
+      });
+    }
+
+    function captureCurrentViewport() {
+      if (!mapBbox) return;
+      const center = mapBbox.getCenter();
+      const rawZoom = mapBbox.getZoom();
+      const currentZoom = parseFloat((Math.round(rawZoom * 2) / 2).toFixed(1));
+
+      const zoomInput = document.getElementById('cfg_initial_zoom');
+      if (zoomInput) zoomInput.value = currentZoom;
+
+      const latEl = document.getElementById('cfg_initial_lat');
+      const lonEl = document.getElementById('cfg_initial_lon');
+      if (latEl) latEl.value = center.lat.toFixed(5);
+      if (lonEl) lonEl.value = center.lng.toFixed(5);
+
+      if (cityData && cityData.city) {
+        cityData.city.initial_zoom = currentZoom;
+        cityData.city.initial_center = [parseFloat(center.lng.toFixed(5)), parseFloat(center.lat.toFixed(5))];
+      }
+
+      updateZoomPreviewLayer();
+      triggerAutoSave();
+      showToast(`Vista de cámara capturada: [${center.lng.toFixed(4)}, ${center.lat.toFixed(4)}] (Zoom: ${currentZoom})`, "success");
+    }
+
+    function resetCameraToBboxCenter() {
+      const center = getBboxCenter();
+      const latEl = document.getElementById('cfg_initial_lat');
+      const lonEl = document.getElementById('cfg_initial_lon');
+      if (latEl) latEl.value = center[0].toFixed(5);
+      if (lonEl) lonEl.value = center[1].toFixed(5);
+
+      if (cityData && cityData.city) {
+        cityData.city.initial_center = [parseFloat(center[1].toFixed(5)), parseFloat(center[0].toFixed(5))];
+      }
+
+      updateZoomPreviewLayer();
+      triggerAutoSave();
+      showToast("Cámara re-centrada al centroide del BBOX", "info");
+    }
+
+    function onCameraParamChange() {
+      const zoomInput = document.getElementById('cfg_initial_zoom');
+      const latEl = document.getElementById('cfg_initial_lat');
+      const lonEl = document.getElementById('cfg_initial_lon');
+      if (cityData && cityData.city) {
+        if (zoomInput) cityData.city.initial_zoom = parseFloat(zoomInput.value) || 11.5;
+        if (latEl && lonEl && latEl.value.trim() !== '' && lonEl.value.trim() !== '') {
+          const lat = parseFloat(latEl.value);
+          const lon = parseFloat(lonEl.value);
+          if (!isNaN(lat) && !isNaN(lon)) {
+            cityData.city.initial_center = [parseFloat(lon.toFixed(5)), parseFloat(lat.toFixed(5))];
+          }
+        }
+      }
+      updateZoomPreviewLayer();
+      triggerAutoSave();
     }
 
     function previewGameCamera() {
       if (!mapBbox) return;
-      const center = getBboxCenter();
+      const center = getCameraCenter();
       const zoomInput = document.getElementById('cfg_initial_zoom');
       const zoom = zoomInput ? (parseFloat(zoomInput.value) || 11.5) : 11.5;
       mapBbox.flyTo(center, zoom, { duration: 1.0 });
-      showToast(`Simulando cámara inicial del juego (Zoom: ${zoom})`, "info");
+      showToast(`Simulando cámara inicial en [${center[1].toFixed(4)}, ${center[0].toFixed(4)}] (Zoom: ${zoom})`, "info");
     }
 
     function captureCurrentZoom() {
@@ -3887,7 +4117,7 @@
           dashArray: '5, 5',
           fillColor: '#F59E0B',
           fillOpacity: 0.2
-        }).bindTooltip(`<strong>🏛️ Núcleo Urbano (LOD)</strong><br><span class="text-[10px] text-stone-500">Edificios 3D y calles finas activas</span>`, { sticky: true });
+        }).bindTooltip(`<strong>🏛️ Núcleo Urbano (LOD / Demanda)</strong><br><span class="text-[10px] text-stone-500">Demanda activa, edificios 3D y calles finas</span>`, { sticky: true });
 
         if (urbanCoreGroup) {
           urbanCoreGroup.addLayer(urbanCoreLayer);
@@ -5303,11 +5533,37 @@
       const zoomEl = document.getElementById('cfg_initial_zoom');
       if (zoomEl) cityData.city.initial_zoom = parseFloat(zoomEl.value);
 
+      const lonEl = document.getElementById('cfg_initial_lon');
+      const latEl = document.getElementById('cfg_initial_lat');
+      if (lonEl && latEl && lonEl.value.trim() !== '' && latEl.value.trim() !== '') {
+        const lon = parseFloat(lonEl.value);
+        const lat = parseFloat(latEl.value);
+        if (!isNaN(lon) && !isNaN(lat)) {
+          cityData.city.initial_center = [parseFloat(lon.toFixed(5)), parseFloat(lat.toFixed(5))];
+        }
+      }
+
       const oceanEl = document.getElementById('cfg_include_ocean');
       if (oceanEl) cityData.city.include_ocean = oceanEl.checked;
 
       const parksEl = document.getElementById('cfg_urban_parks_only');
       if (parksEl) cityData.city.urban_parks_only = parksEl.checked;
+
+      const restrictDemandEl = document.getElementById('cfg_restrict_demand_to_urban_core');
+      if (restrictDemandEl) cityData.city.restrict_demand_to_urban_core = restrictDemandEl.checked;
+
+      const lodRoadsEl = document.getElementById('cfg_lod_peripheral_roads');
+      if (lodRoadsEl) cityData.city.lod_peripheral_roads = lodRoadsEl.value;
+
+      const omitPedEl = document.getElementById('cfg_omit_pedestrian_paths');
+      if (omitPedEl) cityData.city.include_pedestrian_paths = !omitPedEl.checked;
+
+      const lodLabelsEl = document.getElementById('cfg_lod_peripheral_labels');
+      if (lodLabelsEl) cityData.city.lod_peripheral_labels = lodLabelsEl.value;
+
+      const lodBldgsEl = document.getElementById('cfg_lod_peripheral_buildings');
+      if (lodBldgsEl) cityData.city.lod_peripheral_buildings = lodBldgsEl.value;
+
 
       const minResidentsEl = document.getElementById('cfg_min_residents');
       if (minResidentsEl) cityData.city.min_residents = parseInt(minResidentsEl.value, 10) || 10;
@@ -5425,12 +5681,39 @@
       document.getElementById('cfg_city_desc').value = c.description || "";
       document.getElementById('cfg_grid_size').value = c.grid_size || 0.0025;
       document.getElementById('cfg_initial_zoom').value = c.initial_zoom || 11.5;
+      const lonEl = document.getElementById('cfg_initial_lon');
+      const latEl = document.getElementById('cfg_initial_lat');
+      if (lonEl && latEl) {
+        if (c.initial_center && Array.isArray(c.initial_center) && c.initial_center.length === 2) {
+          lonEl.value = parseFloat(c.initial_center[0]).toFixed(5);
+          latEl.value = parseFloat(c.initial_center[1]).toFixed(5);
+        } else {
+          lonEl.value = "";
+          latEl.value = "";
+        }
+      }
       document.getElementById('cfg_include_ocean').checked = Boolean(c.include_ocean);
 
       const parksEl = document.getElementById('cfg_urban_parks_only');
       if (parksEl) parksEl.checked = Boolean(c.urban_parks_only);
       const parksStep5El = document.getElementById('chkUrbanParksStep5');
       if (parksStep5El) parksStep5El.checked = Boolean(c.urban_parks_only);
+
+      const restrictDemandEl = document.getElementById('cfg_restrict_demand_to_urban_core');
+      if (restrictDemandEl) restrictDemandEl.checked = c.restrict_demand_to_urban_core !== undefined ? Boolean(c.restrict_demand_to_urban_core) : true;
+
+      const lodRoadsEl = document.getElementById('cfg_lod_peripheral_roads');
+      if (lodRoadsEl) lodRoadsEl.value = c.lod_peripheral_roads || "standard";
+
+      const omitPedEl = document.getElementById('cfg_omit_pedestrian_paths');
+      if (omitPedEl) omitPedEl.checked = c.include_pedestrian_paths !== undefined ? !Boolean(c.include_pedestrian_paths) : false;
+
+      const lodLabelsEl = document.getElementById('cfg_lod_peripheral_labels');
+      if (lodLabelsEl) lodLabelsEl.value = c.lod_peripheral_labels || "none";
+
+      const lodBldgsEl = document.getElementById('cfg_lod_peripheral_buildings');
+      if (lodBldgsEl) lodBldgsEl.value = c.lod_peripheral_buildings || "none";
+
 
       const mrEl = document.getElementById('cfg_min_residents');
       if (mrEl) mrEl.value = c.min_residents !== undefined ? c.min_residents : 10;
@@ -5522,7 +5805,7 @@
       // Adjuntar listeners de auto-guardado a los campos de formulario
       const inputIds = [
         'cfg_city_name', 'cfg_city_code', 'cfg_city_creator', 'cfg_city_desc',
-        'cfg_grid_size', 'cfg_initial_zoom', 'cfg_include_ocean', 'cfg_urban_parks_only',
+        'cfg_grid_size', 'cfg_initial_zoom', 'cfg_initial_lon', 'cfg_initial_lat', 'cfg_include_ocean', 'cfg_urban_parks_only',
         'cfg_min_residents', 'cfg_min_jobs',
         'cfg_building_filter_size', 'cfg_building_simplification',
         'cfg_bbox_0', 'cfg_bbox_1', 'cfg_bbox_2', 'cfg_bbox_3',
@@ -5530,7 +5813,9 @@
         'cfg_max_distance_km', 'cfg_min_pop_size', 'cfg_target_pop_size', 'cfg_max_pop_size', 'cfg_seed',
         'cfg_sample_threshold', 'cfg_furness_iterations', 'cfg_furness_tol',
         'cfg_modal_experiment_enabled', 'cfg_modal_experiment_preset',
-        'cfg_modal_traffic_speed', 'cfg_modal_motorization_rate'
+        'cfg_modal_traffic_speed', 'cfg_modal_motorization_rate',
+        'cfg_restrict_demand_to_urban_core', 'cfg_lod_peripheral_roads',
+        'cfg_omit_pedestrian_paths', 'cfg_lod_peripheral_labels', 'cfg_lod_peripheral_buildings'
       ];
       inputIds.forEach(id => {
         const el = document.getElementById(id);

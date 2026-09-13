@@ -9,7 +9,7 @@ Inspirado en la estética del Metro de la CDMX (Lance Wyman).
 
 Uso:
     python tools/wizard.py
-    python tools/wizard.py --city cities/cancun.yaml
+    python tools/wizard.py --city cities/cancun_riviera_maya.yaml
     python tools/wizard.py --port 8080 --no-browser
 """
 
@@ -177,8 +177,19 @@ def load_city_data(rel_or_abs_path: str) -> Dict[str, Any]:
         city["building_filter_size"] = 15.0
     if "building_simplification" not in city:
         city["building_simplification"] = 0.2
+    if "restrict_demand_to_urban_core" not in city:
+        city["restrict_demand_to_urban_core"] = True
+    if "lod_peripheral_roads" not in city:
+        city["lod_peripheral_roads"] = "standard"
+    if "include_pedestrian_paths" not in city:
+        city["include_pedestrian_paths"] = False
+    if "lod_peripheral_labels" not in city:
+        city["lod_peripheral_labels"] = "none"
+    if "lod_peripheral_buildings" not in city:
+        city["lod_peripheral_buildings"] = "none"
 
     if "min_pop_size" not in macro:
+
         macro["min_pop_size"] = 25
     if "target_pop_size" not in macro:
         macro["target_pop_size"] = 150
@@ -267,9 +278,26 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         f'  include_ocean: {"true" if city_cfg.get("include_ocean") else "false"}',
         f'  urban_parks_only: {"true" if city_cfg.get("urban_parks_only") else "false"}',
     ])
+    if city_cfg.get("initial_center") and isinstance(city_cfg.get("initial_center"), (list, tuple)) and len(city_cfg["initial_center"]) == 2:
+        try:
+            ic = [round(float(city_cfg["initial_center"][0]), 5), round(float(city_cfg["initial_center"][1]), 5)]
+            lines.append(f'  initial_center: {ic}')
+        except (ValueError, TypeError):
+            pass
     if city_cfg.get("urban_core_polygon"):
         lines.append(f'  urban_core_polygon: {json.dumps(city_cfg.get("urban_core_polygon"))}')
+    if city_cfg.get("restrict_demand_to_urban_core") is not None:
+        lines.append(f'  restrict_demand_to_urban_core: {"true" if city_cfg.get("restrict_demand_to_urban_core") else "false"}')
+    if city_cfg.get("lod_peripheral_roads"):
+        lines.append(f'  lod_peripheral_roads: {_yaml_quote(city_cfg.get("lod_peripheral_roads", "standard"))}')
+    if city_cfg.get("include_pedestrian_paths") is not None:
+        lines.append(f'  include_pedestrian_paths: {"true" if city_cfg.get("include_pedestrian_paths") else "false"}')
+    if city_cfg.get("lod_peripheral_labels"):
+        lines.append(f'  lod_peripheral_labels: {_yaml_quote(city_cfg.get("lod_peripheral_labels", "none"))}')
+    if city_cfg.get("lod_peripheral_buildings"):
+        lines.append(f'  lod_peripheral_buildings: {_yaml_quote(city_cfg.get("lod_peripheral_buildings", "none"))}')
     lines.append("")
+
 
     if data_dir_cfg:
         lines.append(f'data_dir: {_yaml_quote(data_dir_cfg)}')
@@ -512,7 +540,12 @@ def create_new_project(name: str, code: str, creator: str = "Creador", data_dir:
             "building_filter_size": 15.0,
             "building_simplification": 0.2,
             "include_ocean": False,
-            "urban_parks_only": False
+            "urban_parks_only": False,
+            "restrict_demand_to_urban_core": True,
+            "lod_peripheral_roads": "standard",
+            "include_pedestrian_paths": False,
+            "lod_peripheral_labels": "none",
+            "lod_peripheral_buildings": "none"
         },
         "data_dir": resolved_data_dir,
         "data_exclusions": [],
@@ -2222,7 +2255,7 @@ def main():
     parser.add_argument(
         "--city",
         default=None,
-        help="Archivo YAML de ciudad inicial a cargar (ej. cities/cancun.yaml)"
+        help="Archivo YAML de ciudad inicial a cargar (ej. cities/cancun_riviera_maya.yaml)"
     )
     parser.add_argument(
         "--port",

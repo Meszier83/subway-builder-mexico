@@ -29,14 +29,14 @@ for i in range(150):
         "popIds": []
     })
 
-# 2. POIs de Cancún declarados en cancun.yaml
+# 2. POIs de Cancún declarados en cancun_riviera_maya.yaml
 pois = [
-    {"id": "AIR_Aeropuerto_CUN", "location": [-86.874, 21.036], "jobs": 15000, "residents": 0, "pea_15ymas": 0, "is_special": True, "popIds": []},
-    {"id": "Zona_Hotelera_Punta_Cancun", "location": [-86.747, 21.137], "jobs": 12000, "residents": 1200, "pea_15ymas": 600, "is_special": True, "popIds": []},
-    {"id": "Zona_Hotelera_Punta_Nizuc", "location": [-86.784, 21.042], "jobs": 8000, "residents": 500, "pea_15ymas": 250, "is_special": True, "popIds": []},
-    {"id": "Plaza_Las_Americas", "location": [-86.824, 21.147], "jobs": 5500, "residents": 200, "pea_15ymas": 100, "is_special": True, "popIds": []},
-    {"id": "UNI_Universidad_Caribe", "location": [-86.851, 21.198], "jobs": 4500, "residents": 0, "pea_15ymas": 0, "is_special": True, "popIds": []},
-    {"id": "UNI_Tec_Cancun", "location": [-86.848, 21.144], "jobs": 3500, "residents": 0, "pea_15ymas": 0, "is_special": True, "popIds": []}
+    {"id": "AIR_Cancun", "location": [-86.874, 21.036], "jobs": 15000, "residents": 0, "pea_15ymas": 0, "is_special": True, "popIds": []},
+    {"id": "Zona Hotelera Punta Cancun", "location": [-86.747, 21.137], "jobs": 12000, "residents": 1200, "pea_15ymas": 600, "is_special": True, "popIds": []},
+    {"id": "Zona Hotelera Punta Nizuc", "location": [-86.784, 21.042], "jobs": 8000, "residents": 500, "pea_15ymas": 250, "is_special": True, "popIds": []},
+    {"id": "Plaza Las Americas", "location": [-86.824, 21.147], "jobs": 5500, "residents": 200, "pea_15ymas": 100, "is_special": True, "popIds": []},
+    {"id": "UNI_Universidad del Caribe", "location": [-86.851, 21.198], "jobs": 4500, "residents": 0, "pea_15ymas": 0, "is_special": True, "popIds": []},
+    {"id": "UNI_Tecnologico de Cancun", "location": [-86.848, 21.144], "jobs": 3500, "residents": 0, "pea_15ymas": 0, "is_special": True, "popIds": []}
 ]
 
 points.extend(pois)
@@ -46,7 +46,7 @@ pops = simulate_gravity_demand(demand_points=points, beta=0.12, max_pop_size=150
 
 clean_points = sanitize_demand_points(points)
 
-out_demo_dir = os.path.join("dist", "cancun")
+out_demo_dir = os.path.join("dist", "cancun_riviera_maya")
 os.makedirs(out_demo_dir, exist_ok=True)
 demand_path = os.path.join(out_demo_dir, "demand_data.json")
 config_path = os.path.join(out_demo_dir, "config.json")
@@ -56,9 +56,9 @@ with open(demand_path, "w", encoding="utf-8") as f:
     json.dump({"points": clean_points, "pops": pops}, f)
 
 config_data = {
-    "name": "Cancun y Riviera Norte",
-    "code": "CUN",
-    "description": "Zona Metropolitana de Cancun, Isla Mujeres y Corredor Turistico",
+    "name": "Cancun / Riviera Maya",
+    "code": "CUR",
+    "description": "Zona Metropolitana de Cancun y Riviera Maya",
     "population": sum(p["size"] for p in pops),
     "initialViewState": {
         "zoom": 11.5,
@@ -68,7 +68,7 @@ config_data = {
         "bearing": 0
     },
     "creator": "Keppler",
-    "version": "6.3.0"
+    "version": "7.1.0"
 }
 
 with open(config_path, "w", encoding="utf-8") as f:

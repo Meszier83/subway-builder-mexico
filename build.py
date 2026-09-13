@@ -3,8 +3,8 @@
 Subway Builder México CLI - v7.1
 ================================
 Ejecución:
-    python build.py cities/cancun.yaml
-    python build.py cities/cancun.yaml --skip-map   (para regenerar solo la demanda)
+    python build.py cities/cancun_riviera_maya.yaml
+    python build.py cities/cancun_riviera_maya.yaml --skip-map   (para regenerar solo la demanda)
 """
 
 import sys
@@ -17,7 +17,7 @@ def main():
     )
     parser.add_argument(
         "config",
-        help="Ruta al archivo YAML de configuración de la ciudad (ej. cities/cancun.yaml)"
+        help="Ruta al archivo YAML de configuración de la ciudad (ej. cities/cancun_riviera_maya.yaml)"
     )
     parser.add_argument(
         "--skip-map",

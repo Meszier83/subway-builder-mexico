@@ -12,9 +12,23 @@ city:
   min_residents: 10                   # Mínimo de habitantes para activar nodo de origen
   min_jobs: 3                         # Mínimo de empleos para activar nodo de destino
   initial_zoom: 11.5                  # Nivel de zoom inicial en el juego
+  initial_center: [-86.85, 21.16]     # (Opcional) [lon, lat] del encuadre inicial de cámara (Día 1)
   building_filter_size: 15.0          # Filtro de edificios 3D (10-20, mayor = mejor rendimiento)
   building_simplification: 0.2        # Simplificación de geometría de edificios
   include_ocean: false                # true si es ciudad costera con océano modelado
+  urban_parks_only: false             # true para suprimir macro-reservas rurales fuera de parques urbanos
+  # urban_core_polygon:               # (Opcional) Polígono de núcleo urbano denso (AOI LOD concéntrico y máscara de demanda)
+  #   - [-86.88, 21.18]               # Restringe residentes, empleos, edificios 3D y vías locales a la mancha urbana densa,
+  #   - [-86.80, 21.18]               # conservando troncales y horizontes limpios en el BBOX completo.
+  #   - [-86.80, 21.10]
+  #   - [-86.88, 21.10]
+  #   - [-86.88, 21.18]
+  # restrict_demand_to_urban_core: true # true por defecto: excluye población/empleos fuera del núcleo
+  # lod_peripheral_roads: "standard"   # "ultralight" (solo autopistas), "standard", "detailed" (incluye terciarias)
+  # include_pedestrian_paths: false   # true para incluir andadores peatonales interiores (footway, cycleway, path)
+  # lod_peripheral_labels: "none"     # "none" (periferia limpia), "cities_only", "all"
+  # lod_peripheral_buildings: "none"  # "none" (apagados), "large_only" (>1000m²), "all"
+
 
 macroeconomics:
   tasa_pea: 0.62                      # Tasa de participación laboral (ENOE)
@@ -147,7 +161,7 @@ pois:
     metadata:
       source: "ASUR / AFAC 2026"
 
-  - id: "UNI_Campus_Metropolitano"
+  - id: "UNI_Campus Metropolitano"
     name:
       es: "Universidad Metropolitana"
       en: "Metropolitan University"
@@ -157,7 +171,7 @@ pois:
     radius_m: 800                     # Radio del campus
     mode: "MAX"
 
-  - id: "TOU_Centro_Convenciones"
+  - id: "TOU_Centro de Convenciones"
     name:
       es: "Centro Internacional de Convenciones"
       en: "International Convention Center"
@@ -166,3 +180,16 @@ pois:
     jobs: 6000                        # Flujo de visitantes/turistas en nodo ancla
     radius_m: 600                     # Radio acotado (no cubre todo el corredor)
     mode: "MAX"
+
+# ==============================================================================
+# TOPONIMIA URBANA Y ASENTAMIENTOS ADICIONALES (PLACES - OPCIONAL)
+# ==============================================================================
+# Colonias, barrios y supermanzanas para inyectar en la cartografía 3D (etiquetas).
+# Tipos: "suburb" (colonia grande / supermanzana), "neighbourhood" (barrio / fraccionamiento), "quarter" (cuadrante)
+# places:
+#   - name: "Supermanzana 94"
+#     loc: [-86.8653, 21.1610]
+#     type: "suburb"
+#   - name: "Fracc. Paseos Del Mar"
+#     loc: [-86.9099, 21.1737]
+#     type: "neighbourhood"

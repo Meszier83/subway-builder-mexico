@@ -7,7 +7,7 @@ y validar POIs sobre mapas Leaflet y capas satelitales en tiempo real.
 
 Uso:
     python tools/poi_studio.py
-    python tools/poi_studio.py --city cities/cancun.yaml
+    python tools/poi_studio.py --city cities/cancun_riviera_maya.yaml
     python tools/poi_studio.py --port 8085 --no-browser
 """
 
@@ -386,6 +386,16 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
             except Exception:
                 pass
     exclusion_zones = cdata.get("exclusion_zones", []) if cdata else []
+    city_dict = cdata.get("city", {}) if cdata else {}
+    urban_core_polygon = city_dict.get("urban_core_polygon") or (cdata.get("urban_core_polygon") if cdata else None)
+    restrict_demand_core = city_dict.get("restrict_demand_to_urban_core", True)
+    prep_core = None
+    if urban_core_polygon and restrict_demand_core:
+        try:
+            from sb_mexico.gravity import prepare_polygon_geom
+            prep_core = prepare_polygon_geom(urban_core_polygon)
+        except Exception:
+            pass
 
     def _clean_and_filter(pts: List[Dict[str, Any]], box: Optional[List[float]]) -> List[Dict[str, Any]]:
         clean_pts = []
@@ -410,6 +420,14 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
                         continue
                 except Exception:
                     pass
+            if prep_core:
+                try:
+                    from sb_mexico.gravity import is_point_in_prepared_polygon
+                    if not is_point_in_prepared_polygon(loc[0], loc[1], prep_core):
+                        continue
+                except Exception:
+                    pass
+
             raw_j = p.get("raw_jobs")
             clean_pts.append({
                 "id": p_id,
