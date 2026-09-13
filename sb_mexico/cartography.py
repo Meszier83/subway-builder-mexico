@@ -9,6 +9,7 @@ import os
 import shutil
 import glob
 import subprocess
+import json
 try:
     import psutil
 except ImportError:
@@ -235,7 +236,9 @@ def build_city_map_wsl(
     output_dir: str,
     building_filter_size: float = 15.0,
     building_simplification: float = 0.2,
-    include_ocean: bool = False
+    include_ocean: bool = False,
+    urban_parks_only: bool = False,
+    urban_core_polygon: Optional[Any] = None
 ) -> Dict[str, str]:
     """
     Ejecuta la compilación cartográfica dentro de WSL Ubuntu vía subprocess con streaming en vivo.
@@ -255,6 +258,49 @@ def build_city_map_wsl(
     ]
     if include_ocean:
         wsl_cmd.append("--include-ocean")
+    if urban_parks_only:
+        wsl_cmd.append("--urban-parks-only")
+
+    # Exportar urban_core_polygon como GeoJSON para el runner de WSL si está definido
+    if urban_core_polygon:
+        try:
+            core_geojson_path = os.path.join(output_dir, "urban_core.geojson")
+            geojson_data = None
+            if isinstance(urban_core_polygon, dict) and "coordinates" in urban_core_polygon:
+                geojson_data = {
+                    "type": "FeatureCollection",
+                    "features": [{
+                        "type": "Feature",
+                        "properties": {},
+                        "geometry": urban_core_polygon
+                    }]
+                }
+            elif isinstance(urban_core_polygon, dict) and urban_core_polygon.get("type") in ("FeatureCollection", "Feature"):
+                geojson_data = urban_core_polygon
+            elif isinstance(urban_core_polygon, list):
+                coords = [list(pt) for pt in urban_core_polygon]
+                if len(coords) >= 3:
+                    if coords[0] != coords[-1]:
+                        coords.append(coords[0])
+                    geojson_data = {
+                        "type": "FeatureCollection",
+                        "features": [{
+                            "type": "Feature",
+                            "properties": {},
+                            "geometry": {
+                                "type": "Polygon",
+                                "coordinates": [coords]
+                            }
+                        }]
+                    }
+            if geojson_data:
+                with open(core_geojson_path, "w", encoding="utf-8") as f:
+                    json.dump(geojson_data, f)
+                wsl_core_geojson = to_wsl_path(core_geojson_path)
+                wsl_cmd.extend(["--urban-core-geojson", wsl_core_geojson])
+                print(f"-> [LOD] Polígono núcleo urbano activo exportado a {core_geojson_path}.")
+        except Exception as e:
+            print(f"  [WARN] No se pudo exportar urban_core.geojson: {e}")
 
     print(f"-> Conectando con motor cartográfico en WSL 2 (Ubuntu)...")
     print(f"-> Comando WSL: python3 -m sb_mexico.cartography_runner --city-code {city_code} ...")
@@ -308,6 +354,8 @@ def build_city_map(
     building_filter_size: float = 15.0,
     building_simplification: float = 0.2,
     include_ocean: bool = False,
+    urban_parks_only: bool = False,
+    urban_core_polygon: Optional[Any] = None,
     places: Optional[List[Dict]] = None
 ) -> Dict[str, str]:
     """
@@ -338,7 +386,9 @@ def build_city_map(
                 output_dir=output_dir,
                 building_filter_size=building_filter_size,
                 building_simplification=building_simplification,
-                include_ocean=include_ocean
+                include_ocean=include_ocean,
+                urban_parks_only=urban_parks_only,
+                urban_core_polygon=urban_core_polygon
             )
         else:
             print(f"  [WARN] WSL 2 no está disponible o carece de herramientas ({distro}).")

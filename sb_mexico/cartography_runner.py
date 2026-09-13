@@ -13,6 +13,7 @@ import json
 import shutil
 import subprocess
 import glob
+import time
 from typing import List, Optional
 
 # Asegurar que el repositorio esté en sys.path
@@ -78,6 +79,98 @@ def extract_pbf_bbox_if_large(
     return input_pbf
 
 
+def apply_urban_lod_filtering(
+    input_pbf: str,
+    bbox: List[float],
+    urban_core_geojson: str,
+    build_dir: str,
+    city_code: str
+) -> str:
+    """
+    Subway Builder México: Urban Core AOI LOD Filter.
+    Aplica zonificación concéntrica:
+    - Conserva todas las calles residenciales, andadores y detalles urbanos DENTRO de urban_core_geojson.
+    - Conserva autopistas troncales (motorway, trunk, primary, secondary), agua y cobertura vegetal en TODO el BBOX.
+    - Elimina calles menores fuera del núcleo para acelerar Planetiler y WebGL sin romper el horizonte.
+    """
+    if not os.path.exists(input_pbf) or not os.path.exists(urban_core_geojson):
+        return input_pbf
+
+    osmium_bin = shutil.which("osmium")
+    if not osmium_bin:
+        print("-> [LOD] osmium no disponible; usando PBF original.")
+        return input_pbf
+
+    try:
+        t0 = time.time()
+        print("-> [LOD] Aplicando filtro de Zonificación Concéntrica (Urban Core AOI)...")
+        print(f"   • Polígono núcleo: {urban_core_geojson}")
+
+        # 1. Extraer elementos dentro del polígono núcleo urbano
+        core_pbf = os.path.join(build_dir, f"{city_code.lower()}_core_raw.osm.pbf")
+        res_extract = subprocess.run([
+            osmium_bin, "extract",
+            "-p", urban_core_geojson,
+            "-s", "complete_ways",
+            "--overwrite",
+            "-o", core_pbf,
+            input_pbf
+        ], capture_output=True, text=True)
+
+        if res_extract.returncode != 0 or not os.path.exists(core_pbf):
+            print(f"   [WARN] osmium extract falló ({res_extract.stderr.strip()}). Usando PBF original.")
+            return input_pbf
+
+        # 2. Filtrar solo vías menores dentro del núcleo para evitar colisiones con troncales
+        core_minor_pbf = os.path.join(build_dir, f"{city_code.lower()}_core_minor.osm.pbf")
+        res_minor = subprocess.run([
+            osmium_bin, "tags-filter",
+            core_pbf,
+            "w/highway=tertiary,tertiary_link,unclassified,residential,living_street,service,pedestrian,footway,cycleway,path",
+            "n/place=suburb,neighbourhood,quarter",
+            "--overwrite",
+            "-o", core_minor_pbf
+        ], capture_output=True, text=True)
+
+        # 3. Filtrar red troncal y terreno para TODO el BBOX exterior
+        bg_pbf = os.path.join(build_dir, f"{city_code.lower()}_bg_arterials.osm.pbf")
+        res_bg = subprocess.run([
+            osmium_bin, "tags-filter",
+            input_pbf,
+            "w/highway=motorway,motorway_link,trunk,trunk_link,primary,primary_link,secondary,secondary_link",
+            "w/natural=water", "w/waterway=*", "w/landuse=*", "w/boundary=*", "w/landcover=*", "w/aeroway=*",
+            "n/place=city,town",
+            "--overwrite",
+            "-o", bg_pbf
+        ], capture_output=True, text=True)
+
+        if res_minor.returncode != 0 or res_bg.returncode != 0 or not os.path.exists(core_minor_pbf) or not os.path.exists(bg_pbf):
+            print("   [WARN] osmium tags-filter falló. Usando PBF base.")
+            return input_pbf
+
+        # 4. Fusionar troncales + vías menores del núcleo
+        optimized_pbf = os.path.join(build_dir, f"{city_code.lower()}_lod_optimized.osm.pbf")
+        res_merge = subprocess.run([
+            osmium_bin, "merge",
+            bg_pbf, core_minor_pbf,
+            "--overwrite",
+            "-o", optimized_pbf
+        ], capture_output=True, text=True)
+
+        if res_merge.returncode == 0 and os.path.exists(optimized_pbf):
+            orig_sz = os.path.getsize(input_pbf) / (1024 * 1024)
+            opt_sz = os.path.getsize(optimized_pbf) / (1024 * 1024)
+            elapsed = time.time() - t0
+            print(f"   ✓ PBF optimizado con éxito ({orig_sz:.1f} MB -> {opt_sz:.1f} MB) en {elapsed:.1f}s.")
+            return optimized_pbf
+        else:
+            print(f"   [WARN] osmium merge falló ({res_merge.stderr.strip()}). Usando PBF base.")
+            return input_pbf
+    except Exception as e:
+        print(f"   [WARN] Error durante optimización LOD: {e}. Usando PBF base.")
+        return input_pbf
+
+
 def run_cartography(
     city_code: str,
     bbox: List[float],
@@ -85,8 +178,22 @@ def run_cartography(
     output_dir: str,
     building_filter_size: float = 15.0,
     building_simplification: float = 0.2,
-    include_ocean: bool = False
+    include_ocean: bool = False,
+    urban_parks_only: bool = False,
+    urban_core_geojson: Optional[str] = None
 ) -> int:
+    if urban_parks_only:
+        os.environ["SB_URBAN_PARKS_ONLY"] = "1"
+        print("-> [OPCIÓN] Filtrado de parques urbanos activo: omitiendo macro-selvas y bosques rurales.")
+    else:
+        os.environ["SB_URBAN_PARKS_ONLY"] = "0"
+
+    if urban_core_geojson and os.path.exists(urban_core_geojson):
+        os.environ["SB_URBAN_CORE_GEOJSON"] = os.path.abspath(urban_core_geojson)
+        print(f"-> [OPCIÓN] Polígono de detalle urbano (LOD) activo: {urban_core_geojson}")
+    else:
+        os.environ.pop("SB_URBAN_CORE_GEOJSON", None)
+
     try:
         from tools.patch_depot_wsl import patch_depot_maps
         patch_depot_maps()
@@ -127,6 +234,11 @@ def run_cartography(
 
     # Optimización de recorte BBOX
     effective_pbf = extract_pbf_bbox_if_large(osm_pbf, bbox, native_build_dir, city_code)
+
+    # Optimización de zonificación concéntrica (Urban Core AOI LOD) si se definió polígono núcleo
+    if urban_core_geojson and os.path.exists(urban_core_geojson):
+        effective_pbf = apply_urban_lod_filtering(effective_pbf, bbox, urban_core_geojson, native_build_dir, city_code)
+
     pbf_name = os.path.basename(effective_pbf)
     target_pbf = os.path.join(native_build_dir, pbf_name)
 
@@ -216,6 +328,8 @@ def main():
     parser.add_argument("--building-filter-size", type=float, default=15.0)
     parser.add_argument("--building-simplification", type=float, default=0.2)
     parser.add_argument("--include-ocean", action="store_true", default=False)
+    parser.add_argument("--urban-parks-only", action="store_true", default=False, help="Excluir macro-selvas/bosques y dejar solo parques urbanos")
+    parser.add_argument("--urban-core-geojson", default=None, help="Ruta al GeoJSON del polígono núcleo urbano para LOD espacial")
 
     args = parser.parse_args()
     ret = run_cartography(
@@ -225,7 +339,9 @@ def main():
         output_dir=args.output_dir,
         building_filter_size=args.building_filter_size,
         building_simplification=args.building_simplification,
-        include_ocean=args.include_ocean
+        include_ocean=args.include_ocean,
+        urban_parks_only=args.urban_parks_only,
+        urban_core_geojson=args.urban_core_geojson
     )
     sys.exit(ret)
 

@@ -277,6 +277,8 @@ def execute_pipeline(
             building_filter_size=city_info.get("building_filter_size", 15.0),
             building_simplification=city_info.get("building_simplification", 0.2),
             include_ocean=city_info.get("include_ocean", False),
+            urban_parks_only=city_info.get("urban_parks_only", False),
+            urban_core_polygon=city_info.get("urban_core_polygon"),
             places=cfg.get("places", []),
             output_dir=out_dir
         )

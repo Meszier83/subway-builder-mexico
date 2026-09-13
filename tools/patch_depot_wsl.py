@@ -376,6 +376,40 @@ def patch_resilient_buildings(content: str) -> tuple[str, bool]:
         # 2. Filter by building_index_filter_size and valid geometry
         min_area = getattr(self, "building_index_filter_size", 15.0)
         mask = (areas > min_area) & shapely.is_valid(geoms) & (~shapely.is_empty(geoms))
+
+        # Subway Builder Mexico: Urban Core AOI LOD Filtering
+        core_geojson = os.environ.get("SB_URBAN_CORE_GEOJSON")
+        if not core_geojson or not os.path.exists(core_geojson):
+            cand_core = os.path.join(self.city_dir, "urban_core.geojson")
+            if os.path.exists(cand_core):
+                core_geojson = cand_core
+
+        if core_geojson and os.path.exists(core_geojson):
+            try:
+                import numpy as np
+                with open(core_geojson, "r", encoding="utf-8") as cf:
+                    cdata = json.load(cf)
+                from shapely.geometry import shape
+                core_geom = None
+                if cdata.get("type") == "FeatureCollection" and cdata.get("features"):
+                    core_geoms = [shape(f["geometry"]) for f in cdata["features"] if f.get("geometry")]
+                    core_geom = shapely.unary_union(core_geoms) if core_geoms else None
+                elif cdata.get("type") == "Feature" and cdata.get("geometry"):
+                    core_geom = shape(cdata["geometry"])
+                elif cdata.get("type") in ("Polygon", "MultiPolygon"):
+                    core_geom = shape(cdata)
+
+                if core_geom and not core_geom.is_empty:
+                    if not core_geom.is_valid:
+                        core_geom = core_geom.buffer(0)
+                    centroids = shapely.centroid(geoms)
+                    in_core = shapely.intersects(core_geom, centroids)
+                    mask = mask & in_core
+                    if self.verb:
+                        print(f"  [Urban Core LOD] Edificios 3D restringidos al poligono nucleo ({int(np.sum(mask)):,} conservados).")
+            except Exception as ce:
+                print(f"  [WARN] No se pudo aplicar filtro LOD a edificios: {ce}")
+
         df_filtered = df[mask].copy()
         areas_filtered = areas[mask]
 
@@ -560,6 +594,14 @@ def patch_depot_maps(file_path: str = None) -> bool:
     content, mod_bldg = patch_resilient_buildings(content)
     any_modified = any_modified or mod_bldg
 
+    # 6. Parche Filtrado de Parques Urbanos vs Selva/Bosques
+    content, mod_parks = patch_urban_parks(content)
+    any_modified = any_modified or mod_parks
+
+    # 7. Parche Filtrado Urban Core AOI LOD para Edificios 3D
+    content, mod_lod = patch_urban_core_lod(content)
+    any_modified = any_modified or mod_lod
+
     if not any_modified:
         print("[OK] Todos los parches de depot.maps ya estan aplicados.")
         return True
@@ -576,6 +618,118 @@ def patch_depot_maps(file_path: str = None) -> bool:
 
     print(f"[OK] depot.maps actualizado y guardado exitosamente en {file_path}")
     return True
+
+
+def patch_urban_parks(content: str) -> tuple[str, bool]:
+    """
+    Parche para permitir la exclusion de macro-reservas, selvas y bosques rurales
+    cuando la variable de entorno SB_URBAN_PARKS_ONLY=1 esta activa.
+    """
+    if "SB_URBAN_PARKS_ONLY" in content:
+        print("[OK] depot.maps ya cuenta con el soporte para SB_URBAN_PARKS_ONLY.")
+        return content, False
+
+    old_block = """        if any(x in v for x in ['park', 'nature_reserve', 'cemetery', 'pitch', 
+                                'zoo', 'grass', 'wood', 'forest', 'scrub', 
+                                'wetland', 'wilderness_area', 
+                                'wildlife_sanctuary', 'state_forest', 
+                                'national_wildlife_refuge', 'management_area', 
+                                'wildlife_management_area']):
+            return 'park', None, priority['park']"""
+
+    new_block = """        # Subway Builder Mexico: Soporte opcional para solo parques urbanos
+        urban_only = os.environ.get("SB_URBAN_PARKS_ONLY", "0") == "1"
+        if urban_only:
+            is_macro_wilderness = any(x in v for x in [
+                'nature_reserve', 'wood', 'forest', 'scrub', 'wetland', 
+                'wilderness_area', 'wildlife_sanctuary', 'state_forest', 
+                'national_wildlife_refuge', 'management_area', 'wildlife_management_area',
+                'national_park', 'protected_area'
+            ])
+            if not is_macro_wilderness and any(x in v for x in [
+                'park', 'cemetery', 'pitch', 'zoo', 'grass', 'garden', 
+                'recreation_ground', 'village_green', 'dog_park', 'playground'
+            ]):
+                return 'park', None, priority['park']
+        else:
+            if any(x in v for x in ['park', 'nature_reserve', 'cemetery', 'pitch', 
+                                    'zoo', 'grass', 'wood', 'forest', 'scrub', 
+                                    'wetland', 'wilderness_area', 
+                                    'wildlife_sanctuary', 'state_forest', 
+                                    'national_wildlife_refuge', 'management_area', 
+                                    'wildlife_management_area']):
+                return 'park', None, priority['park']"""
+
+    if old_block in content:
+        content = content.replace(old_block, new_block, 1)
+        print("[OK] Parche SB_URBAN_PARKS_ONLY incorporado en depot.maps.")
+        return content, True
+    else:
+        print("[WARN] No se encontro el bloque exacto de _get_kind_and_rank para parques.")
+        return content, False
+
+
+def patch_urban_core_lod(content: str) -> tuple[str, bool]:
+    """
+    Subway Builder Mexico: Soporte para Urban Core AOI LOD Filtering en edificios 3D.
+    Excluye edificios 3D fuera del poligono nucleo urbano para acelerar compilacion
+    y mantener 60 FPS en WebGL.
+    """
+    if "SB_URBAN_CORE_GEOJSON" in content:
+        print("[OK] depot.maps ya cuenta con el soporte para SB_URBAN_CORE_GEOJSON.")
+        return content, False
+
+    old_block = """        # 2. Filter by building_index_filter_size and valid geometry
+        min_area = getattr(self, "building_index_filter_size", 15.0)
+        mask = (areas > min_area) & shapely.is_valid(geoms) & (~shapely.is_empty(geoms))
+        df_filtered = df[mask].copy()"""
+
+    new_block = """        # 2. Filter by building_index_filter_size and valid geometry
+        min_area = getattr(self, "building_index_filter_size", 15.0)
+        mask = (areas > min_area) & shapely.is_valid(geoms) & (~shapely.is_empty(geoms))
+
+        # Subway Builder Mexico: Urban Core AOI LOD Filtering
+        core_geojson = os.environ.get("SB_URBAN_CORE_GEOJSON")
+        if not core_geojson or not os.path.exists(core_geojson):
+            cand_core = os.path.join(self.city_dir, "urban_core.geojson")
+            if os.path.exists(cand_core):
+                core_geojson = cand_core
+
+        if core_geojson and os.path.exists(core_geojson):
+            try:
+                import numpy as np
+                with open(core_geojson, "r", encoding="utf-8") as cf:
+                    cdata = json.load(cf)
+                from shapely.geometry import shape
+                core_geom = None
+                if cdata.get("type") == "FeatureCollection" and cdata.get("features"):
+                    core_geoms = [shape(f["geometry"]) for f in cdata["features"] if f.get("geometry")]
+                    core_geom = shapely.unary_union(core_geoms) if core_geoms else None
+                elif cdata.get("type") == "Feature" and cdata.get("geometry"):
+                    core_geom = shape(cdata["geometry"])
+                elif cdata.get("type") in ("Polygon", "MultiPolygon"):
+                    core_geom = shape(cdata)
+
+                if core_geom and not core_geom.is_empty:
+                    if not core_geom.is_valid:
+                        core_geom = core_geom.buffer(0)
+                    centroids = shapely.centroid(geoms)
+                    in_core = shapely.intersects(core_geom, centroids)
+                    mask = mask & in_core
+                    if self.verb:
+                        print(f"  [Urban Core LOD] Edificios 3D restringidos al poligono nucleo ({int(np.sum(mask)):,} conservados).")
+            except Exception as ce:
+                print(f"  [WARN] No se pudo aplicar filtro LOD a edificios: {ce}")
+
+        df_filtered = df[mask].copy()"""
+
+    if old_block in content:
+        content = content.replace(old_block, new_block, 1)
+        print("[OK] Parche SB_URBAN_CORE_GEOJSON incorporado en depot.maps.")
+        return content, True
+    else:
+        print("[WARN] No se encontro el bloque exacto de filtrado de edificios para SB_URBAN_CORE_GEOJSON.")
+        return content, False
 
 
 if __name__ == "__main__":
