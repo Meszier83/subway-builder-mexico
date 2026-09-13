@@ -293,6 +293,235 @@ def patch_ocean_water_zoom(content: str) -> tuple[str, bool]:
     return content, True
 
 
+def patch_ram_safety(content: str) -> tuple[str, bool]:
+    """Previene que valores ya en MB (>100) sean multiplicados accidentalmente por 1000."""
+    if "Subway Builder Mexico: Guard against values already in MB" in content:
+        print("[OK] depot.maps ya cuenta con el parche de seguridad de RAM.")
+        return content, False
+
+    old_setter = """        # GB uses base 10 (1000) - not to be confused with GiB (1024)
+        # We store as MB for internal CLI tool flags
+        self._RAM = int(value * 1000)"""
+
+    new_setter = """        # GB uses base 10 (1000) - not to be confused with GiB (1024)
+        # We store as MB for internal CLI tool flags
+        # Subway Builder Mexico: Guard against values already in MB (>100)
+        if value > 100:
+            self._RAM = int(value)
+        else:
+            self._RAM = int(value * 1000)"""
+
+    if old_setter not in content:
+        print("[WARN] No se encontro el bloque del setter de RAM en depot/maps.py.")
+        return content, False
+
+    content = content.replace(old_setter, new_setter, 1)
+    print("[OK] Parche de seguridad de RAM incorporado.")
+    return content, True
+
+
+def patch_resilient_buildings(content: str) -> tuple[str, bool]:
+    """
+    Subway Builder Mexico: Reemplaza Mapshaper por motor vectorial nativo en Python/Shapely.
+    Elimina los cuellos de botella de heap en V8 (4GB) y evita colapsos por OOM en mega-ciudades.
+    """
+    if "Subway Builder Mexico: Resilient C++ (GEOS/Shapely) building processor" in content:
+        print("[OK] depot.maps ya cuenta con el motor de resiliencia de edificios.")
+        return content, False
+
+    helper_code = '''    def _cleanup_buildings_resilient(self, output_cleaned_json, output_zoom_json=None, max_buildings=850000):
+        """
+        Subway Builder Mexico: Resilient C++ (GEOS/Shapely) building processor.
+        Eliminates Mapshaper V8 4GB heap limit and WSL OOM crashes on large cities.
+        """
+        import os, time, math, json, shutil
+        import pandas as pd
+        import geopandas as gpd
+        import shapely
+
+        t0 = time.time()
+        buildings_pkl = os.path.join(self.city_dir, "buildings.pkl")
+
+        if os.path.exists(buildings_pkl):
+            df = pd.read_pickle(buildings_pkl)
+        elif self.buildings_geojson and os.path.exists(self.buildings_geojson):
+            try:
+                import pyogrio
+                df = pyogrio.read_dataframe(self.buildings_geojson)
+            except Exception:
+                df = gpd.read_file(self.buildings_geojson)
+        else:
+            raise FileNotFoundError(f"No building data found for {self.city}")
+
+        if df.empty:
+            print("WARNING: No buildings found to clean.")
+            empty_geojson = '{"type":"FeatureCollection","features":[]}'
+            with open(output_cleaned_json, "w", encoding="utf-8") as f:
+                f.write(empty_geojson)
+            if output_zoom_json:
+                with open(output_zoom_json, "w", encoding="utf-8") as f:
+                    f.write(empty_geojson)
+            return
+
+        total_raw = len(df)
+        if self.verb:
+            print(f"  [Resilient Buildings Engine] Processing {total_raw:,} buildings with native GEOS/Shapely...")
+
+        # 1. Compute geodesic areas in m2
+        geoms = df['geometry'].values
+        lat = (self.bbox[1] + self.bbox[3]) / 2.0
+        m2_factor = (111320.0 * math.cos(math.radians(lat))) * 110574.0
+        areas = shapely.area(geoms) * m2_factor
+
+        # 2. Filter by building_index_filter_size and valid geometry
+        min_area = getattr(self, "building_index_filter_size", 15.0)
+        mask = (areas > min_area) & shapely.is_valid(geoms) & (~shapely.is_empty(geoms))
+        df_filtered = df[mask].copy()
+        areas_filtered = areas[mask]
+
+        # 3. Cap to max_buildings for WebGL stability in mega-metropolises
+        if len(df_filtered) > max_buildings:
+            if self.verb:
+                print(f"  [Resilient Buildings Engine] Mega-city detected ({len(df_filtered):,} buildings > {min_area}m2). Prioritizing top {max_buildings:,} for 60 FPS WebGL stability...")
+            top_indices = (-areas_filtered).argsort()[:max_buildings]
+            df_filtered = df_filtered.iloc[top_indices].copy()
+
+        # 4. Fill default height where missing
+        if 'height' not in df_filtered.columns:
+            df_filtered['height'] = 4.0
+        else:
+            df_filtered['height'] = df_filtered['height'].fillna(4.0)
+            df_filtered['height'] = pd.to_numeric(df_filtered['height'], errors='coerce').fillna(4.0)
+
+        # 5. Simplification for index
+        idx_simp = getattr(self, "building_index_simplification", 0.2)
+        tol_deg_idx = idx_simp / (111000.0 * math.cos(math.radians(lat)))
+        df_cleaned = df_filtered.copy()
+        df_cleaned['geometry'] = shapely.simplify(df_cleaned['geometry'].values, tolerance=tol_deg_idx, preserve_topology=True)
+
+        gdf_cleaned = gpd.GeoDataFrame(df_cleaned, geometry='geometry', crs='EPSG:4326')
+        try:
+            gdf_cleaned.to_file(output_cleaned_json, driver='GeoJSON', engine='pyogrio')
+        except Exception:
+            gdf_cleaned.to_file(output_cleaned_json, driver='GeoJSON')
+
+        if output_zoom_json:
+            tile_simp = getattr(self, "building_tile_simplification", 0.2)
+            if abs(tile_simp - idx_simp) < 1e-4:
+                shutil.copyfile(output_cleaned_json, output_zoom_json)
+            else:
+                tol_deg_tile = tile_simp / (111000.0 * math.cos(math.radians(lat)))
+                df_zoom = df_filtered.copy()
+                df_zoom['geometry'] = shapely.simplify(df_zoom['geometry'].values, tolerance=tol_deg_tile, preserve_topology=True)
+                gdf_zoom = gpd.GeoDataFrame(df_zoom, geometry='geometry', crs='EPSG:4326')
+                try:
+                    gdf_zoom.to_file(output_zoom_json, driver='GeoJSON', engine='pyogrio')
+                except Exception:
+                    gdf_zoom.to_file(output_zoom_json, driver='GeoJSON')
+
+        elapsed = time.time() - t0
+        if self.verb:
+            size_mb = os.path.getsize(output_cleaned_json) / (1024 * 1024)
+            print(f"  [OK] [Resilient Buildings Engine] {len(df_filtered):,} buildings saved ({size_mb:.1f} MB) in {elapsed:.1f}s.")
+
+'''
+
+    old_process_bldg = """        # 2. Mapshaper Cleanup
+        cleaned_json = os.path.join(self.city_dir, "buildings_cleaned.json")
+        mapshaper_cmd = (
+            f"node --max-old-space-size={self.RAM} $(which mapshaper) "
+            f"{self.buildings_geojson} -proj {self.epsg} -snap 0.5 -clean "
+            f"-filter 'this.area > {self.building_index_filter_size}' "
+            f"-simplify dp interval={self.building_index_simplification} "
+            f"-proj wgs84 -o precision=0.00001 {cleaned_json}"
+        )
+        self._run_command(mapshaper_cmd)"""
+
+    new_process_bldg = """        # 2. Resilient Buildings Cleanup (Subway Builder Mexico)
+        cleaned_json = os.path.join(self.city_dir, "buildings_cleaned.json")
+        self.buildings_zoom_geojson = os.path.join(self.city_dir, "buildings_zoom.geojson")
+        self._cleanup_buildings_resilient(cleaned_json, self.buildings_zoom_geojson)"""
+
+    old_tiles_block = """        mapshaper_cmd = (
+            f"node --max-old-space-size={self.RAM} $(which mapshaper) "
+            f"{self.buildings_geojson} -proj {self.epsg} -snap 0.5 "
+            f"-filter 'this.area > {self.building_index_filter_size}' -clean "
+            f"-simplify dp interval={self.building_tile_simplification} "
+            f"-proj wgs84 -o precision=0.00001 {self.buildings_zoom_geojson}"
+        )
+        self._run_command(mapshaper_cmd)
+        
+        # Remove any features with no geometry
+        with open(self.buildings_zoom_geojson, 'r') as f:
+            geojson_data = json.load(f)
+        geojson_data['features'] = [f for f in geojson_data['features'] \\
+                                    if 'geometry' in f.keys() and f['geometry'] is not None]
+        # Save the modified data
+        with open(self.buildings_zoom_geojson, 'w', encoding='utf-8') as f:
+            json.dump(geojson_data, f, indent=2)
+        
+        # Add default building height where needed
+        self._set_default_building_height()"""
+
+    new_tiles_block = """        # Subway Builder Mexico: Ensure buildings_zoom_geojson is generated
+        if not hasattr(self, 'buildings_zoom_geojson') or not self.buildings_zoom_geojson or not os.path.exists(self.buildings_zoom_geojson):
+            self.buildings_zoom_geojson = os.path.join(self.city_dir, "buildings_zoom.geojson")
+            cleaned_json = os.path.join(self.city_dir, "buildings_cleaned.json")
+            self._cleanup_buildings_resilient(cleaned_json, self.buildings_zoom_geojson)"""
+
+    old_fetch_block = """        else:
+            if self.verb:
+                print("***** Loading previously downloaded buildings file: *****")
+                print("    "+buildings_pkl)
+            df = pd.read_pickle(buildings_pkl)
+        
+        gdf = gpd.GeoDataFrame(df, geometry='geometry', crs="EPSG:4326")
+        
+        if self.verb:
+            print(f"Saving to {self.buildings_geojson}...", flush=True)
+        gdf.to_file(self.buildings_geojson, driver='GeoJSON')"""
+
+    new_fetch_block = """        else:
+            if self.verb:
+                print("***** Using previously downloaded buildings pickle: *****")
+                print("    "+buildings_pkl)
+            return"""
+
+    old_foundations_call = """        # Make buildings foundations file
+        self._create_building_foundation_files()"""
+
+    new_foundations_call = """        # Make buildings foundations file
+        if self.create_building_foundations:
+            self._create_building_foundation_files()"""
+
+    modified = False
+
+    # Insert helper before def process_buildings
+    if "def process_buildings(self):" in content and "_cleanup_buildings_resilient" not in content:
+        content = content.replace("    def process_buildings(self):", helper_code + "    def process_buildings(self):", 1)
+        modified = True
+
+    if old_process_bldg in content:
+        content = content.replace(old_process_bldg, new_process_bldg, 1)
+        modified = True
+
+    if old_tiles_block in content:
+        content = content.replace(old_tiles_block, new_tiles_block, 1)
+        modified = True
+
+    if old_fetch_block in content:
+        content = content.replace(old_fetch_block, new_fetch_block, 1)
+        modified = True
+
+    if old_foundations_call in content:
+        content = content.replace(old_foundations_call, new_foundations_call, 1)
+        modified = True
+
+    if modified:
+        print("[OK] Parche del motor de resiliencia de edificios incorporado.")
+    return content, modified
+
+
 def patch_depot_maps(file_path: str = None) -> bool:
     if file_path is None:
         try:
@@ -323,6 +552,14 @@ def patch_depot_maps(file_path: str = None) -> bool:
     content, mod_zoom = patch_ocean_water_zoom(content)
     any_modified = any_modified or mod_zoom
 
+    # 4. Parche Seguridad RAM
+    content, mod_ram = patch_ram_safety(content)
+    any_modified = any_modified or mod_ram
+
+    # 5. Parche Resiliencia Edificios 3D
+    content, mod_bldg = patch_resilient_buildings(content)
+    any_modified = any_modified or mod_bldg
+
     if not any_modified:
         print("[OK] Todos los parches de depot.maps ya estan aplicados.")
         return True
@@ -343,3 +580,4 @@ def patch_depot_maps(file_path: str = None) -> bool:
 
 if __name__ == "__main__":
     patch_depot_maps()
+

@@ -103,8 +103,19 @@ def run_cartography(
     native_build_dir = os.path.abspath(os.path.expanduser(f"~/build_{city_code.lower()}"))
 
     if os.path.exists(native_build_dir):
-        shutil.rmtree(native_build_dir)
-    os.makedirs(native_build_dir, exist_ok=True)
+        # Limpiar teselas temporales y pmtiles parciales, preservando descargas pesadas (.pkl, .pbf)
+        for stale in glob.glob(os.path.join(native_build_dir, "**", "*.mbtiles"), recursive=True):
+            try:
+                os.remove(stale)
+            except OSError:
+                pass
+        for stale in glob.glob(os.path.join(native_build_dir, "**", "*.pmtiles"), recursive=True):
+            try:
+                os.remove(stale)
+            except OSError:
+                pass
+    else:
+        os.makedirs(native_build_dir, exist_ok=True)
     os.makedirs(work_dir, exist_ok=True)
 
     print(f"===========================================================")
@@ -136,7 +147,9 @@ def run_cartography(
             shutil.copyfile(ocean_cache_contours, os.path.join(build_output_dir, "ocean_depth_index_contours.json.gz"))
 
     cores, ram_mb = get_optimal_hardware_resources()
-    print(f"-> Inicializando MapGen (Cores: {cores}, RAM asignada: {ram_mb} MB)...")
+    # MapGen expects RAM in Gigabytes (its setter converts GB to MB: self._RAM = int(RAM * 1000))
+    ram_gb = max(2.0, round(ram_mb / 1000.0, 1))
+    print(f"-> Inicializando MapGen (Cores: {cores}, RAM asignada: {ram_gb} GB [{ram_mb} MB])...")
 
     prev_cwd = os.getcwd()
     try:
@@ -146,7 +159,7 @@ def run_cartography(
             bbox=bbox,
             osmpbf=pbf_name,
             outputdir=build_output_dir,
-            RAM=ram_mb,
+            RAM=ram_gb,
             ncores=cores,
             cities=ETIQUETAS_CITIES,
             suburbs=ETIQUETAS_SUBURBS,
@@ -155,6 +168,8 @@ def run_cartography(
             road_name_preferred_language="es",
             building_index_filter_size=building_filter_size,
             building_index_simplification=building_simplification,
+            building_tile_simplification=building_simplification,
+            create_building_foundations=False,
             create_ocean_foundations=include_ocean
         )
 
