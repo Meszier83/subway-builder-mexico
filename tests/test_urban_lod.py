@@ -107,6 +107,87 @@ class TestUrbanCoreLOD(unittest.TestCase):
         self.assertTrue(mask[0])
         self.assertFalse(mask[1])
 
+    def test_demand_grid_restricted_to_urban_core(self):
+        """Verifica que build_demand_grid descarte puntos de población y empleo fuera del núcleo urbano."""
+        import pandas as pd
+        import geopandas as gpd
+        from sb_mexico.gravity import build_demand_grid
+
+        df_cpv = pd.DataFrame([
+            {"lon": -86.85, "lat": 21.15, "pobtot_adj": 100, "pea_real": 60},  # Adentro
+            {"lon": -86.95, "lat": 21.25, "pobtot_adj": 200, "pea_real": 120}  # Afuera
+        ])
+        df_denue = pd.DataFrame([
+            {"lon": -86.85, "lat": 21.15, "calibrated_jobs": 50},  # Adentro
+            {"lon": -86.95, "lat": 21.25, "calibrated_jobs": 80}   # Afuera
+        ])
+        empty_roads = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
+        # Con restricción activa
+        pts_restricted, _ = build_demand_grid(
+            df_denue=df_denue,
+            df_cpv=df_cpv,
+            special_pois=[],
+            roads_gdf=empty_roads,
+            min_residents=5,
+            min_jobs=2,
+            urban_core_polygon=self.sample_polygon,
+            restrict_demand_to_urban_core=True
+        )
+
+        self.assertEqual(len(pts_restricted), 1)
+        self.assertEqual(pts_restricted[0]["residents"], 100)
+        self.assertEqual(pts_restricted[0]["jobs"], 50)
+
+        # Con restricción desactivada
+        pts_unrestricted, _ = build_demand_grid(
+            df_denue=df_denue,
+            df_cpv=df_cpv,
+            special_pois=[],
+            roads_gdf=empty_roads,
+            min_residents=5,
+            min_jobs=2,
+            urban_core_polygon=self.sample_polygon,
+            restrict_demand_to_urban_core=False
+        )
+
+        self.assertEqual(len(pts_unrestricted), 2)
+        tot_res = sum(p["residents"] for p in pts_unrestricted)
+        tot_jobs = sum(p["jobs"] for p in pts_unrestricted)
+        self.assertEqual(tot_res, 300)
+        self.assertEqual(tot_jobs, 130)
+
+    def test_lod_options_yaml_serialization_persistence(self):
+        """Verifica que save_full_city_data persista y recargue todas las opciones avanzadas de LOD."""
+        city_data = {
+            "city": {
+                "name": "LOD Options Test",
+                "code": "LOD",
+                "bbox": [-87.0, 21.0, -86.7, 21.3],
+                "urban_core_polygon": self.sample_polygon,
+                "restrict_demand_to_urban_core": True,
+                "lod_peripheral_roads": "ultralight",
+                "include_pedestrian_paths": True,
+                "lod_peripheral_labels": "cities_only",
+                "lod_peripheral_buildings": "large_only"
+            },
+            "macroeconomics": {},
+            "data_dir": "data/lod"
+        }
+        yaml_path = "cities/test_lod_full_options.yaml"
+        try:
+            save_full_city_data(yaml_path, city_data)
+            loaded = load_city_data(yaml_path)
+            c = loaded["city"]
+            self.assertTrue(c["restrict_demand_to_urban_core"])
+            self.assertEqual(c["lod_peripheral_roads"], "ultralight")
+            self.assertTrue(c["include_pedestrian_paths"])
+            self.assertEqual(c["lod_peripheral_labels"], "cities_only")
+            self.assertEqual(c["lod_peripheral_buildings"], "large_only")
+        finally:
+            if os.path.exists(yaml_path):
+                os.remove(yaml_path)
+
     def test_apply_urban_lod_filtering_fallback_when_missing(self):
         """Verifica que apply_urban_lod_filtering retorne input_pbf sin romper si faltan archivos."""
         res = apply_urban_lod_filtering(
@@ -114,7 +195,10 @@ class TestUrbanCoreLOD(unittest.TestCase):
             bbox=[-87.0, 21.0, -86.7, 21.3],
             urban_core_geojson="non_existent.geojson",
             build_dir=self.test_dir,
-            city_code="TEST"
+            city_code="TEST",
+            lod_peripheral_roads="ultralight",
+            include_pedestrian_paths=True,
+            lod_peripheral_labels="cities_only"
         )
         self.assertEqual(res, "non_existent.pbf")
 

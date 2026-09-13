@@ -84,6 +84,63 @@ def is_point_in_exclusion_zone(lon: float, lat: float, exclusion_zones: Optional
     return False
 
 
+def prepare_polygon_geom(poly_data: Any) -> Optional[Any]:
+    """
+    Convierte una estructura de coordenadas (lista de [lon, lat], GeoJSON dict, etc.)
+    en un objeto shapely preparado (prepared.prep) para chequeos espaciales vectorizados de alta velocidad.
+    """
+    if not poly_data:
+        return None
+    try:
+        from shapely.geometry import Polygon, MultiPolygon, shape
+        from shapely.prepared import prep
+        import shapely
+
+        p_obj = None
+        if isinstance(poly_data, dict):
+            if poly_data.get("type") in ("Polygon", "MultiPolygon", "Feature", "FeatureCollection"):
+                if poly_data.get("type") == "FeatureCollection" and poly_data.get("features"):
+                    geoms = [shape(f["geometry"]) for f in poly_data["features"] if f.get("geometry")]
+                    p_obj = shapely.unary_union(geoms) if geoms else None
+                elif poly_data.get("type") == "Feature" and poly_data.get("geometry"):
+                    p_obj = shape(poly_data["geometry"])
+                else:
+                    p_obj = shape(poly_data)
+            elif "coordinates" in poly_data:
+                coords = poly_data["coordinates"]
+                if coords and len(coords) >= 3:
+                    pts = [list(c) for c in coords]
+                    if pts[0] != pts[-1]:
+                        pts.append(pts[0])
+                    p_obj = Polygon(pts)
+        elif isinstance(poly_data, list) and len(poly_data) >= 3:
+            pts = [list(c) for c in poly_data]
+            if pts[0] != pts[-1]:
+                pts.append(pts[0])
+            p_obj = Polygon(pts)
+
+        if p_obj is not None and not p_obj.is_empty:
+            if not p_obj.is_valid:
+                p_obj = p_obj.buffer(0)
+            return prep(p_obj)
+    except Exception:
+        return None
+    return None
+
+
+def is_point_in_prepared_polygon(lon: float, lat: float, prepared_poly: Any) -> bool:
+    """Verifica si una coordenada [lon, lat] interseca un polígono preparado."""
+    if prepared_poly is None:
+        return True
+    try:
+        from shapely.geometry import Point
+        pt = Point(lon, lat)
+        return bool(prepared_poly.contains(pt) or prepared_poly.intersects(pt))
+    except Exception:
+        return False
+
+
+
 def get_zone_multipliers_for_point(
     lon: float,
     lat: float,
@@ -129,7 +186,9 @@ def build_demand_grid(
     min_jobs: int = 3,
     seed: int = 42,
     affluence_zones: Optional[List[Dict]] = None,
-    exclusion_zones: Optional[List[Dict]] = None
+    exclusion_zones: Optional[List[Dict]] = None,
+    urban_core_polygon: Optional[Any] = None,
+    restrict_demand_to_urban_core: bool = True
 ) -> Tuple[List[Dict], List[Dict]]:
     """
     Agrega datos de población y empleo en celdas espaciales,
@@ -137,6 +196,10 @@ def build_demand_grid(
     y realiza el snapping a la red vial.
     """
     rng = np.random.default_rng(seed)
+    core_poly_prep = prepare_polygon_geom(urban_core_polygon) if (urban_core_polygon and restrict_demand_to_urban_core) else None
+    denue_outside_core = 0
+    cpv_outside_core = 0
+
     
     # 1. Validar unicidad estricta y resolver radios de absorción de POIs Especiales
     poi_ids = [p["id"] for p in special_pois if isinstance(p, dict) and "id" in p]
@@ -190,6 +253,9 @@ def build_demand_grid(
         r_lon = float(rec['lon'])
         r_lat = float(rec['lat'])
         if exclusion_zones and is_point_in_exclusion_zone(r_lon, r_lat, exclusion_zones):
+            continue
+        if core_poly_prep and not is_point_in_prepared_polygon(r_lon, r_lat, core_poly_prep):
+            denue_outside_core += 1
             continue
         r_jobs = float(rec['calibrated_jobs'])
         
@@ -265,6 +331,9 @@ def build_demand_grid(
         r_lat = float(rec['lat'])
         if exclusion_zones and is_point_in_exclusion_zone(r_lon, r_lat, exclusion_zones):
             continue
+        if core_poly_prep and not is_point_in_prepared_polygon(r_lon, r_lat, core_poly_prep):
+            cpv_outside_core += 1
+            continue
         k = get_grid_key(r_lon, r_lat)
         if k not in grid:
             grid[k] = {
@@ -278,6 +347,10 @@ def build_demand_grid(
         cell["weight"] += w
         cell["residents"] += float(rec['pobtot_adj'])
         cell["pea"] += float(rec['pea_real'])
+
+    if core_poly_prep:
+        print(f"-> [Núcleo Urbano] Máscara de demanda activa: {cpv_outside_core:,} manzanas censales y {denue_outside_core:,} comercios fuera del núcleo excluidos.")
+
 
     # 4. Preparar Snapping Vial con STRtree (Filtrando vías peatonales / urbanas accesibles)
     if roads_gdf.crs is None:

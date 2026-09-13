@@ -238,7 +238,11 @@ def build_city_map_wsl(
     building_simplification: float = 0.2,
     include_ocean: bool = False,
     urban_parks_only: bool = False,
-    urban_core_polygon: Optional[Any] = None
+    urban_core_polygon: Optional[Any] = None,
+    lod_peripheral_roads: str = "standard",
+    include_pedestrian_paths: bool = False,
+    lod_peripheral_labels: str = "none",
+    lod_peripheral_buildings: str = "none"
 ) -> Dict[str, str]:
     """
     Ejecuta la compilación cartográfica dentro de WSL Ubuntu vía subprocess con streaming en vivo.
@@ -260,6 +264,15 @@ def build_city_map_wsl(
         wsl_cmd.append("--include-ocean")
     if urban_parks_only:
         wsl_cmd.append("--urban-parks-only")
+    if lod_peripheral_roads:
+        wsl_cmd.extend(["--lod-peripheral-roads", lod_peripheral_roads])
+    if include_pedestrian_paths:
+        wsl_cmd.append("--include-pedestrian-paths")
+    if lod_peripheral_labels:
+        wsl_cmd.extend(["--lod-peripheral-labels", lod_peripheral_labels])
+    if lod_peripheral_buildings:
+        wsl_cmd.extend(["--lod-peripheral-buildings", lod_peripheral_buildings])
+
 
     # Exportar urban_core_polygon como GeoJSON para el runner de WSL si está definido
     if urban_core_polygon:
@@ -356,6 +369,10 @@ def build_city_map(
     include_ocean: bool = False,
     urban_parks_only: bool = False,
     urban_core_polygon: Optional[Any] = None,
+    lod_peripheral_roads: str = "standard",
+    include_pedestrian_paths: bool = False,
+    lod_peripheral_labels: str = "none",
+    lod_peripheral_buildings: str = "none",
     places: Optional[List[Dict]] = None
 ) -> Dict[str, str]:
     """
@@ -388,8 +405,13 @@ def build_city_map(
                 building_simplification=building_simplification,
                 include_ocean=include_ocean,
                 urban_parks_only=urban_parks_only,
-                urban_core_polygon=urban_core_polygon
+                urban_core_polygon=urban_core_polygon,
+                lod_peripheral_roads=lod_peripheral_roads,
+                include_pedestrian_paths=include_pedestrian_paths,
+                lod_peripheral_labels=lod_peripheral_labels,
+                lod_peripheral_buildings=lod_peripheral_buildings
             )
+
         else:
             print(f"  [WARN] WSL 2 no está disponible o carece de herramientas ({distro}).")
             print("  -> Se omite la generación cartográfica nativa.")

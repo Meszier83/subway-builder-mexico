@@ -602,6 +602,10 @@ def patch_depot_maps(file_path: str = None) -> bool:
     content, mod_lod = patch_urban_core_lod(content)
     any_modified = any_modified or mod_lod
 
+    # 8. Parche Filtrado Urban Core LOD para Supresion de Etiquetas Fuera del Nucleo
+    content, mod_lbl = patch_urban_core_labels(content)
+    any_modified = any_modified or mod_lbl
+
     if not any_modified:
         print("[OK] Todos los parches de depot.maps ya estan aplicados.")
         return True
@@ -675,9 +679,29 @@ def patch_urban_core_lod(content: str) -> tuple[str, bool]:
     Excluye edificios 3D fuera del poligono nucleo urbano para acelerar compilacion
     y mantener 60 FPS en WebGL.
     """
-    if "SB_URBAN_CORE_GEOJSON" in content:
-        print("[OK] depot.maps ya cuenta con el soporte para SB_URBAN_CORE_GEOJSON.")
+    if "SB_LOD_PERIPHERAL_BUILDINGS" in content:
+        print("[OK] depot.maps ya cuenta con el soporte para SB_LOD_PERIPHERAL_BUILDINGS.")
         return content, False
+
+    if "in_core = shapely.intersects(core_geom, centroids)" in content:
+        old_core_filter = """                    in_core = shapely.intersects(core_geom, centroids)
+                    mask = mask & in_core
+                    if self.verb:
+                        print(f"  [Urban Core LOD] Edificios 3D restringidos al poligono nucleo ({int(np.sum(mask)):,} conservados).")"""
+        new_core_filter = """                    in_core = shapely.intersects(core_geom, centroids)
+                    b_mode = str(os.environ.get("SB_LOD_PERIPHERAL_BUILDINGS", "none")).lower()
+                    if b_mode == "large_only":
+                        mask = mask & (in_core | (areas > 1000.0))
+                    elif b_mode == "all":
+                        pass
+                    else:
+                        mask = mask & in_core
+                    if self.verb:
+                        print(f"  [Urban Core LOD] Edificios 3D ({b_mode}): {int(np.sum(mask)):,} conservados.")"""
+        if old_core_filter in content:
+            content = content.replace(old_core_filter, new_core_filter, 1)
+            print("[OK] Parche SB_URBAN_CORE_GEOJSON actualizado con SB_LOD_PERIPHERAL_BUILDINGS.")
+            return content, True
 
     old_block = """        # 2. Filter by building_index_filter_size and valid geometry
         min_area = getattr(self, "building_index_filter_size", 15.0)
@@ -715,9 +739,15 @@ def patch_urban_core_lod(content: str) -> tuple[str, bool]:
                         core_geom = core_geom.buffer(0)
                     centroids = shapely.centroid(geoms)
                     in_core = shapely.intersects(core_geom, centroids)
-                    mask = mask & in_core
+                    b_mode = str(os.environ.get("SB_LOD_PERIPHERAL_BUILDINGS", "none")).lower()
+                    if b_mode == "large_only":
+                        mask = mask & (in_core | (areas > 1000.0))
+                    elif b_mode == "all":
+                        pass
+                    else:
+                        mask = mask & in_core
                     if self.verb:
-                        print(f"  [Urban Core LOD] Edificios 3D restringidos al poligono nucleo ({int(np.sum(mask)):,} conservados).")
+                        print(f"  [Urban Core LOD] Edificios 3D ({b_mode}): {int(np.sum(mask)):,} conservados.")
             except Exception as ce:
                 print(f"  [WARN] No se pudo aplicar filtro LOD a edificios: {ce}")
 
@@ -729,6 +759,152 @@ def patch_urban_core_lod(content: str) -> tuple[str, bool]:
         return content, True
     else:
         print("[WARN] No se encontro el bloque exacto de filtrado de edificios para SB_URBAN_CORE_GEOJSON.")
+        return content, False
+
+
+def patch_urban_core_labels(content: str) -> tuple[str, bool]:
+    """
+    Subway Builder Mexico: Soporte para Urban Core LOD Label Suppression.
+    Descarta etiquetas de lugares fuera del poligono del nucleo urbano segun SB_LOD_PERIPHERAL_LABELS.
+    """
+    if "SB_LOD_PERIPHERAL_LABELS" in content:
+        print("[OK] depot.maps ya cuenta con el soporte para SB_LOD_PERIPHERAL_LABELS.")
+        return content, False
+
+    if "Urban Core LOD Label Suppression" in content:
+        old_lbl_code = """                    if core_geom and not core_geom.is_empty:
+                        if not core_geom.is_valid:
+                            core_geom = core_geom.buffer(0)
+                        with open(geojson, "r", encoding="utf-8") as gf:
+                            gdata = json.load(gf)
+                        features = gdata.get("features", [])
+                        filtered_feats = []
+                        for f in features:
+                            geom = f.get("geometry")
+                            if geom and geom.get("type") == "Point" and geom.get("coordinates"):
+                                pt = Point(geom["coordinates"][0], geom["coordinates"][1])
+                                if core_geom.intersects(pt):
+                                    filtered_feats.append(f)
+                            elif geom:
+                                pt = shape(geom).centroid
+                                if core_geom.intersects(pt):
+                                    filtered_feats.append(f)
+                        gdata["features"] = filtered_feats
+                        with open(geojson, "w", encoding="utf-8") as gf:
+                            json.dump(gdata, gf)
+                        if self.verb:
+                            print(f"  [Urban Core LOD] Capa '{name}': {len(filtered_feats)}/{len(features)} etiquetas conservadas dentro del nucleo.")"""
+        new_lbl_code = """                    if core_geom and not core_geom.is_empty:
+                        if not core_geom.is_valid:
+                            core_geom = core_geom.buffer(0)
+                        l_mode = str(os.environ.get("SB_LOD_PERIPHERAL_LABELS", "none")).lower()
+                        if l_mode != "all" and not (l_mode == "cities_only" and name == "cities"):
+                            with open(geojson, "r", encoding="utf-8") as gf:
+                                gdata = json.load(gf)
+                            features = gdata.get("features", [])
+                            filtered_feats = []
+                            for f in features:
+                                geom = f.get("geometry")
+                                if geom and geom.get("type") == "Point" and geom.get("coordinates"):
+                                    pt = Point(geom["coordinates"][0], geom["coordinates"][1])
+                                    if core_geom.intersects(pt):
+                                        filtered_feats.append(f)
+                                elif geom:
+                                    pt = shape(geom).centroid
+                                    if core_geom.intersects(pt):
+                                        filtered_feats.append(f)
+                            gdata["features"] = filtered_feats
+                            with open(geojson, "w", encoding="utf-8") as gf:
+                                json.dump(gdata, gf)
+                            if self.verb:
+                                print(f"  [Urban Core LOD] Capa '{name}': {len(filtered_feats)}/{len(features)} etiquetas conservadas ({l_mode}).")"""
+        if old_lbl_code in content:
+            content = content.replace(old_lbl_code, new_lbl_code, 1)
+            print("[OK] Parche Urban Core LOD Label Suppression actualizado con SB_LOD_PERIPHERAL_LABELS.")
+            return content, True
+
+    target_suffix = "\n            geojson_paths[name] = str(geojson)"
+    old_core = """            # Combine with additional labels, if provided
+            if name == "cities" and self.cities_additional:
+                self._combine_geojson_labels(geojson, self.cities_additional)
+            elif name == "suburbs" and self.suburbs_additional:
+                self._combine_geojson_labels(geojson, self.suburbs_additional)
+            elif name == "neighborhoods" and self.neighborhoods_additional:
+                self._combine_geojson_labels(geojson, self.neighborhoods_additional)"""
+
+    old_block_clean = old_core + "\n" + target_suffix
+    old_block_spaced = old_core + "\n" + (" " * 12) + target_suffix
+
+    new_block = """            # Combine with additional labels, if provided
+            if name == "cities" and self.cities_additional:
+                self._combine_geojson_labels(geojson, self.cities_additional)
+            elif name == "suburbs" and self.suburbs_additional:
+                self._combine_geojson_labels(geojson, self.suburbs_additional)
+            elif name == "neighborhoods" and self.neighborhoods_additional:
+                self._combine_geojson_labels(geojson, self.neighborhoods_additional)
+
+            # Subway Builder Mexico: Urban Core LOD Label Suppression (Supresion segun SB_LOD_PERIPHERAL_LABELS)
+            core_geojson = os.environ.get("SB_URBAN_CORE_GEOJSON")
+            if not core_geojson or not os.path.exists(core_geojson):
+                cand_core = os.path.join(self.city_dir, "urban_core.geojson")
+                if os.path.exists(cand_core):
+                    core_geojson = cand_core
+
+            if core_geojson and os.path.exists(core_geojson) and os.path.exists(geojson):
+                try:
+                    with open(core_geojson, "r", encoding="utf-8") as cf:
+                        cdata = json.load(cf)
+                    from shapely.geometry import shape, Point
+                    import shapely
+                    core_geom = None
+                    if cdata.get("type") == "FeatureCollection" and cdata.get("features"):
+                        core_geoms = [shape(f["geometry"]) for f in cdata["features"] if f.get("geometry")]
+                        core_geom = shapely.unary_union(core_geoms) if core_geoms else None
+                    elif cdata.get("type") == "Feature" and cdata.get("geometry"):
+                        core_geom = shape(cdata["geometry"])
+                    elif cdata.get("type") in ("Polygon", "MultiPolygon"):
+                        core_geom = shape(cdata)
+
+                    if core_geom and not core_geom.is_empty:
+                        if not core_geom.is_valid:
+                            core_geom = core_geom.buffer(0)
+                        l_mode = str(os.environ.get("SB_LOD_PERIPHERAL_LABELS", "none")).lower()
+                        if l_mode != "all" and not (l_mode == "cities_only" and name == "cities"):
+                            with open(geojson, "r", encoding="utf-8") as gf:
+                                gdata = json.load(gf)
+                            features = gdata.get("features", [])
+                            filtered_feats = []
+                            for f in features:
+                                geom = f.get("geometry")
+                                if geom and geom.get("type") == "Point" and geom.get("coordinates"):
+                                    pt = Point(geom["coordinates"][0], geom["coordinates"][1])
+                                    if core_geom.intersects(pt):
+                                        filtered_feats.append(f)
+                                elif geom:
+                                    pt = shape(geom).centroid
+                                    if core_geom.intersects(pt):
+                                        filtered_feats.append(f)
+                            gdata["features"] = filtered_feats
+                            with open(geojson, "w", encoding="utf-8") as gf:
+                                json.dump(gdata, gf)
+                            if self.verb:
+                                print(f"  [Urban Core LOD] Capa '{name}': {len(filtered_feats)}/{len(features)} etiquetas conservadas ({l_mode}).")
+                except Exception as lbe:
+                    if self.verb:
+                        print(f"  [WARN] No se pudo aplicar filtro LOD a etiquetas '{name}': {lbe}")
+
+            geojson_paths[name] = str(geojson)"""
+
+    if old_block_spaced in content:
+        content = content.replace(old_block_spaced, new_block, 1)
+        print("[OK] Parche Urban Core LOD Label Suppression incorporado en depot.maps.")
+        return content, True
+    elif old_block_clean in content:
+        content = content.replace(old_block_clean, new_block, 1)
+        print("[OK] Parche Urban Core LOD Label Suppression incorporado en depot.maps.")
+        return content, True
+    else:
+        print("[WARN] No se encontro el bloque exacto de combine_geojson_labels en add_labels.")
         return content, False
 
 

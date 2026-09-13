@@ -279,6 +279,10 @@ def execute_pipeline(
             include_ocean=city_info.get("include_ocean", False),
             urban_parks_only=city_info.get("urban_parks_only", False),
             urban_core_polygon=city_info.get("urban_core_polygon"),
+            lod_peripheral_roads=city_info.get("lod_peripheral_roads", "standard"),
+            include_pedestrian_paths=city_info.get("include_pedestrian_paths", False),
+            lod_peripheral_labels=city_info.get("lod_peripheral_labels", "none"),
+            lod_peripheral_buildings=city_info.get("lod_peripheral_buildings", "none"),
             places=cfg.get("places", []),
             output_dir=out_dir
         )
@@ -476,7 +480,9 @@ def execute_pipeline(
         min_jobs=city_info.get("min_jobs", 3),
         seed=seed,
         affluence_zones=affluence_zones,
-        exclusion_zones=exclusion_zones
+        exclusion_zones=exclusion_zones,
+        urban_core_polygon=city_info.get("urban_core_polygon"),
+        restrict_demand_to_urban_core=city_info.get("restrict_demand_to_urban_core", True)
     )
 
     console.print(f"-> Nodos de demanda consolidados: [green]{len(demand_points):,}[/green]")
@@ -680,14 +686,26 @@ def execute_pipeline(
     # Auditoría estricta de integridad física y espacial antes de tocar disco
     validate_cohort_spatial_integrity(pops, demand_points)
 
-    # Cálculo del Baricentro Urbano Ponderado por Actividad Humana (Cámara)
-    total_mass = sum(p["residents"] + 1.5 * p["jobs"] for p in demand_points)
-    if total_mass > 0:
-        center_lon = sum(p["location"][0] * (p["residents"] + 1.5 * p["jobs"]) for p in demand_points) / total_mass
-        center_lat = sum(p["location"][1] * (p["residents"] + 1.5 * p["jobs"]) for p in demand_points) / total_mass
-    else:
-        center_lon = (bbox_dict["min_lon"] + bbox_dict["max_lon"]) / 2.0
-        center_lat = (bbox_dict["min_lat"] + bbox_dict["max_lat"]) / 2.0
+    # Centrado de Cámara (initialViewState):
+    # Si el usuario configuró manualmente initial_center en el Wizard, se respeta con máxima prioridad.
+    manual_center = city_info.get("initial_center")
+    if manual_center and isinstance(manual_center, (list, tuple)) and len(manual_center) == 2:
+        try:
+            center_lon = float(manual_center[0])
+            center_lat = float(manual_center[1])
+            console.print(f"[cyan]-> Cámara inicial configurada manualmente:[/] lon={center_lon:.5f}, lat={center_lat:.5f}")
+        except (ValueError, TypeError):
+            manual_center = None
+
+    if not manual_center:
+        # Cálculo del Baricentro Urbano Ponderado por Actividad Humana (Cámara)
+        total_mass = sum(p["residents"] + 1.5 * p["jobs"] for p in demand_points)
+        if total_mass > 0:
+            center_lon = sum(p["location"][0] * (p["residents"] + 1.5 * p["jobs"]) for p in demand_points) / total_mass
+            center_lat = sum(p["location"][1] * (p["residents"] + 1.5 * p["jobs"]) for p in demand_points) / total_mass
+        else:
+            center_lon = (bbox_dict["min_lon"] + bbox_dict["max_lon"]) / 2.0
+            center_lat = (bbox_dict["min_lat"] + bbox_dict["max_lat"]) / 2.0
 
     # Sanitización de drivingPath y validación de límites de memoria en V8 (Subway Builder)
     if not include_driving_path:

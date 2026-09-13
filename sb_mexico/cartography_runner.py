@@ -84,14 +84,18 @@ def apply_urban_lod_filtering(
     bbox: List[float],
     urban_core_geojson: str,
     build_dir: str,
-    city_code: str
+    city_code: str,
+    lod_peripheral_roads: str = "standard",
+    include_pedestrian_paths: bool = False,
+    lod_peripheral_labels: str = "none"
 ) -> str:
     """
     Subway Builder México: Urban Core AOI LOD Filter.
     Aplica zonificación concéntrica:
     - Conserva todas las calles residenciales, andadores y detalles urbanos DENTRO de urban_core_geojson.
-    - Conserva autopistas troncales (motorway, trunk, primary, secondary), agua y cobertura vegetal en TODO el BBOX.
-    - Elimina calles menores fuera del núcleo para acelerar Planetiler y WebGL sin romper el horizonte.
+    - Conserva autopistas y vías seleccionadas según lod_peripheral_roads en el BBOX exterior.
+    - Opcionalmente incluye o descarta andadores peatonales según include_pedestrian_paths.
+    - Elimina o modula calles menores y etiquetas fuera del núcleo para acelerar Planetiler y WebGL.
     """
     if not os.path.exists(input_pbf) or not os.path.exists(urban_core_geojson):
         return input_pbf
@@ -103,7 +107,7 @@ def apply_urban_lod_filtering(
 
     try:
         t0 = time.time()
-        print("-> [LOD] Aplicando filtro de Zonificación Concéntrica (Urban Core AOI)...")
+        print(f"-> [LOD] Aplicando filtro de Zonificación Concéntrica (Urban Core AOI - Vías: {lod_peripheral_roads})...")
         print(f"   • Polígono núcleo: {urban_core_geojson}")
 
         # 1. Extraer elementos dentro del polígono núcleo urbano
@@ -121,28 +125,44 @@ def apply_urban_lod_filtering(
             print(f"   [WARN] osmium extract falló ({res_extract.stderr.strip()}). Usando PBF original.")
             return input_pbf
 
-        # 2. Filtrar solo vías menores dentro del núcleo para evitar colisiones con troncales
+        # 2. Filtrar vias menores y etiquetas de lugares estrictamente dentro del nucleo
         core_minor_pbf = os.path.join(build_dir, f"{city_code.lower()}_core_minor.osm.pbf")
+        minor_highways = "w/highway=tertiary,tertiary_link,unclassified,residential,living_street,service"
+        if include_pedestrian_paths:
+            minor_highways += ",pedestrian,footway,cycleway,path"
+
         res_minor = subprocess.run([
             osmium_bin, "tags-filter",
             core_pbf,
-            "w/highway=tertiary,tertiary_link,unclassified,residential,living_street,service,pedestrian,footway,cycleway,path",
-            "n/place=suburb,neighbourhood,quarter",
+            minor_highways,
+            "n/place=city,town,suburb,neighbourhood,quarter,village,hamlet",
             "--overwrite",
             "-o", core_minor_pbf
         ], capture_output=True, text=True)
 
-        # 3. Filtrar red troncal y terreno para TODO el BBOX exterior
+        # 3. Filtrar red troncal y terreno para TODO el BBOX exterior según lod_peripheral_roads
         bg_pbf = os.path.join(build_dir, f"{city_code.lower()}_bg_arterials.osm.pbf")
-        res_bg = subprocess.run([
+        if lod_peripheral_roads == "ultralight":
+            bg_highways = "w/highway=motorway,motorway_link,trunk,trunk_link"
+        elif lod_peripheral_roads == "detailed":
+            bg_highways = "w/highway=motorway,motorway_link,trunk,trunk_link,primary,primary_link,secondary,secondary_link,tertiary,tertiary_link"
+        else: # standard
+            bg_highways = "w/highway=motorway,motorway_link,trunk,trunk_link,primary,primary_link,secondary,secondary_link"
+
+        tags_filter_cmd = [
             osmium_bin, "tags-filter",
             input_pbf,
-            "w/highway=motorway,motorway_link,trunk,trunk_link,primary,primary_link,secondary,secondary_link",
-            "w/natural=water", "w/waterway=*", "w/landuse=*", "w/boundary=*", "w/landcover=*", "w/aeroway=*",
-            "n/place=city,town",
-            "--overwrite",
-            "-o", bg_pbf
-        ], capture_output=True, text=True)
+            bg_highways,
+            "w/natural=water", "w/waterway=*", "w/landuse=*", "w/boundary=*", "w/landcover=*", "w/aeroway=*"
+        ]
+        if lod_peripheral_labels == "cities_only":
+            tags_filter_cmd.append("n/place=city")
+        elif lod_peripheral_labels == "all":
+            tags_filter_cmd.append("n/place=*")
+
+        tags_filter_cmd.extend(["--overwrite", "-o", bg_pbf])
+        res_bg = subprocess.run(tags_filter_cmd, capture_output=True, text=True)
+
 
         if res_minor.returncode != 0 or res_bg.returncode != 0 or not os.path.exists(core_minor_pbf) or not os.path.exists(bg_pbf):
             print("   [WARN] osmium tags-filter falló. Usando PBF base.")
@@ -180,7 +200,11 @@ def run_cartography(
     building_simplification: float = 0.2,
     include_ocean: bool = False,
     urban_parks_only: bool = False,
-    urban_core_geojson: Optional[str] = None
+    urban_core_geojson: Optional[str] = None,
+    lod_peripheral_roads: str = "standard",
+    include_pedestrian_paths: bool = False,
+    lod_peripheral_labels: str = "none",
+    lod_peripheral_buildings: str = "none"
 ) -> int:
     if urban_parks_only:
         os.environ["SB_URBAN_PARKS_ONLY"] = "1"
@@ -188,9 +212,13 @@ def run_cartography(
     else:
         os.environ["SB_URBAN_PARKS_ONLY"] = "0"
 
+    os.environ["SB_LOD_PERIPHERAL_LABELS"] = str(lod_peripheral_labels).lower()
+    os.environ["SB_LOD_PERIPHERAL_BUILDINGS"] = str(lod_peripheral_buildings).lower()
+
     if urban_core_geojson and os.path.exists(urban_core_geojson):
         os.environ["SB_URBAN_CORE_GEOJSON"] = os.path.abspath(urban_core_geojson)
         print(f"-> [OPCIÓN] Polígono de detalle urbano (LOD) activo: {urban_core_geojson}")
+        print(f"   • Vías periferia: {lod_peripheral_roads} | Andadores núcleo: {include_pedestrian_paths} | Etiquetas: {lod_peripheral_labels} | Edificios: {lod_peripheral_buildings}")
     else:
         os.environ.pop("SB_URBAN_CORE_GEOJSON", None)
 
@@ -237,7 +265,12 @@ def run_cartography(
 
     # Optimización de zonificación concéntrica (Urban Core AOI LOD) si se definió polígono núcleo
     if urban_core_geojson and os.path.exists(urban_core_geojson):
-        effective_pbf = apply_urban_lod_filtering(effective_pbf, bbox, urban_core_geojson, native_build_dir, city_code)
+        effective_pbf = apply_urban_lod_filtering(
+            effective_pbf, bbox, urban_core_geojson, native_build_dir, city_code,
+            lod_peripheral_roads=lod_peripheral_roads,
+            include_pedestrian_paths=include_pedestrian_paths,
+            lod_peripheral_labels=lod_peripheral_labels
+        )
 
     pbf_name = os.path.basename(effective_pbf)
     target_pbf = os.path.join(native_build_dir, pbf_name)
@@ -330,6 +363,10 @@ def main():
     parser.add_argument("--include-ocean", action="store_true", default=False)
     parser.add_argument("--urban-parks-only", action="store_true", default=False, help="Excluir macro-selvas/bosques y dejar solo parques urbanos")
     parser.add_argument("--urban-core-geojson", default=None, help="Ruta al GeoJSON del polígono núcleo urbano para LOD espacial")
+    parser.add_argument("--lod-peripheral-roads", default="standard", choices=["ultralight", "standard", "detailed"], help="Jerarquía de vías en periferia")
+    parser.add_argument("--include-pedestrian-paths", action="store_true", default=False, help="Incluir andadores y senderos dentro del núcleo")
+    parser.add_argument("--lod-peripheral-labels", default="none", choices=["none", "cities_only", "all"], help="Etiquetas toponímicas en periferia")
+    parser.add_argument("--lod-peripheral-buildings", default="none", choices=["none", "large_only", "all"], help="Edificios 3D en periferia")
 
     args = parser.parse_args()
     ret = run_cartography(
@@ -341,9 +378,14 @@ def main():
         building_simplification=args.building_simplification,
         include_ocean=args.include_ocean,
         urban_parks_only=args.urban_parks_only,
-        urban_core_geojson=args.urban_core_geojson
+        urban_core_geojson=args.urban_core_geojson,
+        lod_peripheral_roads=args.lod_peripheral_roads,
+        include_pedestrian_paths=args.include_pedestrian_paths,
+        lod_peripheral_labels=args.lod_peripheral_labels,
+        lod_peripheral_buildings=args.lod_peripheral_buildings
     )
     sys.exit(ret)
+
 
 
 if __name__ == "__main__":
