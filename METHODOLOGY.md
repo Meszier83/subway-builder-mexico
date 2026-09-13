@@ -189,6 +189,18 @@ Un error habitual en el modelado de *Subway Builder* es asumir que los puntos de
 * **Demand Points (`points`):** Son entidades puramente visuales y de referencia geografica (`{id, location, jobs, residents, popIds}`). Determinan el tamano y color de las burbujas graficas en el mapa y la informacion mostrada en los tooltips al pasar el cursor. **No suben a los trenes ni crean flujos de pasajeros.**
 * **Pops (`pops`):** Son las verdaderas cohortes de desplazamiento commuter (`{id, size, residenceId, jobId, drivingSeconds, drivingDistance}`). Cada objeto `pop` representa un grupo discreto de personas que viajan recurrentemente desde su `residenceId` hasta su `jobId`. Son los unicos agentes que abordan los trenes, saturan los andenes y generan la recaudacion del metro.
 
+### 4.6. Zonas de Exclusion (`exclusion_zones`) y Preservacion de Infraestructura
+En diversas conurbaciones existen areas naturales protegidas, lagunas interiores, humedales, manglares, salinas o zonas federales e islas deshabitadas donde no debe asignarse poblacion activa ni puestos de trabajo:
+* Si se confiara exclusivamente en la agregacion censal o baricentros, registros espurios o comercios periféricos podrian proyectar demanda en medio de lagunas o manglares.
+* Sin embargo, el modelador **desea conservar intacta la red vial, los puentes, las vias ferreas y los edificios 3D** en dichas zonas (por ejemplo, el puente sobre la Laguna Nichupte o autopistas escénicas).
+
+Para conciliar ambos objetivos sin distorsionar la cartografia, `sb_mexico` introduce **Zonas de Exclusion (`exclusion_zones`)**:
+1. Se delimitan poligonos vectoriales o cuadros delimitadores en el archivo YAML o en la pestana *Exclusiones* de POI Studio.
+2. Durante la agregacion espacial censal y economica, toda celda cuyo baricentro quede cubierto por una zona de exclusion activa es purgada de la simulacion:
+   $$\text{residents}_k = 0, \qquad \text{PEA}_k = 0, \qquad \text{jobs}_k = 0$$
+3. Como resultado, ningun objeto `pop` puede originarse ni tener como destino la zona excluida ($T_{ik} = 0$, $T_{kj} = 0$).
+4. **Preservacion Cartografica Total:** El mapa base vectorial (`.pmtiles`) y la red vial (`roads.geojson`) se compilan a partir de la totalidad del extracto OSM metropolitano, asegurando que avenidas, puentes maritimos y estructuras continúen mostrandose con fidelidad al 100% en el motor del juego.
+
 ---
 
 ## 5. El Modelo Gravitatorio en Dos Capas (Two-Tier Doubly-Constrained Model)
@@ -478,24 +490,46 @@ Para solucionar esto de raiz sin caer en aproximaciones arbitrarias, la document
 docker run -t -p 5000:5000 -v "${PWD}:/data" osrm/osrm-backend osrm-routed --algorithm mld /data/city.osrm
 ```
 
-Y la consulta de rutas mediante el API REST:
+Y la consulta de rutas mediante el API REST oficial:
 ```
-GET /route/v1/driving/{originLon},{originLat};{destLon},{destLat}?overview=full&geometries=geojson
+GET /route/v1/driving/{originLon},{originLat};{destLon},{destLat}?overview=false
 ```
 
 De esta respuesta oficial se extraen:
-* `drivingSeconds = routes[0].duration` (segundos reales considerando sentidos, giros permitidos y velocidades por tipo de via).
-* `drivingDistance = routes[0].distance` (metros de pavimento real).
-* `drivingPath = routes[0].geometry.coordinates` (traza vectorial GeoJSON para renderizar los vehiculos en la simulacion).
+* `drivingSeconds = round(routes[0].duration)`: Segundos reales de conduccion sobre la red vial mixta a flujo libre (~40 km/h), considerando sentidos de circulacion, giros permitidos y limites segun la clasificacion vial de OSM.
+* `drivingDistance = round(routes[0].distance)`: Metros de pavimento real transitado.
+* `drivingPath = routes[0].geometry.coordinates`: Traza vectorial GeoJSON opcional (unicamente cuando `include_driving_path = true`).
 
-### 9.2. Arquitectura de Compilacion Rapida en WSL 2
-En cumplimiento con el estandar de la **Regla 10 (WSL 2 y Puente Cartografico)**, el pipeline de `sb_mexico`:
+### 9.2. Arquitectura de Compilacion Rapida y Resiliencia en WSL 2
+En cumplimiento con el estandar de la **Regla 10 (WSL 2 y Puente Cartografico)** y **Regla 12 (Resiliencia de Microservicios)**, el motor implementa:
 
 1. **Recorte BBOX con `osmium extract`:** Si el archivo OSM PBF es de escala nacional o regional, se recorta al rectangulo metropolitano de la ciudad antes de compilar. Esto reduce el tiempo de indexacion de ~15 minutos a solo **1.2 segundos**.
 2. **Compilacion en Particion Nativa Linux (ext4):** La generacion del grafo MLD (`osrm-extract`, `osrm-partition`, `osrm-customize`) se ejecuta en `~/osrm_<city>` dentro de WSL 2, eliminando la degradacion de I/O de Windows NTFS.
-3. **Daemon Efimero Autogestionado:** El pipeline inicia un contenedor Docker liviano (`sb_osrm_<city>`) en el puerto 5000, consulta las rutas necesarias y garantiza el apagado seguro en bloques `finally`.
-4. **Enriquecimiento por Pares Unicos:** En lugar de saturar el motor con matrices completas $N \times N$, el sistema unicamente consulta los pares `(residenceId, jobId)` de las cohortes `pops` activas consolidadas (~800 a 2,500 rutas), completando el enriquecimiento total en menos de 2 segundos.
-5. **Preservacion de Geometria (`drivingPath`):** Todas las etapas posteriores de consolidacion de cohortes (`merge_identical_commutes` y `sync_demand_points_and_pops`) preservan la traza `drivingPath` para su visualizacion en el juego.
+3. **Supervisor Persistente contra WSL 2 Idle Standby:** Para impedir que Windows suspenda la maquina virtual WSL 2 y envie un `SIGTERM (signal 15)` al contenedor Docker tras 15–20 segundos de inactividad de consola, el pipeline mantiene abierto el handle de proceso mediante `subprocess.Popen(["wsl.exe", ...])` durante toda la fase de consultas y lo termina de forma limpia en bloques `finally`.
+4. **Renovacion de Sockets Keep-Alive (`max=512`):** El daemon OSRM cierra la conexion tras 512 peticiones. Las consultas masivas se dirigen a `http://127.0.0.1:5000` con `urllib3.util.Retry(total=2, backoff_factor=0.05)` para renovar sockets de forma transparente.
+5. **Fail-Fast ante Caidas:** Monitoreo activo de errores de conexion; tras 5 fallos consecutivos, el enriquecimiento aborta de inmediato las peticiones HTTP y aplica el fallback canonico de Colin en memoria, evitando tiempos de espera acumulativos ($N \times 4\text{s}$).
+
+### 9.3. Desacoplamiento de `drivingPath` y Proteccion contra Limites de V8 en Electron
+Un principio fundamental derivado de la arquitectura nativa de *Subway Builder* es que **las ciudades oficiales creadas por Colin Miller (como Nueva York o Seattle) nunca incluyen geometrias de ruta `drivingPath` en sus archivos de demanda**:
+* **El limite de 512 MB de V8 en Electron:** El motor JavaScript V8 sobre el que corre Electron posee un limite maximo inmutable de 512 megabytes para la longitud de una cadena de texto en memoria (`ERR_STRING_TOO_LONG`).
+* En conurbaciones medianas y grandes (> 15,000 cohortes `pops`), incluir la lista completa de coordenadas GeoJSON de cada trayecto incrementa el tamano de `demand_data.json` por encima de 500 MB. Al intentar parsear o serializar este archivo, el juego colapsa por desbordamiento de memoria o descarta la totalidad de la demanda.
+* **Canon Oficial de Subway Builder Mexico:** El campo `drivingPath` se desacopla y permanece **desactivado por defecto (`include_driving_path: false`)**, consultando OSRM con `overview=false`. Esto reduce el tamano del JSON final a tan solo **1 a 3 MB** y acelera las consultas OSRM en mas de un 400%.
+* Para analisis SIG, visualizacion en QGIS o visores externos, el modelador puede activar explicitamente `include_driving_path: true` en la seccion `routing` de su archivo YAML o mediante la bandera `--include-driving-path` en el CLI.
+
+### 9.4. Huella Criptografica de Red (SHA-256), Cortafuegos de Snapping y Auditoria Espacial
+Para garantizar robustez cientifica ante cambios cartograficos o anomalias topologicas complejas:
+
+1. **Huella Criptografica (SHA-256):**
+   El sistema calcula una firma criptografica compuesta:
+   $$\text{Hash} = \operatorname{SHA-256}\left(\text{BBOX} \,||\, \text{mtime}(PBF) \,||\, \text{size}(PBF) \,||\, \text{hash}(\text{car.lua})\right)$$
+   Si la huella almacenada en `fingerprint.txt` difiere de la ejecucion actual, el grafo MLD en WSL 2 se recompila automaticamente, garantizando que nunca se utilicen grafos desactualizados.
+2. **Cortafuegos de Snapping Extremo (`MAX_WAYPOINT_SNAPPING_METERS = 1500m`):**
+   Si una coordenada de origen o destino se proyecta a mas de 1,500 metros del segmento vial transitable mas cercano (ej. islas, manglares o zonas sin red vial), el ruteo OSRM puede generar atajos aberrantes a traves de cuerpos de agua. El cortafuegos detecta la condicion y desvia automaticamente la cohorte al fallback canonico de Colin.
+3. **Invariantes Fisicas de Circuidad y Distancia Minima:**
+   * **Piso de circuidad:** Se valida que $\text{drivingDistance} \ge d_{\text{euclid}} \times 0.70$. Cualquier valor inferior (imposible en una red de calles reales) es neutralizado.
+   * **Piso de distancia vial:** Todo viaje inter-nodo debe satisfacer $\text{drivingDistance} \ge 150\text{ metros}$.
+4. **Auditoria de Integridad Espacial (`validate_cohort_spatial_integrity`):**
+   Durante la fase de empaquetado, el motor audita al 100% de las cohortes `pops`, certificando que satisfagan los limites fisicos de velocidad promedio ($5\text{ km/h} \le V_{\text{media}} \le 120\text{ km/h}$) y tiempos minimos antes de autorizar la generacion del paquete final.
 
 ---
 
@@ -541,7 +575,10 @@ $$\text{target\_pop\_size} = \max\left(35, \ \operatorname{round}\left(\frac{\te
 | **1,500,000 – 3,000,000** | Guadalajara, Monterrey, Puebla | $85 – 150$ | 18,000 – 22,000 | 60 FPS Fluido |
 | **> 3,000,000** | Zona Metropolitana Valle de Mexico | $150 – 250$ | 20,000 – 25,000 | 60 FPS Estable |
 
-**Resultado:** Se estabiliza el numero total de cohortes en el intervalo optimo de **15,000 a 25,000 pops**, manteniendo fluidez absoluta a 60 FPS sin perder resolucion espacial en ninguna metropoli.
+### 11.3. Limites Estrictos de Cohorte y Fusion de Viajes Idénticos
+Para erradicar micro-cohortes ineficientes generadas por la discretizacion estocastica de marginales residuales, el pipeline implementa la funcion `merge_identical_commutes`:
+1. **Piso Minimo (`min_pop_size = 25`):** Agrupa o fusiona viajes redundantes entre el mismo par `(residenceId, jobId)`. Si una cohorte residual no alcanza el umbral minimo de 25 personas, se redistribuye hacia la cohorte mas afin del mismo origen para no sobrecargar el hilo WebGL con paquetes minusculos de 1 a 5 personas.
+2. **Techo Canonico (`max_pop_size = 200`):** En estricto respeto a la arquitectura de Colin Miller, ninguna cohorte puede superar 200 personas. Si un par masivo acumula 650 personas, se divide limpiamente en cohortes discretas (`[200, 200, 200, 50]`).
 
 ---
 
@@ -564,33 +601,74 @@ El archivo de demanda compilado `demand_data.json` cumple estrictamente con el e
   5. `drivingSeconds` (entero): Tiempo de manejo estimado sobre la red vial real.
   6. `drivingDistance` (entero): Distancia de recorrido vehicular en metros.
 
-### 12.2. Camara Viewport Inicial Centrada en Masa
-Al abrir un mapa nuevo, el juego posiciona la vista en las coordenadas declaradas en los metadatos del escenario.
-* **El error clasico:** Centrar la camara en el centro geometrico del BBOX:
-  $$\text{cam}_{\text{geom}} = \left(\frac{\text{min\_lat} + \text{max\_lat}}{2}, \ \frac{\text{min\_lon} + \text{max\_lon}}{2}\right)$$
-  En ciudades costeras o con areas metropolitanas asimetricas, esto sitúa la camara sobre el oceano o en predios baldios despoblados.
-* **El estandar `sb_mexico` (Baricentro de Masa Humana):**
-  La camara se ancla automaticamente en el baricentro ponderado de la poblacion activa:
+### 12.2. Camara Viewport Inicial: Modo Manual 16:9 y Baricentro de Masa
+Al abrir un mapa nuevo, el juego posiciona la vista en las coordenadas declaradas en los metadatos del escenario:
+* **Encuadre Manual Interactivo 16:9 (`initial_center` & `initial_zoom`):** En el Paso 1 del Wizard Studio, el modelador dispone de un marco de encuadre en proporcion cinematografica 16:9 con un boton de captura rapida. Al pulsar el boton, se guardan las coordenadas y nivel de zoom exactos que el jugador experimentara en su primer dia de partida.
+* **Fallback Automatico (Baricentro de Masa Humana):** Si no se configuran coordenadas manuales, el motor ancla la camara en el baricentro ponderado de la poblacion activa censal:
   $$\text{cam\_lat} = \frac{\sum_i \text{PEA}_i \cdot \text{lat}_i}{\sum_i \text{PEA}_i}, \qquad \text{cam\_lon} = \frac{\sum_i \text{PEA}_i \cdot \text{lon}_i}{\sum_i \text{PEA}_i}$$
-  Garantiza que, al iniciar la partida, el jugador aterriza inmediatamente sobre el corazon civico y de mayor densidad habitacional de la ciudad.
+  Esto previene que la camara aparezca sobre el oceano o en predios baldios despoblados.
 
 ---
 
-## 13. Cuadro Maestro de Estandares de Calidad S-Tier
+## 13. Zonificacion Concentrica (Urban Core AOI LOD) y Filtrado de Parques
+
+### 13.1. La Paradoja de los Horizontes Infinitos vs. Carga Grafica 3D
+En metropolis extensas o conurbaciones con amplias franjas de selva, montana o mar (como Cancun y Riviera Maya, Monterrey o el Valle de Mexico), compilar la totalidad del BBOX metropolitano con edificios 3D y calles menores residenciales satura las teselas vectoriales (`.pmtiles`), elevando su peso por encima de 150 MB y causando estrangulamiento de GPU o colapso por falta de memoria (OOM).
+
+Para resolver esta contradiccion, `sb_mexico` implementa **Zonificacion Concentrica de Nivel de Detalle (Urban Core AOI LOD)**:
+1. **Delimitacion del Poligono Nucleo (`urban_core_polygon`):** El usuario traza el perimetro de la mancha urbana densa en el mapa interactivo del Wizard o solicita el calculo automatico mediante envolvente concava (*Concave Hull*) sobre los microdatos censales de manzanas (`/api/auto-urban-polygon`).
+2. **Filtrado Concéntrico en WSL 2 (`apply_urban_lod_filtering`):**
+   * Sobre el **BBOX metropolitano completo**, `osmium tags-filter` conserva autopistas, carreteras primarias, secundarias, vias ferreas, lineas de costa y lagos para garantizar un horizonte continuo y red interurbana conectada, omitiendo etiquetas de lugares perifericos.
+   * Dentro del **poligono del nucleo urbano**, se preserva la totalidad de la red capilar (calles residenciales, peatonales, andadores) y la toponimia de asentamientos locales.
+3. **Restriccion de Edificios 3D (`patch_urban_core_lod`):** La generacion de volumenes tridimensionales se restringe estrictamente a las huellas contenidas dentro de `urban_core_polygon`, ahorrando hasta un 80% en tiempo de compilacion y tamano de teselas sin romper la estetica de la simulacion.
+4. **Supresion de Etiquetas Fuera del Nucleo (`patch_urban_core_labels`):** Parche cartografico que descarta etiquetas toponimicas de asentamientos (`cities`, `suburbs`, `neighborhoods`) que caigan fuera del contorno de `urban_core_polygon` (`SB_URBAN_CORE_GEOJSON`), asegurando una periferia limpia y libre de texto flotante innecesario.
+
+### 13.2. Filtrado de Macro-Parques Urbanos (`urban_parks_only`)
+En OpenStreetMap, gigantescas areas rurales, selvas virgenes, reservas de biosfera y sierras nacionales a menudo estan etiquetadas como `leisure=nature_reserve` o `boundary=protected_area`. Al renderizarse, tiñen arbitrariamente de verde oscuro cientos de kilometros cuadrados rurales.
+
+Cuando `urban_parks_only: true` (o mediante la opcion en el Wizard), el motor cartografico en WSL 2 aplica el parche `patch_urban_parks` (`SB_URBAN_PARKS_ONLY=1`), descartando reservas masivas no urbanizadas y preservando unicamente parques recreativos, plazas, jardines y camellones cívicos.
+
+---
+
+## 14. Motor Cartografico Resiliente en WSL 2, Regla "Campus Wins" y Optimizaciones
+
+### 14.1. Regla Canonica "Campus Wins" y Etiquetado Dual
+En la cartografia de *Subway Builder*, los poligonos de zonificacion urbana (residencial, comercial, educativo) deben distinguirse sin artefactos visuales superpuestos:
+* **La Falla del Solapamiento Comercial/Universitario:** En muchas ciudades universitarias, los campus centrales contienen locales comerciales (bancos, librerias, cafeterias). Si el motor vectorial renderiza ambos poligonos en el mismo espacio, el estilo comercial sobrescribe el campus, desapareciendo la representacion visual de la universidad.
+* **Solucion Canonica "Campus Wins":** El parche `patch_campus_wins` en `tools/patch_depot_wsl.py` construye una mascara vectorial continua del campus (`college_mask = unary_union(college_geoms)`) y sustrae dicha mascara de todos los poligonos comerciales superpuestos (`geom.difference(college_mask)`).
+* **Etiquetado Dual:** Se inyectan explicitamente los pares `type: 'college', kind: 'college'` y `type: 'commercial', kind: final_kind`, asegurando que los estilos Mapbox GL / PMTiles rendericen el color cívico-educativo prioritario.
+
+### 14.2. Motor Resiliente de Edificios 3D y Salvaguardas de RAM
+* **Simplificacion Nativa en GeoPandas (`patch_resilient_buildings`):** depot.maps dependia originalmente de comandos CLI de Mapshaper ejecutados mediante Node.js, los cuales fallaban silenciosamente ante geometrias complejas o limites de argumentos en la consola de Linux. El parche sustituye la llamada por una rutina vectorial vectorizada en GeoPandas/Shapely, garantizando simplificacion geometrica robusta e inmune a fallos externos.
+* **Salvaguarda de RAM en MapGen (`patch_ram_safety`):** Corrige un desbordamiento numerico interno en MapGen donde la memoria disponible en gigabytes se multiplicaba dos veces consecutivas por 1024, provocando que procesos de compilacion en maquinas con 16 GB de RAM intentaran reservar terabytes virtuales y fueran eliminados por el OOM Killer del kernel de Linux.
+* **Aceleracion Oceanica y Mascara de Agua:** Desbloqueo del 100% de los nucleos de CPU para el procesamiento de batimetria marina y optimizacion de la mascara de agua a nivel de zoom $z=14$ (en lugar de $z=15$), acelerando el tiempo de procesamiento oceanico en mas de un 60%.
+* **Supresion de Etiquetas Fuera del Nucleo (`patch_urban_core_labels`):** Descarta etiquetas toponimicas de asentamientos perifericos fuera del perimetro urbano denso para mantener limpios los horizontes rurales.
+
+---
+
+## 15. Cuadro Maestro de Estandares de Calidad S-Tier
 
 | Componente | Estandar Tecnico | Metodologia Implementada | Garantia de Calidad |
 | :--- | :--- | :--- | :--- |
-| **Conservacion de Masa** | $\sum \text{Pops} \equiv \sum \text{PEA}$ | Asignacion Multinomial Acotada a Priori | $\Delta = 0$ personas (cero perdidas, cero inflacion) |
-| **Generadores Especiales** | Cuotas Exactas de Demanda | Modelo en Dos Capas con Deduccion de Presupuesto | 100% de la cuota oficial en tooltips y flujos |
-| **Calibracion de Empleo** | Control Censal CE 2024 / SAIC | Ponderacion Territorial BBOX y Clamping Asimetrico | Grandes empresas intactas (1.0x), micro acotado a informalidad |
-| **Proyecciones Temporales** | Base 2024–2026 Homogenea | Ratios oficiales CONAPO intercensales por municipio | Refleja dinamismo demografico sin desfase temporal |
-| **Georreferenciacion Censal** | Cero Megapuntos Artificiales | Cascada cuadruple (MGM $\to$ DENUE) y `dropna()` estricto | Cero imputacion al centro de BBOX |
-| **Zonas de Alta Afluencia** | Atraccion Territorial Diferenciada | Modulacion de $\beta_j$ con reach_bonus y regla MAX Priority | Reflejo de CBDs y corredores sin deformar POIs manuales |
-| **Fisica Vial y Ruteo** | Red Vial Real OSM | OSRM (`car.lua`) en WSL 2 + Fallback canonico de Colin | Tiempos y distancias viales exactos con `drivingPath` |
-| **Competitividad Modal** | Laboratorio Experimental Opcional | Impedancia alternativa ponderada ($T_{\text{auto}}, T_{\text{colectivo}}$) | Simulacion controlada de congestion y transporte cautivo |
-| **Rendimiento de Simulacion** | 60 FPS Continuos WebGL | Tamano de cohorte adaptativo ($\text{target\_pop\_size}$) | Poblacion estabilizada entre 15k y 25k pops |
+| **Conservacion de Masa** | $\sum \text{Pops} \equiv \sum \text{PEA}$ | Asignacion Multinomial Acotada a Priori y Deduccion de Presupuesto | $\Delta = 0$ personas (cero perdidas, cero inflacion) |
+| **Limites de Cohorte** | 60 FPS WebGL Continuos | Tamano adaptativo `target_pop_size`, piso `min_pop_size=25` y techo `max_pop_size=200` | Archivo liviano y eliminacion de micro-pops ineficientes |
+| **Generadores Especiales** | Cuotas Exactas de Demanda | Modelo en Dos Capas con Deduccion de Presupuesto ($\beta_{\text{esp}}=0.04$) | 100% de la cuota oficial en tooltips y flujos |
+| **Calibracion de Empleo** | Control Censal CE 2024 / SAIC | Ponderacion Territorial BBOX y Clamping Asimetrico acotado a $TIL_1$ | Grandes empresas intactas (1.0x), micro acotado a informalidad |
+| **Proyecciones Temporales** | Base 2024–2026 Homogenea | Factores oficiales CONAPO intercensales auditados por municipio en Wizard | Refleja dinamismo demografico sin desfase temporal |
+| **Georreferenciacion Censal** | Cero Megapuntos Artificiales | Cascada cuadruple (MGM $\to$ DENUE) y `dropna()` estricto | Cero imputacion arbitraria al centro de BBOX |
+| **Zonas de Alta Afluencia** | Atraccion Territorial Diferenciada | Modulacion de $\beta_j$ con reach_bonus y regla canonica MAX Priority | Reflejo de CBDs y corredores sin distorsionar POIs manuales |
+| **Zonas de Exclusion** | Cero Demanda en Zonas No Habitables | Supresion de celdas censales en lagunas/manglares preservando mapas 3D | Cero viajes imposibles sobre agua o reservas naturales |
+| **Zonificacion Concentrica** | Urban Core AOI LOD | Osmium extract, tags-filter, restriccion 3D y supresion de etiquetas perifericas | Horizontes continuos y reduccion de 80% en peso de teselas |
+| **Filtrado de Parques** | Espacios Publicos Civicos | Supresion de selvas y macro-reservas rurales (`urban_parks_only`) | Ciudades limpias sin saturacion de verde rural |
+| **Ruteo Vial OSRM** | Red Vial Real OSM | OSRM (`car.lua`) en WSL 2 a flujo libre (~40 km/h) + Fallback Colin | Tiempos y distancias viales exactos sobre pavimento real |
+| **Seguridad V8 en Electron** | Desacoplamiento de `drivingPath` | Desactivado por defecto (`include_driving_path: false`), OSRM `overview=false` | Total inmunidad contra el limite de 512 MB (`ERR_STRING_TOO_LONG`) |
+| **Salvaguardas Espaciales** | Cortafuegos y Huella SHA-256 | Huella SHA-256 de red, snapping firewall (1500m) e invariantes fisicas | Cero atajos aberrantes a traves de barreras de agua |
+| **Regla "Campus Wins"** | Disyuntividad Institucional | Sustraccion de `college_mask` y etiquetado dual `type: college, kind: college` | Representacion universitaria visible sin sobreescritura comercial |
+| **Resiliencia en WSL 2** | Estabilidad de Compilacion 3D | Simplificacion GeoPandas nativa, parches de RAM y supervisor persistente | Compilacion confiable y reproducible en Ubuntu WSL 2 |
 | **Aislamiento Insular** | Cero Conduccion sobre el Agua | Particionamiento zonal estanco (`isolated_zones`) | Cero viajes trans-maritimos en automovil |
-| **Esquema JSON** | Canonico de Colin Miller / Kronifer | 5 propiedades en points, 6 en pops, cero llaves espurias | Compatibilidad nativa sin cierres inesperados del juego |
+| **Encuadre Inicial Dia 1** | Viewport Centrado en Masa | Encuadre 16:9 interactivo con fallback automatico a baricentro de PEA | Camara siempre aterriza sobre el corazon civico poblado |
+| **Esquema JSON** | Canonico de Colin / Kronifer | 5 propiedades en points, 6 en pops, cero llaves espurias | Compatibilidad nativa sin cierres inesperados del juego |
+| **Suite de Pruebas** | Calidad Rigurosa Garantizada | **162 pruebas unitarias automatizadas aprobadas** | Cobertura integral de pipeline, algoritmos y codificacion |
 | **Integridad de Codificacion** | Universal UTF-8 sin BOM | Terminaciones LF, sin emojis SMP en cabeceras | Cero mojibake o errores de decodificacion en Windows |
 
 

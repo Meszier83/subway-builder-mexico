@@ -50,6 +50,7 @@ Al trabajar en este repositorio, siempre debes seguir estos principios técnicos
 - **Despeje de Controles de Capas:** El área de `L.control.layers` (esquina superior derecha) debe mantenerse siempre despejada de badges, leyendas o tooltips flotantes (ubicarlos en la esquina inferior izquierda `bottom-4 left-4`).
 - **Cinemática del Zoom (Scrollwheel):** Configurar el zoom de rueda con `wheelPxPerZoomLevel: 50–60`, `wheelDebounceTime: 10ms` y `zoomSnap: 0.5` para garantizar una respuesta ágil, rápida y precisa.
 - **Calibración Interactiva de BBOX:** Las herramientas de delimitación deben contar con 4 tiradores visibles en las esquinas (`NW, NE, SE, SW`) con eventos de arrastre sincronizados en tiempo real con los campos de entrada de coordenadas.
+- **Encuadre Cinematográfico Día 1 (16:9 Viewport):** El visor debe permitir capturar la posición de cámara inicial (`initial_center: [lon, lat]`, `initial_zoom`) con un marco de proporción 16:9 y tirador arrastrable sincronizado. Si no se declara explícitamente, el pipeline debe aplicar fallback estricto al baricentro ponderado de masa activa ($\text{residents} + 1.5 \times \text{jobs}$), nunca al centro geométrico del BBOX.
 
 ### 9. Jerarquía de Ingesta y Aislamiento Hermético por Proyecto (Project Bubble Isolation)
 - **Estructura Canónica de Directorios (`data/` y `dist/`):** Los microdatos de cada ciudad deben almacenarse de forma aislada en `data/<city_code>/` o `data/<city_name>/` (ej. `data/cancun/`, `data/gdl/`) para evitar colisiones entre entidades en conurbaciones distintas. Las salidas y archivos compilados pertenecen exclusivamente a `dist/<city_slug>/`. La raíz de `data/` se reserva únicamente para datasets nacionales (ej. extracto OSM nacional PBF y proyecciones CONAPO).
@@ -75,6 +76,25 @@ Al trabajar en este repositorio, siempre debes seguir estos principios técnicos
 - **Supervisor Persistente contra WSL 2 Idle Standby:** Al invocar contenedores o daemons de soporte en WSL 2 desde scripts en Windows, nunca desacoplarlos con `docker run -d` y cerrar el proceso `wsl.exe`. Windows pone en suspensión la máquina virtual WSL 2 si no detecta handles de proceso activos, enviando `SIGTERM (signal 15)` tras ~15–20 segundos. El script debe mantener el handle abierto mediante `subprocess.Popen(["wsl.exe", ...])` durante toda la fase de consultas y terminarlo limpiamente en un bloque `finally`.
 - **Renovación de Sockets Keep-Alive (`max=512`):** El microservicio OSRM limita cada conexión a 512 peticiones (`Keep-Alive: max=512`). Las consultas masivas deben dirigirse a `http://127.0.0.1:5000` (evitando demoras de DNS/IPv6) y utilizar `urllib3.util.Retry(total=2, backoff_factor=0.05)` para renovar sockets de forma transparente.
 - **Fail-Fast ante Caídas de Servicio:** Los bucles de enriquecimiento deben monitorear fallos consecutivos de red. Si se alcanzan 5 errores consecutivos de conexión, el sistema debe abortar inmediatamente las consultas HTTP y aplicar el fallback canónico en memoria al resto de la lista, evitando bloqueos acumulativos de timeout en Windows ($N \times 4.12\text{s}$).
+
+### 13. Zonificacion Concentrica (Urban Core AOI LOD) y Filtrado de Parques
+- **Zonificacion Concentrica:** Para conurbaciones extensas con amplias zonas rurales, selvaticas o marinas, el sistema debe admitir un poligono de nucleo urbano (`urban_core_polygon`). En WSL 2, `apply_urban_lod_filtering` debe recortar y filtrar las vias menores residenciales y restringir los edificios 3D (`patch_urban_core_lod`) exclusivamente al contorno urbano denso, preservando autopistas, vias troncales y costas en el BBOX completo para mantener horizontes infinitos sin colapsar memoria en WebGL.
+- **Autodeteccion Censal:** El Wizard debe proveer la deteccion automatica del contorno urbano denso mediante envolvente concava (*Concave Hull*) sobre los centroides censales de manzanas del INEGI (`/api/auto-urban-polygon`).
+- **Filtrado de Macro-Parques Urbanos (`urban_parks_only`):** Debe permitirse la supresion automatica de selvas, reservas de biosfera y parques rurales no habitados (`patch_urban_parks` / `SB_URBAN_PARKS_ONLY=1`) para evitar la saturacion visual de verde rural en la escena.
+- **Supresión de Etiquetas Periféricas (`patch_urban_core_labels`):** Descarta etiquetas toponímicas de asentamientos (`cities`, `suburbs`, `neighborhoods`) fuera del polígono del núcleo urbano (`SB_URBAN_CORE_GEOJSON`), mientras `apply_urban_lod_filtering` restringe las etiquetas residenciales y de lugares al interior del núcleo, manteniendo la periferia completamente limpia.
+
+### 14. Zonas de Exclusion (`exclusion_zones`) y Preservacion de Infraestructura
+- **Supresion Rigurosa de Demanda:** Cuerpos de agua interiores, humedales, manglares, salinas o zonas militares deshabitadas deben admitir poligonos de exclusion que anulen al 100% los residentes y empleos ($\text{residents}=0, \text{PEA}=0, \text{jobs}=0$).
+- **Preservacion Cartografica Total:** Las zonas de exclusion nunca deben alterar ni podar la red vial de OpenStreetMap ni la geometria de edificios 3D, garantizando que puentes sobre lagunas, carreteras costeras e instalaciones sigan siendo visibles para el jugador.
+
+### 15. Huella Criptografica OSRM, Cortafuegos de Snapping Extremo y Auditoria Espacial
+- **Huella Criptografica de Red (SHA-256):** El microservicio OSRM en WSL 2 debe invalidar y reconstruir el grafo MLD cuando cambie el hash SHA-256 compuesto de BBOX, PBF y `car.lua`, impidiendo el reuso inadvertido de grafos incompatibles.
+- **Cortafuegos de Snapping Extremo (1500m):** Si un waypoint de origen o destino se proyecta a mas de 1,500 metros de la red vial accesible, el ruteo debe abortar la peticion HTTP a OSRM y aplicar el fallback canonico de Colin para prevenir atajos irreales cruzando barreras geograficas.
+- **Invariantes Fisicas y Auditoria Previa a la Exportacion:** Validar formalmente la circuidad minima ($\tau \ge 0.70$) y distancia minima vial ($150\text{ m}$), ejecutando `validate_cohort_spatial_integrity` en la exportacion final de `demand_data.json`.
+
+### 16. Regla Cartografica Canonica "Campus Wins" y Motor Resiliente de Edificios 3D
+- **Campus Wins:** Aplicar disyuntividad geometrica estricta mediante sustraccion de `college_mask` sobre poligonos comerciales superpuestos y etiquetado dual `type: 'college', kind: 'college'` en `tools/patch_depot_wsl.py` para asegurar que las universidades nunca sean invisibilizadas por comercios contenidos.
+- **Resiliencia de Edificios 3D en GeoPandas:** Sustituir dependencias externas fragiles de CLI Node.js/Mapshaper por simplificacion nativa vectorizada en GeoPandas (`patch_resilient_buildings`) y salvaguardas contra desbordamientos numericos de RAM (`patch_ram_safety`).
 
 
 

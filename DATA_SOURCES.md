@@ -1,6 +1,6 @@
 # Guia de Fuentes de Datos Oficiales (Mexico)
 
-Para modelar cualquier ciudad o zona metropolitana de Mexico con Subway Builder Mexico (v7.1), el motor requiere 5 fuentes de datos abiertas y gratuitas del INEGI, CONAPO y OpenStreetMap.
+Para modelar cualquier ciudad o zona metropolitana de Mexico con Subway Builder Mexico (v7.1), el motor procesa fuentes de datos abiertas y gratuitas del INEGI, CONAPO y OpenStreetMap (red cartográfica OSM, microdatos censales CPV 2020, DENUE, Censos Económicos CE 2024, ENOE, proyecciones CONAPO y opcionalmente el Marco Geoestadístico Nacional MGM).
 
 ---
 
@@ -12,19 +12,27 @@ Para garantizar la reproducibilidad y prevenir colisiones entre proyectos urbano
 data/                                # Datasets de escala nacional
 |-- mexico-latest.osm.pbf            # Extracto OSM completo de la Republica Mexicana
 |-- proyecciones_conapo_2020_2053.csv# Tabulado nacional de proyecciones demograficas
-|-- cancun/                          # Microdatos aislados para Cancun (CUN)
+|-- cancun_riviera_maya/             # Microdatos para Cancun / Riviera Maya (CUR)
 |   |-- RESAGEBURB_23CSV20.csv       # Censo CPV 2020 de Quintana Roo (o subcarpeta conjunto_de_datos)
 |   |-- denue_inegi_23_.csv          # DENUE estatal de Quintana Roo
 |   |-- SAIC_Exporta_23.csv          # Censo Economico 2024 (H001A)
 |   \-- ENOE_2026_Entidad_23.csv     # Indicadores estrategicos ENOE
-\-- merida/                          # Microdatos aislados para Merida (MID)
-    |-- RESAGEBURB_31CSV20.csv       # Censo CPV 2020 de Yucatan
-    |-- denue_inegi_31_.csv          # DENUE estatal de Yucatan
-    |-- SAIC_Exporta_31.csv          # Censo Economico 2024 (H001A)
-    \-- ENOE_2026_Entidad_31.csv     # Indicadores estrategicos ENOE
+|-- ciudad_de_mexico/                # Microdatos para ZMVM (CDMX, EdoMex, Hidalgo)
+|   |-- RESAGEBURB_09CSV20.csv       # Censo CPV 2020 CDMX
+|   |-- RESAGEBURB_15CSV20.csv       # Censo CPV 2020 Estado de Mexico
+|   |-- denue_inegi_09_.csv          # DENUE CDMX
+|   \-- denue_inegi_15_.csv          # DENUE Estado de Mexico
+|-- merida/                          # Microdatos aislados para Merida (MID)
+|   |-- RESAGEBURB_31CSV20.csv       # Censo CPV 2020 de Yucatan
+|   |-- denue_inegi_31_.csv          # DENUE estatal de Yucatan
+|   |-- SAIC_Exporta_31.csv          # Censo Economico 2024 (H001A)
+|   \-- ENOE_2026_Entidad_31.csv     # Indicadores estrategicos ENOE
+\-- saltillo/                        # Microdatos aislados para Saltillo (SAL)
+    |-- RESAGEBURB_05CSV20.csv       # Censo CPV 2020 de Coahuila
+    \-- denue_inegi_05_.csv          # DENUE estatal de Coahuila
 ```
 
-Las salidas compiladas finales y archivos empaquetados se generan estrictamente en `dist/<ciudad>/` (ej. `dist/cancun/CUN.zip`).
+Las salidas compiladas finales y paquetes ZIP listos para importar se generan estrictamente en `dist/<ciudad>/` (ej. `dist/cancun_riviera_maya/CUR.zip` o `dist/ciudad_de_mexico/CDMX.zip`). El motor incluye soporte y resolucion retrocompatible transparente si se utiliza la carpeta `data/cancun/`.
 
 ---
 
@@ -34,7 +42,7 @@ Las salidas compiladas finales y archivos empaquetados se generan estrictamente 
 * **Fuente:** Geofabrik OpenStreetMap Data Extracts.
 * **Enlace:** http://download.geofabrik.de/central-america/mexico.html
 * **Archivo:** `mexico-latest.osm.pbf` (colocar directamente en la raiz de `data/`).
-* **Nota de Compilacion:** Si el archivo es grande (> 50 MB), el pipeline ejecuta un recorte automatico al BBOX metropolitano con `osmium extract` antes de compilar con Planetiler o OSRM.
+* **Nota de Compilacion:** Si el archivo es grande (> 50 MB), el pipeline ejecuta un recorte automatico al BBOX metropolitano con `osmium extract` antes de compilar con Planetiler o OSRM. Ademas, permite zonificacion concentrica (`urban_core_polygon`) para preservar calles secundarias en la mancha urbana, suprimir etiquetas de lugares en la periferia exterior (`patch_urban_core_labels` / `apply_urban_lod_filtering`) y suprimir macro-reservas rurales (`urban_parks_only: true`).
 
 ### 2.2. Poblacion y Vivienda: Censo CPV 2020 a Nivel Manzana
 * **Fuente:** INEGI - Censo de Poblacion y Vivienda 2020 (Resultados por AGEB y Manzana Urbana).
@@ -65,6 +73,12 @@ Las salidas compiladas finales y archivos empaquetados se generan estrictamente 
   $$\text{growth\_factor}_m = \frac{\text{Poblacion Proyectada CONAPO (Ano Actual)}_m}{\text{Poblacion Censo CPV 2020}_m}$$
   * *Ejemplo Benito Juarez (Cancun, 23005):* $\frac{968{,}000 \text{ hab. (2026)}}{904{,}684 \text{ hab. (2020)}} = 1.07$ (+7.0%).
   * *Auditoria en Wizard (Paso 3):* La interfaz grafica desglosa automaticamente el nombre oficial del municipio, el ano detectado (`ANO`), la poblacion base 2020, la poblacion proyectada CONAPO (`POB_MIT_MUN`) y el factor resultante para validacion visual antes de compilar.
+
+### 2.7. Georreferenciacion Vectorial Oficial: Marco Geoestadistico Nacional (MGM - Opcional)
+* **Fuente:** INEGI - Marco Geoestadistico Nacional (Capa Vectorial de Manzanas y AGEBs Urbanos).
+* **Enlace:** https://www.inegi.org.mx/temas/mg/
+* **Archivos Soportados:** Shapefile (`.shp`), GeoJSON (`.geojson`) o GeoPackage (`.gpkg`) con atributos `CVE_ENT`, `CVE_MUN`, `CVE_AGEB`, `CVE_MZA`. Colocar en `data/<ciudad>/`.
+* **Rol en el Motor:** Constituye el **Nivel 0 (Oficial)** de la cascada jerarquica de georreferenciacion censal (`load_marco_geoestadistico_coords`). Provee los centroides poligonales exactos de cada manzana censal antes del fallback baricentrico comercial del DENUE.
 
 ---
 
