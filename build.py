@@ -34,6 +34,12 @@ def main():
         default=None,
         help="Directorio donde se ubican los datos fuente del INEGI y OSM (default: data/<ciudad>/)"
     )
+    parser.add_argument(
+        "--include-driving-path",
+        action="store_true",
+        default=None,
+        help="Incluir geometrías de rutas en cohortes (drivingPath). Desactivado por defecto para evitar exceder 512 MB."
+    )
 
     args = parser.parse_args()
 
@@ -49,7 +55,8 @@ def main():
             config_path=args.config,
             skip_map=args.skip_map,
             output_dir=target_out,
-            data_dir=args.data_dir
+            data_dir=args.data_dir,
+            include_driving_path=args.include_driving_path
         )
     except Exception as e:
         print(f"\n[ERROR] Falló la ejecución del pipeline: {e}")

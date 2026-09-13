@@ -286,7 +286,21 @@ class TestCanonicalOSRMIntegration(unittest.TestCase):
         self.assertEqual(osrm_fb, 0)
         self.assertEqual(pops[0]["drivingDistance"], 6421)
         self.assertEqual(pops[0]["drivingSeconds"], 578)
-        self.assertEqual(pops[0]["drivingPath"], [[-86.85, 21.15], [-86.82, 21.15], [-86.80, 21.15]])
+        # Por defecto include_driving_path=False protege contra límites V8
+        self.assertNotIn("drivingPath", pops[0])
+
+        # Verificación cuando se activa explícitamente include_driving_path=True
+        pops_with_path = [
+            {"id": "pop_002", "residenceId": "dp_1", "jobId": "dp_2", "size": 150}
+        ]
+        with patch("requests.Session.get", return_value=mock_resp):
+            osrm_ok_2, osrm_fb_2 = enrich_pops_with_osrm(
+                pops_with_path, demand_points, osrm_url="http://mocked:5000", include_driving_path=True
+            )
+        self.assertEqual(osrm_ok_2, 1)
+        self.assertEqual(pops_with_path[0]["drivingDistance"], 6421)
+        self.assertEqual(pops_with_path[0]["drivingSeconds"], 578)
+        self.assertEqual(pops_with_path[0]["drivingPath"], [[-86.85, 21.15], [-86.82, 21.15], [-86.80, 21.15]])
 
     def test_enrich_pops_fallback_on_osrm_failure(self):
         from unittest.mock import patch

@@ -179,7 +179,8 @@ def execute_pipeline(
     config_path: str,
     skip_map: bool = False,
     output_dir: str = ".",
-    data_dir: Optional[str] = None
+    data_dir: Optional[str] = None,
+    include_driving_path: Optional[bool] = None
 ) -> str:
     """
     Ejecuta el pipeline completo de principio a fin de manera determinista y autovalidada.
@@ -189,6 +190,16 @@ def execute_pipeline(
     cfg = load_city_config(config_path)
     city_info = cfg["city"]
     macro = cfg["macroeconomics"]
+    routing_cfg = cfg.get("routing", {})
+
+    if include_driving_path is None:
+        if "include_driving_path" in routing_cfg:
+            include_driving_path = bool(routing_cfg["include_driving_path"])
+        elif "include_driving_path" in macro:
+            include_driving_path = bool(macro["include_driving_path"])
+        else:
+            include_driving_path = bool(cfg.get("include_driving_path", False))
+
     pois_cfg = cfg.get("pois") or []
     poi_ids = [p.get("id") for p in pois_cfg if isinstance(p, dict) and "id" in p]
     from collections import Counter
@@ -523,10 +534,10 @@ def execute_pipeline(
     demand_points, pops = consolidate_small_pops(demand_points, pops, min_pop_size=min_pop_size, max_pop_size=max_pop_size)
 
     # 3. Fusión de viajes idénticos
-    pops = merge_identical_commutes(pops, min_pop_size=min_pop_size, max_pop_size=max_pop_size)
+    pops = merge_identical_commutes(pops, min_pop_size=min_pop_size, max_pop_size=max_pop_size, include_driving_path=include_driving_path)
 
     # 4. Sincronización 1:1 entre display (residents, jobs) y simulación real
-    demand_points, pops = sync_demand_points_and_pops(demand_points, pops, remove_orphans=True)
+    demand_points, pops = sync_demand_points_and_pops(demand_points, pops, remove_orphans=True, include_driving_path=include_driving_path)
 
     total_viajeros = sum(p["size"] for p in pops)
 
@@ -606,7 +617,8 @@ def execute_pipeline(
                     osrm_ok, osrm_fb = enrich_pops_with_osrm(
                         pops=pops,
                         demand_points=demand_points,
-                        osrm_url="http://127.0.0.1:5000"
+                        osrm_url="http://127.0.0.1:5000",
+                        include_driving_path=include_driving_path
                     )
                     console.print(
                         f"   • Rutas OSRM exactas (geometría y tiempos reales): [green]{osrm_ok:,}[/green]\n"
@@ -674,6 +686,17 @@ def execute_pipeline(
     else:
         center_lon = (bbox_dict["min_lon"] + bbox_dict["max_lon"]) / 2.0
         center_lat = (bbox_dict["min_lat"] + bbox_dict["max_lat"]) / 2.0
+
+    # Sanitización de drivingPath y validación de límites de memoria en V8 (Subway Builder)
+    if not include_driving_path:
+        for p in pops:
+            p.pop("drivingPath", None)
+    elif len(pops) > 20000:
+        console.print(
+            f"[bold red][ADVERTENCIA][/bold red] 'include_driving_path' está habilitado con {len(pops):,} cohortes.\n"
+            f"   El archivo demand_data.json resultante probablemente excederá el límite de 512 MB de V8 (Chromium)\n"
+            f"   y provocará que Subway Builder descarte la demanda al iniciar el juego."
+        )
 
     clean_demand_points = sanitize_demand_points(demand_points)
     cfg_out_path = os.path.join(out_dir, "config.json")
@@ -810,11 +833,18 @@ if __name__ == "__main__":
     parser.add_argument("--skip-map", action="store_true", help="Omitir compilación cartográfica")
     parser.add_argument("--output-dir", default=".", help="Directorio de salida")
     parser.add_argument("--data-dir", default=None, help="Directorio de datos del proyecto")
+    parser.add_argument(
+        "--include-driving-path",
+        action="store_true",
+        default=None,
+        help="Incluir geometrías de rutas en cohortes (drivingPath). Desactivado por defecto para evitar exceder 512 MB."
+    )
     args = parser.parse_args()
 
     execute_pipeline(
         config_path=args.config,
         skip_map=args.skip_map,
         output_dir=args.output_dir,
-        data_dir=args.data_dir
+        data_dir=args.data_dir,
+        include_driving_path=args.include_driving_path
     )

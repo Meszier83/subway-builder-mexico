@@ -44,6 +44,17 @@ macroeconomics:
     "23003": 1.05                     # Isla Mujeres: +5%
 
 # ==============================================================================
+# CONFIGURACIÓN DE RUTEO Y RED VIAL (OSRM)
+# ==============================================================================
+routing:
+  # Exportar geometrías detalladas de trayectos (drivingPath).
+  # false (por defecto): Genera archivos ligeros (~1-3 MB) y previene exceder el
+  # límite rígido de 512 MB de V8 en Electron (Subway Builder).
+  # true: Habilita geometrías para auditoría GIS o herramientas externas.
+  include_driving_path: false
+
+
+# ==============================================================================
 # ZONAS DE ALTA AFLUENCIA (HIGH ATTRACTION ZONES)
 # ==============================================================================
 # Delimitan distritos o corredores (polígonos o cuadros) con atracción de empleo potenciada.

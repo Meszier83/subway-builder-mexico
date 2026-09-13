@@ -763,20 +763,20 @@ def furness_ipfp_balance(
         return np.full((n_orig, n_dest), 1.0 / n_dest, dtype=np.float64)
 
     # 1. Normalizar capacidad de destinos a la masa total de PEA (Sum_j D*_j == Sum_i O_i)
-    d_target = (dest_jobs.astype(np.float64) / total_d) * total_o
-    o_target = orig_pea.astype(np.float64)
+    d_target = ((dest_jobs.astype(np.float64) / total_d) * total_o).astype(np.float32)
+    o_target = orig_pea.astype(np.float32)
 
     # 2. Matriz de Fricción Espacial con modulación de alcance por destino
     if reach_bonuses is not None and np.any(reach_bonuses > 0):
-        clamped_reach = np.clip(reach_bonuses, 0.0, 0.60)
-        eff_beta = beta * (1.0 - clamped_reach)
-        friction = np.exp(-eff_beta[np.newaxis, :] * dist_km_mat)
+        clamped_reach = np.clip(reach_bonuses, 0.0, 0.60).astype(np.float32)
+        eff_beta = (beta * (1.0 - clamped_reach)).astype(np.float32)
+        friction = np.exp(-eff_beta[np.newaxis, :] * dist_km_mat, dtype=np.float32)
         # Salvaguarda de Piso de Retención Local para viajes de proximidad (<= 3 km)
         local_mask = dist_km_mat <= 3.0
-        friction_base = np.exp(-beta * dist_km_mat)
+        friction_base = np.exp(-beta * dist_km_mat, dtype=np.float32)
         friction = np.where(local_mask & (friction < friction_base), friction_base, friction)
     else:
-        friction = np.exp(-beta * dist_km_mat)
+        friction = np.exp(-beta * dist_km_mat, dtype=np.float32)
 
     friction[dist_km_mat > max_distance_km] = 0.0
 
@@ -1010,11 +1010,18 @@ def simulate_gravity_demand(
         dest_id_to_idx = {d["id"]: idx for idx, d in enumerate(regular_dests)}
         dest_zones = assign_zones(dest_coords_deg, isolated_zones)
 
-        # Matriz NxM de distancias Haversine (en float32 para optimizar consumo de RAM)
-        dlat = dest_coords[:, 1][np.newaxis, :] - orig_coords[:, 1][:, np.newaxis]
-        dlon = dest_coords[:, 0][np.newaxis, :] - orig_coords[:, 0][:, np.newaxis]
-        a = np.sin(dlat / 2.0)**2 + np.cos(orig_coords[:, 1][:, np.newaxis]) * np.cos(dest_coords[:, 1][np.newaxis, :]) * np.sin(dlon / 2.0)**2
-        dist_km_mat = (6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))).astype(np.float32)
+        # Matriz NxM de distancias Haversine (en float32 con chunking por bloques para resiliencia de RAM)
+        n_origs = len(origins)
+        n_dests = len(regular_dests)
+        dist_km_mat = np.empty((n_origs, n_dests), dtype=np.float32)
+        chunk_size = 2000
+        for start_idx in range(0, n_origs, chunk_size):
+            end_idx = min(start_idx + chunk_size, n_origs)
+            sub_orig = orig_coords[start_idx:end_idx]
+            dlat = dest_coords[:, 1][np.newaxis, :] - sub_orig[:, 1][:, np.newaxis]
+            dlon = dest_coords[:, 0][np.newaxis, :] - sub_orig[:, 0][:, np.newaxis]
+            a = np.sin(dlat / 2.0)**2 + np.cos(sub_orig[:, 1][:, np.newaxis]) * np.cos(dest_coords[:, 1][np.newaxis, :]) * np.sin(dlon / 2.0)**2
+            dist_km_mat[start_idx:end_idx] = (6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))).astype(np.float32)
 
         # Vectorizar bonos de alcance por destino según Zonas de Alta Afluencia
         reach_bonuses = np.zeros(len(regular_dests), dtype=np.float64)
@@ -1038,8 +1045,11 @@ def simulate_gravity_demand(
             dest_indices = np.where((dest_zones == z) & (dest_jobs > 0))[0]
 
             if len(dest_indices) > 0:
-                # Sub-matriz de la zona z
-                sub_dist = dist_km_mat[np.ix_(orig_indices, dest_indices)].copy()
+                # Sub-matriz de la zona z (reutiliza dist_km_mat sin duplicar si cubre toda la ciudad)
+                if len(orig_indices) == len(origins) and len(dest_indices) == len(regular_dests):
+                    sub_dist = dist_km_mat
+                else:
+                    sub_dist = dist_km_mat[np.ix_(orig_indices, dest_indices)].copy()
                 sub_pea = orig_pea[orig_indices].copy()
                 sub_jobs = dest_jobs[dest_indices].copy()
                 sub_reach = reach_bonuses[dest_indices].copy()
@@ -1050,9 +1060,12 @@ def simulate_gravity_demand(
                         orig_id = origins[o_idx]["id"]
                         if orig_id in dest_id_to_idx:
                             g_didx = dest_id_to_idx[orig_id]
-                            match = np.where(dest_indices == g_didx)[0]
-                            if len(match) > 0:
-                                sub_dist[si, match[0]] = 1e6
+                            if sub_dist is dist_km_mat:
+                                sub_dist[o_idx, g_didx] = 1e6
+                            else:
+                                match = np.where(dest_indices == g_didx)[0]
+                                if len(match) > 0:
+                                    sub_dist[si, match[0]] = 1e6
 
                 sub_prob = furness_ipfp_balance(
                     orig_pea=sub_pea,
@@ -1142,7 +1155,12 @@ def simulate_gravity_demand(
     return pops
 
 
-def merge_identical_commutes(pops: List[Dict], min_pop_size: int = 25, max_pop_size: int = 200) -> List[Dict]:
+def merge_identical_commutes(
+    pops: List[Dict],
+    min_pop_size: int = 25,
+    max_pop_size: int = 200,
+    include_driving_path: Optional[bool] = None
+) -> List[Dict]:
     """
     Agrupa y fusiona cohortes con los mismos nodos de origen y destino exactos (residenceId, jobId).
     Si la suma de personas supera max_pop_size, genera trozos balanceados de hasta max_pop_size,
@@ -1171,7 +1189,7 @@ def merge_identical_commutes(pops: List[Dict], min_pop_size: int = 25, max_pop_s
             avg_sec = pop_list[0].get("drivingSeconds", 0)
             avg_dist = pop_list[0].get("drivingDistance", 0)
 
-        path = next((p["drivingPath"] for p in pop_list if "drivingPath" in p and p["drivingPath"]), None)
+        path = next((p["drivingPath"] for p in pop_list if "drivingPath" in p and p["drivingPath"]), None) if include_driving_path is not False else None
 
         if total_size <= max_pop_size:
             chunks = [total_size]
@@ -1436,7 +1454,8 @@ def cluster_demand_points(
 def sync_demand_points_and_pops(
     demand_points: List[Dict],
     pops: List[Dict],
-    remove_orphans: bool = True
+    remove_orphans: bool = True,
+    include_driving_path: Optional[bool] = None
 ) -> Tuple[List[Dict], List[Dict]]:
     """
     Sincroniza estrictamente los valores de display (residents, jobs) y referencias (popIds)
@@ -1462,7 +1481,7 @@ def sync_demand_points_and_pops(
             "drivingSeconds": int(p.get("drivingSeconds", 180)),
             "drivingDistance": int(p.get("drivingDistance", 5000))
         }
-        if "drivingPath" in p and p["drivingPath"]:
+        if include_driving_path is not False and "drivingPath" in p and p["drivingPath"]:
             pop_dict["drivingPath"] = p["drivingPath"]
         clean_pops.append(pop_dict)
         res_by_id[pop_dict["residenceId"]] += pop_dict["size"]

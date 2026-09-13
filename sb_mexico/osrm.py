@@ -336,11 +336,13 @@ def stop_osrm_daemon_wsl(city_code: str) -> None:
 def enrich_pops_with_osrm(
     pops: List[Dict],
     demand_points: List[Dict],
-    osrm_url: str = "http://127.0.0.1:5000"
+    osrm_url: str = "http://127.0.0.1:5000",
+    include_driving_path: bool = False
 ) -> Tuple[int, int]:
     """
-    Enriquece cada cohorte (pop) con drivingSeconds, drivingDistance y drivingPath
-    consultando el servicio OSRM local por cada par único (residenceId, jobId).
+    Enriquece cada cohorte (pop) con drivingSeconds y drivingDistance (y drivingPath
+    opcionalmente si include_driving_path=True) consultando el servicio OSRM local
+    por cada par único (residenceId, jobId).
     Si una ruta específica no es conectable en la red vial o el daemon se interrumpe,
     aplica el fallback canónico oficial de Colin (1.3x a 40 km/h).
     Retorna (rutas_enriquecidas_osrm, rutas_fallback).
@@ -410,8 +412,12 @@ def enrich_pops_with_osrm(
                 fallback_count += 1
                 continue
 
-            # Consulta HTTP a OSRM
-            url = f"{osrm_url}/route/v1/driving/{orig_loc[0]},{orig_loc[1]};{dest_loc[0]},{dest_loc[1]}?overview=full&geometries=geojson"
+            # Consulta HTTP a OSRM (overview=false acelera la respuesta y evita cargar memoria si no se requiere geometría)
+            if include_driving_path:
+                url = f"{osrm_url}/route/v1/driving/{orig_loc[0]},{orig_loc[1]};{dest_loc[0]},{dest_loc[1]}?overview=full&geometries=geojson"
+            else:
+                url = f"{osrm_url}/route/v1/driving/{orig_loc[0]},{orig_loc[1]};{dest_loc[0]},{dest_loc[1]}?overview=false"
+
             try:
                 resp = session.get(url, timeout=(1.0, 3.0))
                 consecutive_connection_errors = 0  # El servidor respondió, está activo
@@ -431,7 +437,7 @@ def enrich_pops_with_osrm(
                         best = data["routes"][0]
                         duration_sec = int(round(best["duration"]))
                         distance_m = int(round(best["distance"]))
-                        path_coords = best.get("geometry", {}).get("coordinates", [])
+                        path_coords = best.get("geometry", {}).get("coordinates", []) if include_driving_path else None
 
                         # Salvaguarda 2: Verificación de invariantes físicos (atajos imposibles por fallo topológico)
                         if euclid_m > 500.0 and distance_m < (MIN_CIRCUITY_RATIO * euclid_m):
@@ -475,7 +481,9 @@ def enrich_pops_with_osrm(
             dist_m, sec, path = routes_cache[key]
             p["drivingDistance"] = dist_m
             p["drivingSeconds"] = sec
-            if path:
+            if include_driving_path and path:
                 p["drivingPath"] = path
+            else:
+                p.pop("drivingPath", None)
 
     return osrm_success, fallback_count
