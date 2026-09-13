@@ -454,14 +454,75 @@
               </select>
             </div>
             <div>
-              <label class="block text-stone-700 font-semibold mb-1">Zoom Inicial</label>
-              <input type="number" step="0.5" id="cfg_initial_zoom" value="11.5" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium">
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-stone-700 font-semibold text-xs">Zoom Inicial</label>
+                <button type="button" onclick="captureCurrentZoom()" class="text-[10px] text-metro-orange hover:text-orange-700 font-bold flex items-center space-x-0.5" title="Capturar y adoptar el nivel de zoom actual del mapa">
+                  <i data-lucide="crosshair" class="w-3 h-3"></i>
+                  <span>Capturar</span>
+                </button>
+              </div>
+              <input type="number" step="0.5" id="cfg_initial_zoom" value="11.5" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-medium text-xs">
             </div>
           </div>
 
-          <div class="flex items-center justify-between pt-2 border-t border-stone-200">
-            <span class="text-stone-700 font-semibold">Incluir Océano / Costera</span>
-            <input type="checkbox" id="cfg_include_ocean" class="w-4 h-4 accent-metro-orange rounded">
+          <!-- Preview de Zoom y Encuadre de Cámara (16:9) -->
+          <div class="bg-purple-50/80 p-2.5 rounded-lg border border-purple-200 space-y-1.5">
+            <div class="flex items-center justify-between">
+              <label class="flex items-center space-x-1.5 cursor-pointer text-xs font-bold text-purple-900">
+                <input type="checkbox" id="cfg_show_zoom_preview" checked class="w-3.5 h-3.5 accent-purple-600 rounded">
+                <span>Marco Cámara 16:9 (Día 1)</span>
+              </label>
+              <button type="button" onclick="previewGameCamera()" class="px-2 py-0.5 bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-bold rounded flex items-center space-x-1 shadow-xs transition" title="Simular la vista inicial de cámara del juego">
+                <i data-lucide="eye" class="w-3 h-3"></i>
+                <span>Simular</span>
+              </button>
+            </div>
+            <p class="text-[10px] text-purple-700 leading-tight">
+              Muestra el rectángulo 16:9 que encuadrará el juego al iniciar la partida con este nivel de zoom.
+            </p>
+          </div>
+
+          <!-- Opciones Cartográficas -->
+          <div class="space-y-2 pt-2 border-t border-stone-200">
+            <div class="flex items-center justify-between">
+              <span class="text-stone-700 font-semibold text-xs">Incluir Océano / Costera</span>
+              <input type="checkbox" id="cfg_include_ocean" class="w-4 h-4 accent-metro-orange rounded">
+            </div>
+
+            <div class="flex items-center justify-between">
+              <div class="pr-2">
+                <span class="text-stone-700 font-semibold text-xs block">Solo Parques Urbanos</span>
+                <span class="text-[10px] text-stone-500 block leading-tight">Excluye selvas y reservas para fundir bordes rurales con el fondo</span>
+              </div>
+              <input type="checkbox" id="cfg_urban_parks_only" class="w-4 h-4 accent-metro-orange rounded">
+            </div>
+          </div>
+
+          <!-- Área de Detalle Urbano (LOD / AOI) -->
+          <div class="bg-stone-50 p-3.5 rounded-xl border border-stone-200 space-y-2.5">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-1.5">
+                <i data-lucide="layers" class="w-4 h-4 text-amber-600"></i>
+                <span class="font-bold text-stone-800">Núcleo Urbano (LOD / AOI)</span>
+              </div>
+              <span id="urbanCoreBadge" class="text-[10px] bg-stone-200 border border-stone-300 text-stone-700 px-2 py-0.5 rounded-full font-bold">100% BBOX</span>
+            </div>
+            <p class="text-[11px] text-stone-500 leading-tight">
+              Delimita la mancha urbana para apagar edificios 3D y calles menores en la periferia (mar, selva, montañas), manteniendo el horizonte continuo.
+            </p>
+            <div class="grid grid-cols-2 gap-2">
+              <button type="button" onclick="startDrawingUrbanCore()" id="btnDrawUrbanCore" class="bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold py-1.5 px-2 rounded-lg flex items-center justify-center space-x-1 transition shadow-2xs">
+                <i data-lucide="pen-tool" class="w-3.5 h-3.5"></i>
+                <span>+ Trazar</span>
+              </button>
+              <button type="button" onclick="autoDetectUrbanCore()" id="btnAutoUrbanCore" class="bg-stone-100 hover:bg-stone-200 border border-stone-300 text-stone-800 text-xs font-bold py-1.5 px-2 rounded-lg flex items-center justify-center space-x-1 transition shadow-2xs" title="Calcula la envolvente cóncava a partir del Censo INEGI">
+                <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-600"></i>
+                <span>Auto Censo</span>
+              </button>
+            </div>
+            <button type="button" id="btnClearUrbanCore" onclick="clearUrbanCorePolygon()" class="hidden w-full text-center text-[11px] text-rose-600 font-bold hover:underline py-0.5">
+              Eliminar Polígono Núcleo
+            </button>
           </div>
 
           <!-- Zonas Topológicas Aisladas (Islas / Cuencas) -->
@@ -509,6 +570,13 @@
           <i data-lucide="box-select" class="w-4 h-4 text-cyan-400 animate-pulse"></i>
           <span>Haz clic y arrastra sobre el mapa para encuadrar la isla</span>
           <button type="button" onclick="cancelDrawingIsolatedZone()" class="bg-cyan-800/80 hover:bg-cyan-700 text-white text-[11px] font-bold px-2 py-0.5 rounded border border-cyan-400/40 transition">Cancelar (Esc)</button>
+        </div>
+
+        <!-- Banner Flotante de Modo Trazado de Núcleo Urbano (LOD) -->
+        <div id="drawingUrbanCoreBanner" class="hidden absolute top-4 left-1/2 -translate-x-1/2 bg-amber-950/95 text-amber-200 border border-amber-500/60 backdrop-blur-md px-4 py-2 rounded-xl text-xs font-semibold shadow-2xl flex items-center space-x-3 z-[1000]">
+          <i data-lucide="pen-tool" class="w-4 h-4 text-amber-400 animate-pulse"></i>
+          <span>Haz clics para trazar el contorno de la mancha urbana (doble clic o Enter para cerrar)</span>
+          <button type="button" onclick="cancelDrawingUrbanCore()" class="bg-amber-800/80 hover:bg-amber-700 text-white text-[11px] font-bold px-2 py-0.5 rounded border border-amber-400/40 transition">Cancelar (Esc)</button>
         </div>
 
         <div class="absolute bottom-4 left-4 bg-metro-card/90 backdrop-blur border border-metro-border px-3.5 py-2 rounded-lg text-xs text-gray-300 z-[999] shadow-lg pointer-events-none">
@@ -1528,6 +1596,11 @@
         </div>
 
         <div class="flex items-center space-x-3">
+          <label class="flex items-center space-x-2 text-xs text-gray-300 cursor-pointer" title="Excluir macro-selvas y reservas rurales para que los bordes del mapa se fundan suavemente con el fondo">
+            <input type="checkbox" id="chkUrbanParksStep5" onchange="syncUrbanParksFromStep5(this.checked)" class="w-4 h-4 accent-metro-orange rounded">
+            <span>Solo parques urbanos</span>
+          </label>
+
           <label class="flex items-center space-x-2 text-xs text-gray-300 cursor-pointer" title="Omitir generación cartográfica si ya cuentas con .pmtiles y roads.geojson">
             <input type="checkbox" id="chkSkipMap" class="w-4 h-4 accent-metro-orange rounded">
             <span>Omitir mapa 3D (--skip-map)</span>
@@ -2219,6 +2292,8 @@
     let bboxRectangle = null;
     let bboxPoiGroup = null;
     let isBboxLocked = false;
+    let zoomPreviewRectangle = null;
+    let zoomPreviewGroup = null;
     let poiMarkersGroup = null;
     let demandLayers = { residents: null, jobs: null, pois: null };
     let editingPoiIndex = -1;
@@ -2234,6 +2309,14 @@
     let isDrawingIsolated = false;
     let drawStartLatLng = null;
     let isolatedCornerMarkers = { NW: null, NE: null, SE: null, SW: null };
+
+    // Núcleo Urbano (Urban Core AOI LOD)
+    let urbanCoreGroup = null;
+    let urbanCoreLayer = null;
+    let isDrawingUrbanCore = false;
+    let urbanCoreDrawPoints = [];
+    let urbanCoreDrawMarkers = [];
+    let urbanCoreTempShape = null;
 
     // Zonas de Exclusión y Borrador Local
     let exclusionZonesGroup = null;
@@ -2722,15 +2805,20 @@
       mapBbox = L.map('mapBbox', { ...mapOptions, layers: [b1.baseMapDefault] }).setView([21.16, -86.85], 11);
       bboxMainGroup = L.featureGroup().addTo(mapBbox);
       bboxHandlesGroup = L.layerGroup().addTo(mapBbox);
+      urbanCoreGroup = L.featureGroup().addTo(mapBbox);
       isolatedZonesGroup = L.featureGroup().addTo(mapBbox);
       isolatedHandlesGroup = L.layerGroup().addTo(mapBbox);
+      zoomPreviewGroup = L.layerGroup().addTo(mapBbox);
 
       const bboxOverlays = {
         "📦 BBOX Metropolitano": bboxMainGroup,
-        "🏝️ Zonas Aisladas (Islas)": isolatedZonesGroup
+        "🏛️ Núcleo Urbano (LOD)": urbanCoreGroup,
+        "🏝️ Zonas Aisladas (Islas)": isolatedZonesGroup,
+        "🖥️ Encuadre Inicial (16:9)": zoomPreviewGroup
       };
       L.control.layers(b1.layerControl, bboxOverlays, { position: 'topright' }).addTo(mapBbox);
       setupIsolatedDrawingEvents();
+      setupUrbanCoreDrawingEvents();
 
       // 2. Mapa POI Studio
       const b2 = createBaseLayers();
@@ -2895,6 +2983,7 @@
         if (bboxCornerMarkers.NE) bboxCornerMarkers.NE.setLatLng([newB3, newB2]);
         if (bboxCornerMarkers.SE) bboxCornerMarkers.SE.setLatLng([newB1, newB2]);
         if (bboxCornerMarkers.SW) bboxCornerMarkers.SW.setLatLng([newB1, newB0]);
+        updateZoomPreviewLayer();
       }
 
       function onBoxDragEnd() {
@@ -2984,6 +3073,7 @@
             if (bboxCornerMarkers.NE && key !== 'NE') bboxCornerMarkers.NE.setLatLng([b3, b2]);
             if (bboxCornerMarkers.SE && key !== 'SE') bboxCornerMarkers.SE.setLatLng([b1, b2]);
             if (bboxCornerMarkers.SW && key !== 'SW') bboxCornerMarkers.SW.setLatLng([b1, b0]);
+            updateZoomPreviewLayer();
           });
 
           marker.on('dragend', () => {
@@ -2992,6 +3082,94 @@
 
           bboxCornerMarkers[key] = marker;
         });
+      }
+      updateZoomPreviewLayer();
+    }
+
+    function getBboxCenter() {
+      const b0 = parseFloat(document.getElementById('cfg_bbox_0')?.value);
+      const b1 = parseFloat(document.getElementById('cfg_bbox_1')?.value);
+      const b2 = parseFloat(document.getElementById('cfg_bbox_2')?.value);
+      const b3 = parseFloat(document.getElementById('cfg_bbox_3')?.value);
+      if (!isNaN(b0) && !isNaN(b1) && !isNaN(b2) && !isNaN(b3)) {
+        return [(b1 + b3) / 2, (b0 + b2) / 2];
+      }
+      if (cityData && cityData.city && cityData.city.bbox && Array.isArray(cityData.city.bbox) && cityData.city.bbox.length === 4) {
+        const b = cityData.city.bbox;
+        return [(b[1] + b[3]) / 2, (b[0] + b[2]) / 2];
+      }
+      return [21.16, -86.85];
+    }
+
+    function updateZoomPreviewLayer() {
+      if (!mapBbox || !zoomPreviewGroup) return;
+      zoomPreviewGroup.clearLayers();
+
+      const showPreview = document.getElementById('cfg_show_zoom_preview')?.checked ?? true;
+      if (!showPreview) return;
+
+      const center = getBboxCenter();
+      const centerLatLng = L.latLng(center[0], center[1]);
+      const zoomInput = document.getElementById('cfg_initial_zoom');
+      const zoom = zoomInput ? (parseFloat(zoomInput.value) || 11.5) : 11.5;
+
+      // Pantalla estándar 16:9 de referencia (1920 x 1080 px en el canvas del juego)
+      const screenW = 1920;
+      const screenH = 1080;
+
+      // Proyectar coordenadas geográficas a píxeles mundiales Web Mercator al nivel de zoom configurado
+      const centerPoint = mapBbox.project(centerLatLng, zoom);
+      const swPoint = L.point(centerPoint.x - (screenW / 2), centerPoint.y + (screenH / 2));
+      const nePoint = L.point(centerPoint.x + (screenW / 2), centerPoint.y - (screenH / 2));
+
+      const swLatLng = mapBbox.unproject(swPoint, zoom);
+      const neLatLng = mapBbox.unproject(nePoint, zoom);
+      const cameraBounds = L.latLngBounds(swLatLng, neLatLng);
+
+      zoomPreviewRectangle = L.rectangle(cameraBounds, {
+        color: '#7C3AED',       // Violeta moderno de alto contraste
+        weight: 2,
+        dashArray: '5, 5',
+        fillColor: '#8B5CF6',
+        fillOpacity: 0.08,
+        interactive: true
+      }).addTo(zoomPreviewGroup);
+
+      zoomPreviewRectangle.bindTooltip(
+        `<strong>🖥️ Encuadre de Cámara Día 1 (16:9)</strong><br>` +
+        `<span class="text-[11px]">Zoom inicial configurado: <b>${zoom}</b> &bull; Cobertura en pantalla completa</span>`,
+        { sticky: true, direction: 'top', className: 'poi-custom-tooltip' }
+      );
+    }
+
+    function previewGameCamera() {
+      if (!mapBbox) return;
+      const center = getBboxCenter();
+      const zoomInput = document.getElementById('cfg_initial_zoom');
+      const zoom = zoomInput ? (parseFloat(zoomInput.value) || 11.5) : 11.5;
+      mapBbox.flyTo(center, zoom, { duration: 1.0 });
+      showToast(`Simulando cámara inicial del juego (Zoom: ${zoom})`, "info");
+    }
+
+    function captureCurrentZoom() {
+      if (!mapBbox) return;
+      const rawZoom = mapBbox.getZoom();
+      const currentZoom = parseFloat((Math.round(rawZoom * 2) / 2).toFixed(1));
+      const zoomInput = document.getElementById('cfg_initial_zoom');
+      if (zoomInput) {
+        zoomInput.value = currentZoom;
+        if (cityData && cityData.city) cityData.city.initial_zoom = currentZoom;
+        updateZoomPreviewLayer();
+        triggerAutoSave();
+        showToast(`Zoom inicial adoptado: ${currentZoom}`, "success");
+      }
+    }
+
+    function syncUrbanParksFromStep5(checked) {
+      const el = document.getElementById('cfg_urban_parks_only');
+      if (el) {
+        el.checked = checked;
+        triggerAutoSave();
       }
     }
 
@@ -3548,6 +3726,208 @@
       renderIsolatedZonesList();
       renderIsolatedZonesOnMap();
       renderIsolatedZonesOnDemandMap();
+    }
+
+    // -------------------------------------------------------------------------
+    // SUBSISTEMA: NÚCLEO URBANO (URBAN CORE AOI LOD)
+    // -------------------------------------------------------------------------
+    function setupUrbanCoreDrawingEvents() {
+      if (!mapBbox) return;
+
+      mapBbox.on('click', (e) => {
+        if (!isDrawingUrbanCore) return;
+        addUrbanCoreVertex(e.latlng);
+      });
+
+      mapBbox.on('dblclick', (e) => {
+        if (!isDrawingUrbanCore) return;
+        L.DomEvent.stop(e);
+        finishUrbanCoreDrawing();
+      });
+
+      window.addEventListener('keydown', (e) => {
+        if (!isDrawingUrbanCore) return;
+        if (e.key === 'Escape') cancelDrawingUrbanCore();
+        if (e.key === 'Enter') finishUrbanCoreDrawing();
+      });
+    }
+
+    function startDrawingUrbanCore() {
+      if (!currentCityFile) {
+        showToast("Selecciona o crea un proyecto primero", "warning");
+        return;
+      }
+      isDrawingUrbanCore = true;
+      urbanCoreDrawPoints = [];
+      urbanCoreDrawMarkers = [];
+      if (urbanCoreTempShape && mapBbox) {
+        mapBbox.removeLayer(urbanCoreTempShape);
+        urbanCoreTempShape = null;
+      }
+      if (mapBbox) {
+        mapBbox.doubleClickZoom.disable();
+        mapBbox.getContainer().style.cursor = 'crosshair';
+      }
+      const banner = document.getElementById('drawingUrbanCoreBanner');
+      if (banner) banner.classList.remove('hidden');
+      lucide.createIcons();
+      showToast("Modo trazado núcleo activo: Haz clics en el mapa para rodear la mancha urbana (doble clic o Enter para cerrar)", "info");
+    }
+
+    function cancelDrawingUrbanCore() {
+      isDrawingUrbanCore = false;
+      urbanCoreDrawPoints = [];
+      if (urbanCoreTempShape && mapBbox) {
+        mapBbox.removeLayer(urbanCoreTempShape);
+        urbanCoreTempShape = null;
+      }
+      if (urbanCoreDrawMarkers && mapBbox) {
+        urbanCoreDrawMarkers.forEach(m => mapBbox.removeLayer(m));
+        urbanCoreDrawMarkers = [];
+      }
+      if (mapBbox) {
+        mapBbox.doubleClickZoom.enable();
+        mapBbox.getContainer().style.cursor = '';
+      }
+      const banner = document.getElementById('drawingUrbanCoreBanner');
+      if (banner) banner.classList.add('hidden');
+    }
+
+    function addUrbanCoreVertex(latlng) {
+      if (urbanCoreDrawPoints.length >= 3) {
+        const first = urbanCoreDrawPoints[0];
+        const dist = mapBbox.distance(first, latlng);
+        if (dist < 35) {
+          finishUrbanCoreDrawing();
+          return;
+        }
+      }
+
+      urbanCoreDrawPoints.push(latlng);
+
+      const m = L.circleMarker(latlng, {
+        radius: 5,
+        color: '#D97706',
+        fillColor: '#FFFFFF',
+        fillOpacity: 1,
+        weight: 2
+      }).addTo(mapBbox);
+      urbanCoreDrawMarkers.push(m);
+
+      if (urbanCoreDrawPoints.length === 1) {
+        m.setStyle({ radius: 7, fillColor: '#D97706', color: '#FFFFFF' });
+      }
+
+      if (!urbanCoreTempShape) {
+        urbanCoreTempShape = L.polygon([urbanCoreDrawPoints], {
+          color: '#D97706',
+          weight: 2.5,
+          dashArray: '6, 6',
+          fillColor: '#F59E0B',
+          fillOpacity: 0.25
+        }).addTo(mapBbox);
+      } else {
+        urbanCoreTempShape.setLatLngs([urbanCoreDrawPoints]);
+      }
+    }
+
+    function finishUrbanCoreDrawing() {
+      if (urbanCoreDrawPoints.length < 3) {
+        showToast("El polígono requiere al menos 3 vértices", "warning");
+        return;
+      }
+
+      const rawCoords = urbanCoreDrawPoints.map(p => [
+        parseFloat(p.lng.toFixed(5)),
+        parseFloat(p.lat.toFixed(5))
+      ]);
+      if (rawCoords[0][0] !== rawCoords[rawCoords.length - 1][0] || rawCoords[0][1] !== rawCoords[rawCoords.length - 1][1]) {
+        rawCoords.push([...rawCoords[0]]);
+      }
+
+      cancelDrawingUrbanCore();
+      setUrbanCorePolygon(rawCoords);
+      showToast(`Polígono núcleo definido (${rawCoords.length - 1} vértices). Guardando...`, "success");
+      saveCurrentCity(true);
+    }
+
+    function setUrbanCorePolygon(coords) {
+      if (!cityData) cityData = {};
+      if (!cityData.city) cityData.city = {};
+      cityData.city.urban_core_polygon = coords;
+      renderUrbanCorePolygon();
+    }
+
+    function clearUrbanCorePolygon() {
+      if (!cityData || !cityData.city) return;
+      cityData.city.urban_core_polygon = null;
+      renderUrbanCorePolygon();
+      showToast("Polígono núcleo eliminado. Modo detalle 100% en todo el BBOX restaurado.", "info");
+      saveCurrentCity(true);
+    }
+
+    function renderUrbanCorePolygon() {
+      if (urbanCoreLayer && mapBbox) {
+        mapBbox.removeLayer(urbanCoreLayer);
+        urbanCoreLayer = null;
+      }
+      if (urbanCoreGroup) {
+        urbanCoreGroup.clearLayers();
+      }
+
+      const badge = document.getElementById('urbanCoreBadge');
+      const clearBtn = document.getElementById('btnClearUrbanCore');
+      const poly = cityData?.city?.urban_core_polygon;
+
+      if (poly && Array.isArray(poly) && poly.length >= 3) {
+        const latlngs = poly.map(p => [p[1], p[0]]);
+        urbanCoreLayer = L.polygon(latlngs, {
+          color: '#D97706',
+          weight: 2.5,
+          dashArray: '5, 5',
+          fillColor: '#F59E0B',
+          fillOpacity: 0.2
+        }).bindTooltip(`<strong>🏛️ Núcleo Urbano (LOD)</strong><br><span class="text-[10px] text-stone-500">Edificios 3D y calles finas activas</span>`, { sticky: true });
+
+        if (urbanCoreGroup) {
+          urbanCoreGroup.addLayer(urbanCoreLayer);
+        } else if (mapBbox) {
+          urbanCoreLayer.addTo(mapBbox);
+        }
+        if (badge) {
+          badge.innerText = `${poly.length - 1} vértices`;
+          badge.className = "text-[10px] bg-amber-100 border border-amber-300 text-amber-800 px-2 py-0.5 rounded-full font-bold";
+        }
+        if (clearBtn) clearBtn.classList.remove('hidden');
+      } else {
+        if (badge) {
+          badge.innerText = "100% BBOX";
+          badge.className = "text-[10px] bg-stone-200 border border-stone-300 text-stone-700 px-2 py-0.5 rounded-full font-bold";
+        }
+        if (clearBtn) clearBtn.classList.add('hidden');
+      }
+      lucide.createIcons();
+    }
+
+    async function autoDetectUrbanCore() {
+      if (!currentCityFile) {
+        showToast("Selecciona o crea un proyecto primero", "warning");
+        return;
+      }
+      showToast("Consultando censo y calculando envolvente urbana concéntrica...", "info");
+      try {
+        const resp = await fetch(`/api/auto-urban-polygon?file=${encodeURIComponent(currentCityFile)}`);
+        const data = await resp.json();
+        if (data.status === 'ok' && data.polygon && data.polygon.length >= 3) {
+          setUrbanCorePolygon(data.polygon);
+          showToast(`¡Mancha urbana detectada a partir de ${data.points_count} puntos censales! Guardando...`, "success");
+          saveCurrentCity(true);
+        } else {
+          showToast(data.message || "No se pudo autodetectar la mancha urbana", "error");
+        }
+      } catch (err) {
+        showToast(`Error de conexión al autodetectar: ${err.message}`, "error");
+      }
     }
 
     // -------------------------------------------------------------------------
@@ -4713,6 +5093,11 @@
           bboxPoiGroup.clearLayers();
         }
       }
+      if (urbanCoreGroup) urbanCoreGroup.clearLayers();
+      if (urbanCoreLayer && mapBbox) {
+        mapBbox.removeLayer(urbanCoreLayer);
+        urbanCoreLayer = null;
+      }
       isBboxLocked = false;
       const lockChk = document.getElementById('cfg_bbox_locked');
       if (lockChk) lockChk.checked = false;
@@ -4746,6 +5131,9 @@
       if (isolatedZonesDemandGroup) isolatedZonesDemandGroup.clearLayers();
       if (exclusionZonesGroup) exclusionZonesGroup.clearLayers();
       if (exclusionZonesDemandGroup) exclusionZonesDemandGroup.clearLayers();
+      if (zoomPreviewGroup) zoomPreviewGroup.clearLayers();
+      const showPreviewChk = document.getElementById('cfg_show_zoom_preview');
+      if (showPreviewChk) showPreviewChk.checked = true;
       selectedIsolatedZoneIndex = -1;
       selectedExclusionIndex = -1;
       isDrawingIsolated = false;
@@ -4918,6 +5306,9 @@
       const oceanEl = document.getElementById('cfg_include_ocean');
       if (oceanEl) cityData.city.include_ocean = oceanEl.checked;
 
+      const parksEl = document.getElementById('cfg_urban_parks_only');
+      if (parksEl) cityData.city.urban_parks_only = parksEl.checked;
+
       const minResidentsEl = document.getElementById('cfg_min_residents');
       if (minResidentsEl) cityData.city.min_residents = parseInt(minResidentsEl.value, 10) || 10;
 
@@ -5036,6 +5427,11 @@
       document.getElementById('cfg_initial_zoom').value = c.initial_zoom || 11.5;
       document.getElementById('cfg_include_ocean').checked = Boolean(c.include_ocean);
 
+      const parksEl = document.getElementById('cfg_urban_parks_only');
+      if (parksEl) parksEl.checked = Boolean(c.urban_parks_only);
+      const parksStep5El = document.getElementById('chkUrbanParksStep5');
+      if (parksStep5El) parksStep5El.checked = Boolean(c.urban_parks_only);
+
       const mrEl = document.getElementById('cfg_min_residents');
       if (mrEl) mrEl.value = c.min_residents !== undefined ? c.min_residents : 10;
 
@@ -5121,11 +5517,12 @@
 
       toggleModalExperimentControls(modEn);
       updateModalSimulatorPreview();
+      renderUrbanCorePolygon();
 
       // Adjuntar listeners de auto-guardado a los campos de formulario
       const inputIds = [
         'cfg_city_name', 'cfg_city_code', 'cfg_city_creator', 'cfg_city_desc',
-        'cfg_grid_size', 'cfg_initial_zoom', 'cfg_include_ocean',
+        'cfg_grid_size', 'cfg_initial_zoom', 'cfg_include_ocean', 'cfg_urban_parks_only',
         'cfg_min_residents', 'cfg_min_jobs',
         'cfg_building_filter_size', 'cfg_building_simplification',
         'cfg_bbox_0', 'cfg_bbox_1', 'cfg_bbox_2', 'cfg_bbox_3',
@@ -5143,6 +5540,25 @@
           el.dataset.autosaveBound = "true";
         }
       });
+
+      // Listeners reactivos para Zoom Preview
+      const showPreviewEl = document.getElementById('cfg_show_zoom_preview');
+      if (showPreviewEl && !showPreviewEl.dataset.bound) {
+        showPreviewEl.addEventListener('change', () => {
+          updateZoomPreviewLayer();
+        });
+        showPreviewEl.dataset.bound = "true";
+      }
+
+      const zoomInputEl = document.getElementById('cfg_initial_zoom');
+      if (zoomInputEl && !zoomInputEl.dataset.zoomPreviewBound) {
+        zoomInputEl.addEventListener('input', () => {
+          updateZoomPreviewLayer();
+        });
+        zoomInputEl.dataset.zoomPreviewBound = "true";
+      }
+
+      updateZoomPreviewLayer();
 
       renderGrowthFactorsTable();
       renderPoiList();

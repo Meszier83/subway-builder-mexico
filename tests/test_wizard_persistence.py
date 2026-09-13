@@ -29,6 +29,7 @@ class TestWizardPersistence(unittest.TestCase):
                     "min_jobs": 7,
                     "building_filter_size": 22.5,
                     "building_simplification": 0.35,
+                    "urban_parks_only": True,
                     "seed": 999
                 },
                 "data_dir": "data/prs_test",
@@ -108,6 +109,7 @@ class TestWizardPersistence(unittest.TestCase):
             self.assertEqual(c["min_jobs"], 7)
             self.assertEqual(c["building_filter_size"], 22.5)
             self.assertEqual(c["building_simplification"], 0.35)
+            self.assertTrue(c["urban_parks_only"])
             self.assertEqual(c["seed"], 999)
 
             m = reloaded["macroeconomics"]
@@ -200,6 +202,7 @@ class TestWizardPersistence(unittest.TestCase):
             c = data.get("city", {})
             self.assertEqual(c.get("min_residents"), 10)
             self.assertEqual(c.get("min_jobs"), 3)
+            self.assertFalse(c.get("urban_parks_only", True))
 
             self.assertIn("exclusion_zones", data)
             self.assertEqual(data["exclusion_zones"], [])

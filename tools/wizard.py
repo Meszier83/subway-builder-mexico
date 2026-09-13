@@ -265,8 +265,11 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         f'  building_filter_size: {float(city_cfg.get("building_filter_size", 15.0))}',
         f'  building_simplification: {float(city_cfg.get("building_simplification", 0.2))}',
         f'  include_ocean: {"true" if city_cfg.get("include_ocean") else "false"}',
-        ""
+        f'  urban_parks_only: {"true" if city_cfg.get("urban_parks_only") else "false"}',
     ])
+    if city_cfg.get("urban_core_polygon"):
+        lines.append(f'  urban_core_polygon: {json.dumps(city_cfg.get("urban_core_polygon"))}')
+    lines.append("")
 
     if data_dir_cfg:
         lines.append(f'data_dir: {_yaml_quote(data_dir_cfg)}')
@@ -508,7 +511,8 @@ def create_new_project(name: str, code: str, creator: str = "Creador", data_dir:
             "initial_zoom": 11.5,
             "building_filter_size": 15.0,
             "building_simplification": 0.2,
-            "include_ocean": False
+            "include_ocean": False,
+            "urban_parks_only": False
         },
         "data_dir": resolved_data_dir,
         "data_exclusions": [],
@@ -1625,6 +1629,40 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                     pass
             points = load_demand_sample(bbox, city_file=city_file)
             self.serve_json({"points": points})
+        elif path == "/api/auto-urban-polygon":
+            city_file = query.get("file", [""])[0]
+            try:
+                from tools.poi_studio import load_demand_sample, load_city_data as l_city
+                cdata = l_city(city_file) if city_file else {}
+                bbox = cdata.get("city", {}).get("bbox")
+                pts = load_demand_sample(bbox, city_file=city_file)
+                populated_coords = [p["location"] for p in pts if (p.get("residents", 0) > 0 or p.get("jobs", 0) > 0)]
+
+                if not populated_coords or len(populated_coords) < 3:
+                    self.serve_json({"status": "error", "message": "No se encontraron suficientes puntos de población o empleo para calcular el núcleo urbano."})
+                    return
+
+                import shapely
+                points = [shapely.Point(c[0], c[1]) for c in populated_coords]
+                mp = shapely.MultiPoint(points)
+                # Concave hull with 25% ratio and 0.015 deg (~1.5 km) expansion buffer
+                hull = shapely.concave_hull(mp, ratio=0.25).buffer(0.015).simplify(0.002, preserve_topology=True)
+
+                if hull.geom_type == "Polygon":
+                    coords = [[round(c[0], 5), round(c[1], 5)] for c in hull.exterior.coords]
+                elif hull.geom_type == "MultiPolygon":
+                    largest = max(hull.geoms, key=lambda g: g.area)
+                    coords = [[round(c[0], 5), round(c[1], 5)] for c in largest.exterior.coords]
+                else:
+                    coords = []
+
+                self.serve_json({
+                    "status": "ok",
+                    "polygon": coords,
+                    "points_count": len(populated_coords)
+                })
+            except Exception as e:
+                self.serve_json({"status": "error", "message": str(e)})
         elif path == "/api/settlement_suggestions":
             try:
                 city_file = query.get("file", [""])[0]
