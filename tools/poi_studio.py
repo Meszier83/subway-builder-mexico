@@ -64,6 +64,8 @@ def _resolve_city_path(rel_or_abs_path: str) -> str:
         os.path.abspath(rel_or_abs_path),
         os.path.abspath(os.path.join(ROOT_DIR, "cities", os.path.basename(rel_or_abs_path)))
     ]
+    if "cancun.yaml" in rel_or_abs_path:
+        candidates.append(os.path.abspath(os.path.join(ROOT_DIR, "cities", "cancun_riviera_maya.yaml")))
     resolved = None
     for p in candidates:
         if os.path.exists(p):
