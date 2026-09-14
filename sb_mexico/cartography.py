@@ -242,7 +242,8 @@ def build_city_map_wsl(
     lod_peripheral_roads: str = "standard",
     include_pedestrian_paths: bool = False,
     lod_peripheral_labels: str = "none",
-    lod_peripheral_buildings: str = "none"
+    lod_peripheral_buildings: str = "none",
+    denue_csv: Optional[str] = None
 ) -> Dict[str, str]:
     """
     Ejecuta la compilación cartográfica dentro de WSL Ubuntu vía subprocess con streaming en vivo.
@@ -272,6 +273,19 @@ def build_city_map_wsl(
         wsl_cmd.extend(["--lod-peripheral-labels", lod_peripheral_labels])
     if lod_peripheral_buildings:
         wsl_cmd.extend(["--lod-peripheral-buildings", lod_peripheral_buildings])
+
+    if not denue_csv:
+        candidates = glob.glob(os.path.join(output_dir, "denue_*.csv"))
+        if not candidates:
+            candidates = glob.glob(os.path.join(output_dir, "..", "..", "data", "**", "denue_*.csv"), recursive=True)
+            city_cands = [c for c in candidates if city_code.lower() in c.lower()]
+            if city_cands:
+                candidates = city_cands
+        if candidates:
+            denue_csv = candidates[0]
+
+    if denue_csv and os.path.exists(denue_csv):
+        wsl_cmd.extend(["--denue-csv", to_wsl_path(denue_csv)])
 
 
     # Exportar urban_core_polygon como GeoJSON para el runner de WSL si está definido
@@ -373,7 +387,8 @@ def build_city_map(
     include_pedestrian_paths: bool = False,
     lod_peripheral_labels: str = "none",
     lod_peripheral_buildings: str = "none",
-    places: Optional[List[Dict]] = None
+    places: Optional[List[Dict]] = None,
+    denue_csv: Optional[str] = None
 ) -> Dict[str, str]:
     """
     Ejecuta el pipeline cartográfico completo de depot.maps.MapGen.
@@ -409,7 +424,8 @@ def build_city_map(
                 lod_peripheral_roads=lod_peripheral_roads,
                 include_pedestrian_paths=include_pedestrian_paths,
                 lod_peripheral_labels=lod_peripheral_labels,
-                lod_peripheral_buildings=lod_peripheral_buildings
+                lod_peripheral_buildings=lod_peripheral_buildings,
+                denue_csv=denue_csv
             )
 
         else:
@@ -473,10 +489,85 @@ def build_city_map(
     if include_ocean:
         ocean_cache_main = os.path.join(work_dir, "ocean_depth_index.json.gz")
         ocean_cache_contours = os.path.join(work_dir, "ocean_depth_index_contours.json.gz")
+        cache_valid = False
         if os.path.exists(ocean_cache_main) and os.path.exists(ocean_cache_contours):
+            try:
+                import gzip
+                with gzip.open(ocean_cache_main, "rt", encoding="utf-8") as f:
+                    c_data = json.load(f)
+                c_bbox = c_data.get("bbox", [])
+                if len(c_bbox) == 4 and all(abs(c_bbox[i] - bbox[i]) < 1e-3 for i in range(4)):
+                    cache_valid = True
+                else:
+                    print(f"-> [Caché] BBOX cartográfico cambió (guardado: {c_bbox}, actual: {bbox}).")
+                    print("   -> Invalidando caché de batimetría para recalcular el océano completo.")
+            except Exception as ce:
+                print(f"-> [Caché] Error validando caché de batimetría ({ce}). Se recalculará.")
+
+        if cache_valid:
             print("-> [Caché] Restaurando batimetría previamente calculada para reutilización inmediata (0s)...")
             shutil.copyfile(ocean_cache_main, os.path.join(build_output_dir, "ocean_depth_index.json.gz"))
             shutil.copyfile(ocean_cache_contours, os.path.join(build_output_dir, "ocean_depth_index_contours.json.gz"))
+        else:
+            for stale_f in ["ocean_depth_index.json.gz", "ocean_depth_index_contours.json.gz"]:
+                for stale_p in glob.glob(os.path.join(native_build_dir, "**", stale_f), recursive=True):
+                    try:
+                        os.remove(stale_p)
+                    except OSError:
+                        pass
+
+    # Sincronización y validación preventiva de caché de edificios 3D (Overture Maps)
+    buildings_meta_file = os.path.join(native_build_dir, ".buildings_bbox.json")
+    buildings_cache_valid = False
+    existing_pkls = glob.glob(os.path.join(native_build_dir, "**", "buildings.pkl"), recursive=True)
+
+    if existing_pkls:
+        if os.path.exists(buildings_meta_file):
+            try:
+                with open(buildings_meta_file, "r", encoding="utf-8") as bf:
+                    b_meta = json.load(bf)
+                b_bbox = b_meta.get("bbox", [])
+                if len(b_bbox) == 4 and all(abs(b_bbox[i] - bbox[i]) < 1e-3 for i in range(4)):
+                    buildings_cache_valid = True
+                else:
+                    print(f"-> [Caché Edificios 3D] BBOX cartográfico cambió (guardado: {b_bbox}, actual: {bbox}).")
+                    print("   -> Invalidando caché de edificios 3D para consultar Overture Maps en el BBOX completo.")
+            except Exception as be:
+                print(f"-> [Caché Edificios 3D] Error validando metadatos ({be}). Se recalculará.")
+        else:
+            print("-> [Caché Edificios 3D] Sin registro previo de BBOX para edificios 3D. Verificando extensión espacial...")
+            try:
+                import pandas as pd
+                import geopandas as gpd
+                df_chk = pd.read_pickle(existing_pkls[0])
+                if not df_chk.empty:
+                    tb = gpd.GeoSeries(df_chk['geometry']).total_bounds
+                    if (bbox[0] < tb[0] - 0.03) or (bbox[1] < tb[1] - 0.03) or (bbox[2] > tb[2] + 0.03) or (bbox[3] > tb[3] + 0.03):
+                        print(f"   -> Extensión actual {bbox} excede la huella de edificios guardada {tb.tolist()}. Invalidando.")
+                        buildings_cache_valid = False
+                    else:
+                        buildings_cache_valid = True
+            except Exception:
+                buildings_cache_valid = False
+
+        if not buildings_cache_valid:
+            stale_building_patterns = [
+                "buildings.pkl",
+                "buildings.geojson",
+                "buildings_cleaned.json",
+                "buildings_zoom.geojson",
+                "buildings.mbtiles",
+                "buildings_foundations.*",
+                "buildings_index.*"
+            ]
+            for b_pat in stale_building_patterns:
+                for stale_b in glob.glob(os.path.join(native_build_dir, "**", b_pat), recursive=True):
+                    try:
+                        os.remove(stale_b)
+                    except OSError:
+                        pass
+        else:
+            print("-> [Caché Edificios 3D] Reutilizando edificios 3D previamente descargados (BBOX verificado).")
 
     print(f"-> Inicializando MapGen para {city_code} (Cores: {cores}, RAM: {ram_mb} MB)...")
 
@@ -497,11 +588,18 @@ def build_city_map(
             road_name_preferred_language="es",
             building_index_filter_size=building_filter_size,
             building_index_simplification=building_simplification,
-            create_ocean_foundations=include_ocean
+            create_ocean_foundations=include_ocean,
+            redownload_buildings=not buildings_cache_valid
         )
 
         print("-> Ejecutando extracción de geometrías, vialidades, toponimia y edificios 3D...")
         m.run_all()
+
+        try:
+            with open(buildings_meta_file, "w", encoding="utf-8") as bf:
+                json.dump({"bbox": bbox}, bf, indent=2)
+        except Exception:
+            pass
     finally:
         os.chdir(prev_cwd)
     generated_files = {}

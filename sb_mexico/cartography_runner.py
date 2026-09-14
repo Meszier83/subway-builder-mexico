@@ -125,19 +125,19 @@ def apply_urban_lod_filtering(
             print(f"   [WARN] osmium extract falló ({res_extract.stderr.strip()}). Usando PBF original.")
             return input_pbf
 
-        # 2. Filtrar vias menores y etiquetas de lugares estrictamente dentro del nucleo
-        core_minor_pbf = os.path.join(build_dir, f"{city_code.lower()}_core_minor.osm.pbf")
-        minor_highways = "w/highway=tertiary,tertiary_link,unclassified,residential,living_street,service"
+        # 2. Filtrar vias urbanas y etiquetas de lugares estrictamente dentro del nucleo
+        core_filtered_pbf = os.path.join(build_dir, f"{city_code.lower()}_core_filtered.osm.pbf")
+        core_highways = "w/highway=motorway,motorway_link,trunk,trunk_link,primary,primary_link,secondary,secondary_link,tertiary,tertiary_link,unclassified,residential,living_street,service"
         if include_pedestrian_paths:
-            minor_highways += ",pedestrian,footway,cycleway,path"
+            core_highways += ",pedestrian,footway,cycleway,path"
 
-        res_minor = subprocess.run([
+        res_core = subprocess.run([
             osmium_bin, "tags-filter",
             core_pbf,
-            minor_highways,
+            core_highways,
             "n/place=city,town,suburb,neighbourhood,quarter,village,hamlet",
             "--overwrite",
-            "-o", core_minor_pbf
+            "-o", core_filtered_pbf
         ], capture_output=True, text=True)
 
         # 3. Filtrar red troncal y terreno para TODO el BBOX exterior según lod_peripheral_roads
@@ -153,7 +153,9 @@ def apply_urban_lod_filtering(
             osmium_bin, "tags-filter",
             input_pbf,
             bg_highways,
-            "w/natural=water", "w/waterway=*", "w/landuse=*", "w/boundary=*", "w/landcover=*", "w/aeroway=*"
+            "wr/natural=*", "wr/waterway=*", "wr/landuse=*", "wr/landcover=*",
+            "wr/leisure=*", "wr/amenity=*", "wr/aeroway=*", "wr/boundary=*",
+            "r/type=multipolygon", "r/type=boundary"
         ]
         if lod_peripheral_labels == "cities_only":
             tags_filter_cmd.append("n/place=city")
@@ -164,15 +166,15 @@ def apply_urban_lod_filtering(
         res_bg = subprocess.run(tags_filter_cmd, capture_output=True, text=True)
 
 
-        if res_minor.returncode != 0 or res_bg.returncode != 0 or not os.path.exists(core_minor_pbf) or not os.path.exists(bg_pbf):
+        if res_core.returncode != 0 or res_bg.returncode != 0 or not os.path.exists(core_filtered_pbf) or not os.path.exists(bg_pbf):
             print("   [WARN] osmium tags-filter falló. Usando PBF base.")
             return input_pbf
 
-        # 4. Fusionar troncales + vías menores del núcleo
+        # 4. Fusionar troncales exteriores + red urbana completa del núcleo
         optimized_pbf = os.path.join(build_dir, f"{city_code.lower()}_lod_optimized.osm.pbf")
         res_merge = subprocess.run([
             osmium_bin, "merge",
-            bg_pbf, core_minor_pbf,
+            bg_pbf, core_filtered_pbf,
             "--overwrite",
             "-o", optimized_pbf
         ], capture_output=True, text=True)
@@ -204,7 +206,8 @@ def run_cartography(
     lod_peripheral_roads: str = "standard",
     include_pedestrian_paths: bool = False,
     lod_peripheral_labels: str = "none",
-    lod_peripheral_buildings: str = "none"
+    lod_peripheral_buildings: str = "none",
+    denue_csv: Optional[str] = None
 ) -> int:
     if urban_parks_only:
         os.environ["SB_URBAN_PARKS_ONLY"] = "1"
@@ -238,17 +241,15 @@ def run_cartography(
     native_build_dir = os.path.abspath(os.path.expanduser(f"~/build_{city_code.lower()}"))
 
     if os.path.exists(native_build_dir):
-        # Limpiar teselas temporales y pmtiles parciales, preservando descargas pesadas (.pkl, .pbf)
-        for stale in glob.glob(os.path.join(native_build_dir, "**", "*.mbtiles"), recursive=True):
-            try:
-                os.remove(stale)
-            except OSError:
-                pass
-        for stale in glob.glob(os.path.join(native_build_dir, "**", "*.pmtiles"), recursive=True):
-            try:
-                os.remove(stale)
-            except OSError:
-                pass
+        # Limpiar teselas temporales, pmtiles parciales y archivos intermedios residuales recursivamente
+        for pat in ["*.mbtiles", "*.pmtiles", "*.pbf.tmp", "roads.pbf", "runways_taxiways.pbf", "places.osm.pbf", "*-nobuildings.osm.pbf", "*-merged-source.osm.pbf"]:
+            for stale in glob.glob(os.path.join(native_build_dir, "**", pat), recursive=True):
+                if stale.endswith(("_clipped.osm.pbf", "_lod_optimized.osm.pbf", f"{city_code.lower()}.osm.pbf")):
+                    continue
+                try:
+                    os.remove(stale)
+                except OSError:
+                    pass
     else:
         os.makedirs(native_build_dir, exist_ok=True)
     os.makedirs(work_dir, exist_ok=True)
@@ -286,14 +287,120 @@ def run_cartography(
     if include_ocean:
         ocean_cache_main = os.path.join(work_dir, "ocean_depth_index.json.gz")
         ocean_cache_contours = os.path.join(work_dir, "ocean_depth_index_contours.json.gz")
+        cache_valid = False
         if os.path.exists(ocean_cache_main) and os.path.exists(ocean_cache_contours):
+            try:
+                import gzip
+                with gzip.open(ocean_cache_main, "rt", encoding="utf-8") as f:
+                    c_data = json.load(f)
+                c_bbox = c_data.get("bbox", [])
+                if len(c_bbox) == 4 and all(abs(c_bbox[i] - bbox[i]) < 1e-3 for i in range(4)):
+                    cache_valid = True
+                else:
+                    print(f"-> [Caché] BBOX cartográfico cambió (guardado: {c_bbox}, actual: {bbox}).")
+                    print("   -> Invalidando caché de batimetría para recalcular el océano completo.")
+            except Exception as ce:
+                print(f"-> [Caché] Error validando caché de batimetría ({ce}). Se recalculará.")
+
+        if cache_valid:
             print("-> [Caché] Restaurando batimetría previamente calculada para reutilización inmediata (0s)...")
             shutil.copyfile(ocean_cache_main, os.path.join(build_output_dir, "ocean_depth_index.json.gz"))
             shutil.copyfile(ocean_cache_contours, os.path.join(build_output_dir, "ocean_depth_index_contours.json.gz"))
+        else:
+            for stale_f in ["ocean_depth_index.json.gz", "ocean_depth_index_contours.json.gz"]:
+                for stale_p in glob.glob(os.path.join(native_build_dir, "**", stale_f), recursive=True):
+                    try:
+                        os.remove(stale_p)
+                    except OSError:
+                        pass
+
+    # Sincronización y validación preventiva de caché de edificios 3D (Overture Maps)
+    buildings_meta_file = os.path.join(native_build_dir, ".buildings_bbox.json")
+    buildings_cache_valid = False
+    existing_pkls = glob.glob(os.path.join(native_build_dir, "**", "buildings.pkl"), recursive=True)
+
+    if existing_pkls:
+        if os.path.exists(buildings_meta_file):
+            try:
+                with open(buildings_meta_file, "r", encoding="utf-8") as bf:
+                    b_meta = json.load(bf)
+                b_bbox = b_meta.get("bbox", [])
+                if len(b_bbox) == 4 and all(abs(b_bbox[i] - bbox[i]) < 1e-3 for i in range(4)):
+                    buildings_cache_valid = True
+                else:
+                    print(f"-> [Caché Edificios 3D] BBOX cartográfico cambió (guardado: {b_bbox}, actual: {bbox}).")
+                    print("   -> Invalidando caché de edificios 3D para consultar Overture Maps en el BBOX completo.")
+            except Exception as be:
+                print(f"-> [Caché Edificios 3D] Error validando metadatos ({be}). Se recalculará.")
+        else:
+            print("-> [Caché Edificios 3D] Sin registro previo de BBOX para edificios 3D. Verificando extensión espacial...")
+            try:
+                import pandas as pd
+                import geopandas as gpd
+                df_chk = pd.read_pickle(existing_pkls[0])
+                if not df_chk.empty:
+                    tb = gpd.GeoSeries(df_chk['geometry']).total_bounds
+                    if (bbox[0] < tb[0] - 0.03) or (bbox[1] < tb[1] - 0.03) or (bbox[2] > tb[2] + 0.03) or (bbox[3] > tb[3] + 0.03):
+                        print(f"   -> Extensión actual {bbox} excede la huella de edificios guardada {tb.tolist()}. Invalidando.")
+                        buildings_cache_valid = False
+                    else:
+                        buildings_cache_valid = True
+            except Exception:
+                buildings_cache_valid = False
+
+        if not buildings_cache_valid:
+            stale_building_patterns = [
+                "buildings.pkl",
+                "buildings.geojson",
+                "buildings_cleaned.json",
+                "buildings_zoom.geojson",
+                "buildings.mbtiles",
+                "buildings_foundations.*",
+                "buildings_index.*"
+            ]
+            for b_pat in stale_building_patterns:
+                for stale_b in glob.glob(os.path.join(native_build_dir, "**", b_pat), recursive=True):
+                    try:
+                        os.remove(stale_b)
+                    except OSError:
+                        pass
+        else:
+            print("-> [Caché Edificios 3D] Reutilizando edificios 3D previamente descargados (BBOX verificado).")
 
     cores, ram_mb = get_optimal_hardware_resources()
     # MapGen expects RAM in Gigabytes (its setter converts GB to MB: self._RAM = int(RAM * 1000))
     ram_gb = max(2.0, round(ram_mb / 1000.0, 1))
+
+    # Enriquecimiento automático de toponimia urbana desde DENUE si está disponible
+    additional_neighborhoods_geojson = None
+    if not denue_csv:
+        # Intentar auto-descubrimiento en work_dir o data/<city>
+        candidates = glob.glob(os.path.join(work_dir, "denue_*.csv"))
+        if not candidates:
+            candidates = glob.glob(os.path.join(REPO_ROOT, "data", "**", "denue_*.csv"), recursive=True)
+            city_cands = [c for c in candidates if city_code.lower() in c.lower()]
+            if city_cands:
+                candidates = city_cands
+        if candidates:
+            denue_csv = candidates[0]
+
+    if denue_csv and os.path.exists(denue_csv):
+        try:
+            from sb_mexico.toponymy import generate_denue_neighborhoods_geojson
+            denue_out_geojson = os.path.join(native_build_dir, f"{city_code.lower()}_denue_neighborhoods.geojson")
+            res_geo = generate_denue_neighborhoods_geojson(
+                denue_path=denue_csv,
+                bbox=bbox,
+                output_geojson=denue_out_geojson,
+                urban_core_geojson=urban_core_geojson,
+                min_count=15
+            )
+            if res_geo and os.path.exists(res_geo):
+                additional_neighborhoods_geojson = res_geo
+                print(f"-> [Toponimia DENUE] Inyectando colonias y fraccionamientos adicionales desde {denue_csv}")
+        except Exception as te:
+            print(f"  [WARN] No se pudo generar toponimia complementaria de DENUE: {te}")
+
     print(f"-> Inicializando MapGen (Cores: {cores}, RAM asignada: {ram_gb} GB [{ram_mb} MB])...")
 
     prev_cwd = os.getcwd()
@@ -309,17 +416,26 @@ def run_cartography(
             cities=ETIQUETAS_CITIES,
             suburbs=ETIQUETAS_SUBURBS,
             neighborhoods=ETIQUETAS_NEIGHBORHOODS,
+            neighborhoods_additional=additional_neighborhoods_geojson,
             label_name_language="prefer:es",
             road_name_preferred_language="es",
             building_index_filter_size=building_filter_size,
             building_index_simplification=building_simplification,
             building_tile_simplification=building_simplification,
             create_building_foundations=False,
-            create_ocean_foundations=include_ocean
+            create_ocean_foundations=include_ocean,
+            redownload_buildings=not buildings_cache_valid
         )
 
         print("-> Ejecutando extracción de geometrías, vialidades, toponimia y edificios 3D...")
         m.run_all()
+
+        # Guardar metadatos de BBOX de edificios 3D tras compilación exitosa
+        try:
+            with open(buildings_meta_file, "w", encoding="utf-8") as bf:
+                json.dump({"bbox": bbox}, bf, indent=2)
+        except Exception:
+            pass
     finally:
         os.chdir(prev_cwd)
 
@@ -367,6 +483,7 @@ def main():
     parser.add_argument("--include-pedestrian-paths", action="store_true", default=False, help="Incluir andadores y senderos dentro del núcleo")
     parser.add_argument("--lod-peripheral-labels", default="none", choices=["none", "cities_only", "all"], help="Etiquetas toponímicas en periferia")
     parser.add_argument("--lod-peripheral-buildings", default="none", choices=["none", "large_only", "all"], help="Edificios 3D en periferia")
+    parser.add_argument("--denue-csv", default=None, help="Ruta al archivo DENUE CSV para toponimia complementaria")
 
     args = parser.parse_args()
     ret = run_cartography(
@@ -382,7 +499,8 @@ def main():
         lod_peripheral_roads=args.lod_peripheral_roads,
         include_pedestrian_paths=args.include_pedestrian_paths,
         lod_peripheral_labels=args.lod_peripheral_labels,
-        lod_peripheral_buildings=args.lod_peripheral_buildings
+        lod_peripheral_buildings=args.lod_peripheral_buildings,
+        denue_csv=args.denue_csv
     )
     sys.exit(ret)
 

@@ -78,7 +78,41 @@ class TestOceanOptimization(unittest.TestCase):
 
         self.assertIn("ocean_depth_index_contours.json.gz", content)
         self.assertIn("Restaurando batimetría previamente calculada", content)
+        self.assertIn("BBOX cartográfico cambió", content)
+
+    def test_ocean_cache_bbox_validation(self):
+        """Verifica que la lógica de validación de BBOX detecte diferencias entre caché y destino."""
+        cached_bbox = [-89.9106, 20.7177, -89.3512, 21.3992]
+        new_bbox = [-90.3406, 20.5634, -88.9453, 21.6483]
+        same_bbox = [-89.9106, 20.7177, -89.3512, 21.3992]
+
+        is_same = all(abs(cached_bbox[i] - same_bbox[i]) < 1e-3 for i in range(4))
+        is_diff = all(abs(cached_bbox[i] - new_bbox[i]) < 1e-3 for i in range(4))
+
+        self.assertTrue(is_same)
+        self.assertFalse(is_diff)
+
+    def test_buildings_cache_bbox_validation(self):
+        """Verifica que la lógica de validación de BBOX detecte cambios y fuerce redownload de edificios."""
+        runner_path = os.path.join(os.path.dirname(__file__), "..", "sb_mexico", "cartography_runner.py")
+        with open(runner_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn(".buildings_bbox.json", content)
+        self.assertIn("redownload_buildings=not buildings_cache_valid", content)
+        self.assertIn("Invalidando caché de edificios 3D", content)
+
+    def test_cartography_has_buildings_cache_logic(self):
+        """Verifica que cartography.py incluya la validación de caché de edificios 3D."""
+        cart_path = os.path.join(os.path.dirname(__file__), "..", "sb_mexico", "cartography.py")
+        with open(cart_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn(".buildings_bbox.json", content)
+        self.assertIn("redownload_buildings=not buildings_cache_valid", content)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+

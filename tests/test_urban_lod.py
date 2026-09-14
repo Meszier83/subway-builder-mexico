@@ -202,6 +202,18 @@ class TestUrbanCoreLOD(unittest.TestCase):
         )
         self.assertEqual(res, "non_existent.pbf")
 
+    def test_apply_urban_lod_filtering_preserves_primary_and_secondary_in_core(self):
+        """Verifica que apply_urban_lod_filtering incluya vías principales (primary, secondary) en el núcleo."""
+        import inspect
+        src = inspect.getsource(apply_urban_lod_filtering)
+        self.assertIn("primary", src)
+        self.assertIn("secondary", src)
+        self.assertIn("core_highways", src)
+        self.assertIn("wr/natural=*", src)
+        self.assertIn("wr/leisure=*", src)
+
 
 if __name__ == "__main__":
     unittest.main()
+
+

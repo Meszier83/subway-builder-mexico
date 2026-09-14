@@ -606,6 +606,10 @@ def patch_depot_maps(file_path: str = None) -> bool:
     content, mod_lbl = patch_urban_core_labels(content)
     any_modified = any_modified or mod_lbl
 
+    # 9. Parche Toponimia Universal: Extraccion nwr/place y Conversion a Centroides Point
+    content, mod_top = patch_polygon_neighborhoods(content)
+    any_modified = any_modified or mod_top
+
     if not any_modified:
         print("[OK] Todos los parches de depot.maps ya estan aplicados.")
         return True
@@ -906,6 +910,87 @@ def patch_urban_core_labels(content: str) -> tuple[str, bool]:
     else:
         print("[WARN] No se encontro el bloque exacto de combine_geojson_labels en add_labels.")
         return content, False
+
+
+def patch_polygon_neighborhoods(content: str) -> tuple[str, bool]:
+    """
+    Subway Builder Mexico: Extrae nodos, vias y relaciones (nwr/place) para capturar
+    supermanzanas y colonias poligonales en OSM, convirtiendolas a centroides Point.
+    """
+    if "Subway Builder Mexico: extract nodes, ways and relations (nwr)" in content:
+        print("[OK] depot.maps ya cuenta con el parche de extraccion nwr y centroides de toponimia.")
+        return content, False
+
+    old_filter = """            # Build the osmium filter string
+            # e.g., "n/place=city n/place=borough"
+            filter_cmd.extend([f"n/place{self.places_suffix}={t}" for t in tags])
+            filter_cmd.extend(["-o", str(osm_pbf), "--overwrite"])
+            self._run_command(filter_cmd)
+            self._run_command(["osmium", "export", str(osm_pbf), "-o", 
+                               str(geojson), "--overwrite"])
+            self._rewrite_label_geojson_names(geojson)"""
+
+    new_filter = """            # Build the osmium filter string
+            # Subway Builder Mexico: extract nodes, ways and relations (nwr) to capture polygon neighborhoods
+            filter_cmd.extend([f"nwr/place{self.places_suffix}={t}" for t in tags])
+            filter_cmd.extend(["-o", str(osm_pbf), "--overwrite"])
+            self._run_command(filter_cmd)
+            self._run_command(["osmium", "export", str(osm_pbf), "-o", 
+                               str(geojson), "--overwrite"])
+            self._rewrite_label_geojson_names(geojson)
+
+            # Subway Builder Mexico: convert polygon/line places to centroid Points
+            if os.path.exists(geojson):
+                try:
+                    import json
+                    from shapely.geometry import shape
+                    with open(geojson, "r", encoding="utf-8") as gf:
+                        gdata = json.load(gf)
+                    feats = gdata.get("features", [])
+                    norm_feats = []
+                    seen_places = set()
+                    for f in feats:
+                        props = f.get("properties", {})
+                        p_name = props.get("name", "").strip()
+                        if not p_name or props.get("highway"):
+                            continue
+                        geom = f.get("geometry")
+                        if not geom:
+                            continue
+                        if geom.get("type") == "Point":
+                            pt = geom
+                        else:
+                            try:
+                                s = shape(geom)
+                                if s.is_empty:
+                                    continue
+                                c = s.centroid
+                                pt = {"type": "Point", "coordinates": [round(c.x, 6), round(c.y, 6)]}
+                            except Exception:
+                                continue
+                        coords = pt.get("coordinates", [0, 0])
+                        norm_key = (p_name.lower(), round(coords[0], 3), round(coords[1], 3))
+                        if norm_key in seen_places:
+                            continue
+                        seen_places.add(norm_key)
+                        f["geometry"] = pt
+                        norm_feats.append(f)
+                    gdata["features"] = norm_feats
+                    with open(geojson, "w", encoding="utf-8") as gf:
+                        json.dump(gdata, gf)
+                    if self.verb:
+                        print(f"  [Toponymy Centroids] Capa '{name}': {len(norm_feats)} etiquetas normalizadas a puntos.")
+                except Exception as ce:
+                    if self.verb:
+                        print(f"  [WARN] Error normalizando centroides en '{name}': {ce}")"""
+
+    if old_filter not in content:
+        print("[WARN] No se encontro el bloque de tags-filter n/place en depot/maps.py.")
+        return content, False
+
+    content = content.replace(old_filter, new_filter, 1)
+    print("[OK] Parche de extraccion nwr y centroides de toponimia incorporado en depot.maps.")
+    return content, True
 
 
 if __name__ == "__main__":
