@@ -23,6 +23,10 @@ La version 7.1 consolida una arquitectura declarativa, rigurosa y automatizada d
 7. **Zonas de Alta Afluencia (`affluence_zones`):** Delimitacion poligonal de distritos clave (CBD, turismo, industrial, comercial) con modulacion de masa laboral, bono de alcance metropolitano (`reach_bonus`) y regla canonica *MAX Priority*.
 8. **Zonas Topologicas Aisladas (`isolated_zones`):** Modelado estanco de islas y barreras hidricas que impide la circulacion irreal de automoviles sobre el mar.
 9. **Aislamiento Hermetico por Proyecto (Regla 9):** Almacenamiento hermetico de microdatos en `data/<ciudad>/` y generacion de paquetes ZIP en `dist/<ciudad>/<CODIGO>.zip`.
+10. **Canon Oficial de Simulacion de Pasajeros (Colin Miller / Subway Builder):**
+    * **Ruteo de Pasajeros rRAPTOR (Delling et al., 2012):** Busqueda por rondas sobre horarios de trenes en ventanas de 30 minutos; permite a los viajeros esperar por servicios exprés y realizar transbordos peatonales (*walking transfers*) entre estaciones cercanas.
+    * **Ponderaciones de Tiempo Percibido (Wardman et al., 2026):** Evaluacion con factores de tiempo generalizado ($1.0\times$ tren, $1.39\times$ caminata, $1.37\times$ andén, $0.40\times$ demora en casa, $1.33\times$ trafico automotriz, $1.60\times$ estacionamiento).
+    * **Eleccion Modal por Ingreso (Tao, Wu et al., 2020):** Competencia Metro vs. Auto vs. Caminata con Valor del Tiempo ($VOT$) heterogeneo segun el nivel de ingreso del vecindario, produciendo una curva suave y elastica de captacion de usuarios.
 
 ---
 
@@ -64,7 +68,7 @@ subway-builder-mexico/
 |   |-- wizard.py                    # Servidor web del asistente integral (6 Pasos, POI Studio en Paso 4)
 |   |-- poi_studio.py                # Editor visual standalone de POIs en mapa satelital
 |   |-- preview_toponymy.py          # Visor geoespacial de capas toponimicas
-|   |-- patch_depot_wsl.py           # Suite de 8 parches cartograficos (Campus Wins, RAM, LOD, etiquetas, parques)
+|   |-- patch_depot_wsl.py           # Suite de 9 parches cartograficos (Campus Wins, RAM, LOD, etiquetas, parques, toponimia nwr)
 |   \-- demo_preview.py              # Generador rapido de vistas previas
 |-- build.py                         # CLI ejecutable principal
 |-- wizard.bat                       # Lanzador directo para Windows
@@ -296,7 +300,7 @@ Aplica filtrado en dos niveles con `osmium extract` y `tags-filter`:
 * **Nucleo Urbano (`urban_core_polygon`):** Red vial menor (`residential`, `service`, `living_street`, `pedestrian`), etiquetas toponimicas urbanas y edificios 3D (`patch_urban_core_lod`, `patch_urban_core_labels`), reduciendo el peso de teselas vectoriales hasta en un 80% y eliminando cuellos de botella de memoria.
 
 ### 5. Suite de Parches Cartograficos en WSL 2 (depot.maps)
-El script `tools/patch_depot_wsl.py` aplica 8 parches de estabilidad y estandares canonicos sobre el compilador de mapas:
+El script `tools/patch_depot_wsl.py` aplica 9 parches de estabilidad y estandares canonicos sobre el compilador de mapas:
 1. **Campus Wins (`patch_campus_wins`):** Sustraccion geometrica de `college_mask` sobre comercios superpuestos y etiquetado dual `type: 'college', kind: 'college'`.
 2. **Desbloqueo CPU Oceano (`patch_ocean_cpu`):** Asignacion de 100% de cores CPU para batimetria marina.
 3. **Zoom Mascara de Agua (`patch_ocean_water_zoom`):** Optimizacion a $z=14$ acelerando procesamiento oceanico en >60%.
@@ -305,6 +309,7 @@ El script `tools/patch_depot_wsl.py` aplica 8 parches de estabilidad y estandare
 6. **Filtrado de Macro-Parques (`patch_urban_parks`):** Supresion de selvas y reservas no pobladas (`SB_URBAN_PARKS_ONLY=1`).
 7. **Urban Core LOD Edificios (`patch_urban_core_lod`):** Confinamiento de volumenes 3D al perimetro denso metropolitano.
 8. **Urban Core LOD Etiquetas (`patch_urban_core_labels`):** Supresion estricta de toponimia fuera del nucleo (`SB_URBAN_CORE_GEOJSON`).
+9. **Toponimia Universal NWR (`patch_polygon_neighborhoods`):** Extraccion de vias y relaciones poligonales en OSM (`nwr/place`) con conversion automatica a centroides `Point` y fusion con asentamientos del DENUE (`neighborhoods_additional`).
 
 ### 6. Encuadre Inicial de Camara (Viewport Centrado en Masa)
 * **Modo Manual:** Coordenadas declaradas explicitamente en `initial_center` y `initial_zoom` calibradas en el Wizard Studio con encuadre 16:9.

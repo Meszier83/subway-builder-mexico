@@ -267,8 +267,11 @@ Para superar esto, `sb_mexico` implementa el algoritmo clasico de **Furness / IP
    $$\sum_{j} T_{ij} = \text{PEA}_i^{\text{rem}}$$
 2. **Restriccion de Columna (Capacidad de Absorcion Laboral):**
    $$\sum_{i} T_{ij} \propto D_j \qquad (D_j = \text{calibrated\_jobs}_j)$$
-3. **Friccion Espacial Exponencial:**
+3. **Friccion Espacial Exponencial y Calibracion Empirica por Ciudad:**
    $$f(d_{ij}) = e^{-\beta \cdot d_{ij}} \quad \text{para } d_{ij} \le 55\text{ km} \quad (\beta = 0.12)$$
+
+   * **El Estandar de Calibracion de Colin (Trip Length Distribution):** En la metodologia oficial de *Subway Builder*, el modelo gravitatorio se calibra especificamente para cada metropoli asegurando que la distribucion de distancias de viaje simuladas (*Commute Distance Distribution*) coincida con las curvas de distancia observadas en los censos de movilidad locales.
+   * En ciudades mexicanas compactas (ej. Cancun urbano, Campeche), los desplazamientos laborales diarios se concentran en medianas de 6 a 10 km ($\beta \approx 0.14 - 0.18$), mientras que en metropolis intermedias (Merida, Queretaro, Saltillo) rondan los 12 a 16 km ($\beta \approx 0.10 - 0.12$), y en megaciudades extensas (ZMVM, Monterrey, Guadalajara) superan los 20 a 30 km ($\beta \approx 0.07 - 0.09$).
 
 #### Algoritmo de Convergencia Bidireccional
 Se inicializa la matriz de flujos como $T_{ij}^{(0)} = \text{PEA}_i^{\text{rem}} \cdot D_j^* \cdot f(d_{ij})$ y se itera secuencialmente:
@@ -307,11 +310,13 @@ El motor de *Subway Builder* inspecciona la cadena de texto de los identificador
 
 * **Prefijo `AIR_*` (Aeropuertos):**
   * Activa regimen continuo 24 horas al dia con **dampening = 0.5** y flujo bidireccional simetrico (los vuelos llegan y salen tanto en la madrugada como a mediodia).
+  * **Comportamiento y Distribucion de Ingresos:** El motor simula pasajeros aéreos y tripulaciones con distribucion de ingresos y tiempos de viaje especificos (en EE. UU. alimentado por la FAA; en Mexico por aforos oficiales de la AFAC).
   * **Regla Estricta de Nomenclatura:** El motor de juego recorta automaticamente el prefijo `"AIR_"` y anexa la palabra `" Terminal"`.
     * *Correcto:* `AIR_Cancun` (el juego mostrara `Cancun Terminal`).
     * *Incorrecto:* `AIR_Aeropuerto_CUN` (el juego mostraria `Aeropuerto_CUN Terminal`).
 * **Prefijo `UNI_*` (Universidades):**
   * Activa la curva horaria estudiantil con **dampening = 0.3** (amortigua los picos extremos de oficina y distribuye los viajes a lo largo del dia conforme a turnos matutino, vespertino e intermedio).
+  * **Comportamiento e Ingresos Estudiantiles:** Modela a la poblacion estudiantil con un estrato de ingresos reducido, lo cual disminuye su Valor del Tiempo ($VOT$) y dispara su propension y fidelidad al transporte masivo frente al automovil particular (en EE. UU. basado en datos federales de matricula; en Mexico en la estadistica oficial SEP / ANUIES).
 * **Sin prefijo o prefijos complementarios (`SPO_`, `TOU_`, `MED_`, `TRA_`):**
   * Siguen la curva bimodal estandar de desplazamiento laboral urbano (picos marcados de 7:00–9:30 AM y 5:30–8:30 PM).
 * **Regla de Formato de IDs:** Prohibido usar guiones bajos `_` en el nombre propio tras el prefijo taxonomico. Usar nombres legibles con espacios (ej. `UNI_Universidad del Caribe`, no `UNI_Universidad_del_Caribe`).
@@ -411,29 +416,72 @@ Esta regla garantiza idempotencia e independencia del orden de definicion en el 
 
 # PARTE 3: Fisicas Viales, Ruteo Arterial, Cohortes Dinamicas y Metadatos del Motor
 
-## 8. Fisicas de Trafico, Congestion y Eleccion Modal en Subway Builder
+## 8. Arquitectura de Simulacion, Fisicas Viales y Eleccion Modal en Subway Builder
 
-### 8.1. La Funcion de Eleccion Modal en el Motor de Simulacion
-Un aspecto critico de la arquitectura de *Subway Builder* es comprender como el motor de simulacion decide si una cohorte de pasajeros utiliza la red de metro construida por el jugador o se desplaza en automovil privado:
+Para que una red metropolitana construida en Mexico funcione de forma realista dentro de *Subway Builder*, es esencial comprender en profundidad el motor de simulacion de pasajeros de Colin Miller y las investigaciones academicas en las que se fundamenta. El juego no es un simulador estatico ni un modelo macroscopico tradicional; simula a millones de viajeros individuales con elecciones discretas a 60 FPS mediante tres componentes acoplados:
 
-1. **El juego NO calcula rutas viales en tiempo real:** Durante la simulacion a 60 FPS, el motor no ejecuta busquedas de caminos (A* o Dijkstra) sobre el mapa de calles para los vehiculos; seria computacionalmente inviable simular decenas de miles de automoviles simultaneos en JavaScript/WebGL.
-2. **Confianza Ciega en `drivingSeconds`:** El motor lee directamente el valor numerico escrito en el campo `drivingSeconds` dentro del archivo `demand_data.json` para cada cohorte `pop`.
-3. **Criterio de Eleccion Modal y Penalizaciones en Tiempo Real:**
-   El motor del juego evalua la utilidad comparativa del viaje. Al valor base de `drivingSeconds`, el motor aplica de forma dinamica en tiempo de ejecucion:
-   * **Multiplicador de Hora Pico:** `DRIVING_TIMES.HIGH_DEMAND = 1.5x` durante horas punta.
-   * **Multiplicador de Congestion Vial Dinamica:** `CONGESTED_DRIVING_MULTIPLIER = 1.33x` conforme aumenta la densidad automotriz.
-   * **Friccion de Estacionamiento:** $+180\text{ s}$ en origen y $+180\text{ s}$ en destino, escalados por un factor de hasta $1.6\text{x}$ ($\approx 576\text{ s}$ adicionales de busqueda de cajon).
+### 8.1. Ruteo de Pasajeros sobre Horarios: range-RAPTOR (rRAPTOR)
+El motor de busqueda de rutas de transporte publico dentro del juego no ejecuta busquedas sobre grafos espaciales (como Dijkstra o A*), sino el algoritmo **range-RAPTOR (rRAPTOR)**, desarrollado por Delling, Pajor & Werneck (2012, Microsoft Research: *Round-Based Public Transit Routing*):
+
+1. **Ruteo por Rondas sobre Tablas de Horarios (Timetables):**
+   En lugar de explorar nodos geograficos, RAPTOR barre directamente las tablas de paso de los trenes en rondas discretas:
+   * *Ronda 1:* Identifica todas las estaciones alcanzables mediante un solo tren (cero transbordos).
+   * *Ronda 2:* Identifica estaciones alcanzables con exactamente un transbordo.
+   * *Ronda $k$:* Estaciones con $k-1$ transbordos.
+   Este diseno permite al motor rutear a miles de viajeros en microsegundos cada vez que el jugador anade una estacion o altera la frecuencia de una linea.
+
+2. **Ventana Temporal de 30 Minutos (Range Search):**
+   La variante *range-RAPTOR* evalua la totalidad de salidas programadas dentro de una ventana de 30 minutos, no unicamente el primer tren que llega al anden.
+   * *Comportamiento Inteligente (Locales vs. Expres):* Si un tren local lento sale en 2 minutos pero un tren exprés sale en 10 minutos y llega antes a la estacion de destino, el viajero decide conscientemente esperar en el anden o salir mas tarde para abordar el exprés, emulando la conducta de usuarios reales que conocen el itinerario.
+
+3. **Conectividad Peatonal y Transbordos a Pie (Walking Transfers):**
+   La busqueda de rRAPTOR integra los tramos de caminata desde el hogar a la estacion de origen, desde la estacion final al lugar de trabajo, y **transbordos peatonales entre estaciones cercanas**. Si dos estaciones de lineas distintas se ubican a distancia caminable (ej. 150–350 m), el motor las enlaza automaticamente como nodo de intercambio sin necesidad de fusionar las vias fisicamente.
+
+### 8.2. Evaluacion de Trayectos por Tiempo Percibido: Metanalisis de Wardman et al.
+Los itinerarios viables encontrados por rRAPTOR no se juzgan por tiempo cronometrico bruto, sino por **tiempo percibido (tiempo generalizado)**. Los factores de ponderacion provienen del metanalisis mundial sobre valoracion del tiempo en transporte de **Wardman et al.**:
+
+| Componente del Desplazamiento | Multiplicador Percibido | Comportamiento en la Simulacion del Juego |
+| :--- | :---: | :--- |
+| **Viaje a bordo del tren (Riding train)** | **$1.00\times$** | Linea base neutra de comparacion. |
+| **Caminata peatonal (Walking)** | **$1.39\times$** | Acceso a estaciones, salida al destino y transbordos a pie entre andenes. |
+| **Espera en el anden (Waiting on platform)** | **$1.37\times$** | Espera inicial del primer tren y esperas de conexion en transbordos. |
+| **Desplazamiento horario (Departing later)** | **$0.40\times$** | *Displacement-time*: Esperar en casa por un mejor tren penaliza solo al 40% del tiempo de viaje. |
+| **Conduccion en congestion vial** | **$1.33\times$** | Trafico metropolitano denso en horas punta. |
+| **Friccion de estacionamiento (Parking)** | **$1.60\times$** | Busqueda de cajon y caminata desde el auto al destino final. |
+
+**Conclusiones Metodologicas:**
+* Caminar ($1.39\times$) y esperar en el anden ($1.37\times$) tienen una penalizacion casi 40% superior a viajar sentado en el tren. Redes con frecuencias deficientes (largas esperas) o pasillos de transbordo excesivos pierden competitividad de inmediato frente al auto.
+* Esperar en casa ($0.40\times$) es significativamente mas comodo que esperar en la plataforma ($1.37\times$), por lo que los pasajeros toleran ajustar su horario de salida algunos minutos con tal de tomar un servicio mas directo.
+
+### 8.3. Eleccion Modal por Estratos de Ingreso (Mode Choice Modeling)
+El mejor trayecto de metro seleccionado por rRAPTOR compite contra el automovil privado y la caminata directa. El modelo de eleccion modal implementa los principios de eleccion discreta documentados por **Tao, Wu et al. (2020)** en *Transportation Research Part A*:
+
+1. **Funcion de Costo Generalizado:**
+   Cada viajero compara los modos disponibles balanceando tiempo percibido, desembolsos monetarios y su **Valor del Tiempo ($VOT$)**:
+   $$\text{Costo Generalizado}_{\text{Metro}} = \text{Tiempo Percibido}_{\text{Metro}} \times VOT_h + \text{Tarifa}$$
+   $$\text{Costo Generalizado}_{\text{Auto}} = \text{Tiempo Percibido}_{\text{Auto}} \times VOT_h + (\text{distancia} \times \$0.65/\text{km}) + \text{Costo Estacionamiento}$$
+
+2. **Heterogeneidad de Ingresos por Vecindario ($VOT_h$):**
+   El Valor del Tiempo es funcion directa del nivel de ingresos del hogar ($VOT_h \propto \text{Ingreso}_h$). En lugar de tratar a cada barrio como una masa homogenea:
+   * Los estratos de menores ingresos poseen un $VOT$ reducido: son altamente sensibles al costo de la gasolina ($\$0.65/\text{km}$), tarifas de estacionamiento y costo del boleto, tolerando mayor tiempo de viaje en metro para evitar gastos automotrices.
+   * Los estratos de altos ingresos poseen un $VOT$ elevado: priorizan la velocidad y el confort, optando por el auto salvo que el metro sea sustancialmente mas veloz y directo.
+   * **Elasticidad Continua de la Demanda:** Debido a la varianza de ingresos intrabarrio, la captacion de pasajeros responde con una **curva sigmoide suave y continua** ante cambios en tarifas o frecuencias, en lugar de un salto binario todo-o-nada.
+
+### 8.4. La Funcion de Eleccion Modal en Tiempo Real y Regla de Flujo Libre
+Con base en los fundamentos anteriores, se formaliza la relacion entre el archivo `demand_data.json` y el motor en ejecucion:
+
+1. **El juego NO calcula rutas viales en tiempo real:** Durante la simulacion a 60 FPS, el motor no ejecuta busquedas de caminos sobre la red de calles para los vehiculos; lee directamente `drivingSeconds` y `drivingDistance` para cada cohorte `pop`.
+2. **Penalizaciones Dinamicas en Tiempo de Ejecucion:**
+   El motor aplica automaticamente sobre el valor base de `drivingSeconds`:
+   * **Multiplicador de Hora Pico:** `DRIVING_TIMES.HIGH_DEMAND = 1.5x`.
+   * **Multiplicador de Congestion Vial Dinamica:** `CONGESTED_DRIVING_MULTIPLIER = 1.33x` (Wardman et al.).
+   * **Friccion de Estacionamiento:** $+180\text{ s}$ en origen y $+180\text{ s}$ en destino, escalados por un factor de hasta $1.60\text{x}$ ($\approx 576\text{ s}$ adicionales de busqueda).
    * **Costo Operativo por Kilometro:** $\$0.65/\text{km}$ derivado de `drivingDistance`.
 
-   $$\text{Tiempo\_Auto} = \text{drivingSeconds} \times f_{\text{congestion}} + \text{Tiempo\_Estacionamiento}$$
-   $$\text{Tiempo\_Metro} = \text{Tiempo\_Caminata\_Origen} + \text{Tiempo\_Espera\_Anden} + \text{Tiempo\_Viaje\_Tren} + \text{Tiempo\_Caminata\_Destino}$$
+3. **Regla de Oro: Prohibida la Doble Contabilidad de Congestion:**
+   Dado que el motor ya aplica las penalizaciones de congestion ($1.33\times$), hora punta ($1.5\times$) y estacionamiento ($1.6\times$) en tiempo real, el valor inyectado en `drivingSeconds` **debe corresponder estrictamente a la linea base a flujo libre** (~40 km/h promedio en red mixta). Pre-congestionar artificialmente los datos a 20 o 25 km/h destruye el canon del juego, penalizando doblemente al automovil y creando una demanda ficticia.
 
-   Si $\text{Tiempo\_Metro} < \text{Tiempo\_Auto}$, la cohorte aborda los trenes; si el tiempo en automovil es inferior o el metro exige trasbordos excesivos, la cohorte opta por el automovil privado.
-
-4. **Regla de Oro: Prohibida la Doble Contabilidad de Congestion:**
-   Dado que el motor de *Subway Builder* ya aplica penalizaciones de congestion (1.5x, 1.33x) y busqueda de estacionamiento en tiempo de ejecucion, el valor inyectado en `drivingSeconds` **debe corresponder estrictamente a la linea base a flujo libre** (~40 km/h promedio en red mixta). Pre-congestionar artificialmente los datos a 20 o 25 km/h destruye el canon del juego, penalizando doblemente al automovil y creando una demanda ficticia.
-
-### 8.2. Linea Base Canonica de Colin (Colin's Canonical Fallback)
+### 8.5. Linea Base Canonica de Colin (Colin's Canonical Fallback)
 Documentado formalmente en las guias oficiales del creador del juego (*Subway Builder Custom Cities / Demand API*), el estandar universal de respaldo ante la ausencia de ruteo punto a punto es:
 * **Circuidad Vial Canonica:** Las calles urbanas anaden un 30% de distancia sobre la linea recta euclidiana ($\tau = 1.3$).
 * **Velocidad Promedio Canonica:** $40\text{ km/h}$ ($\approx 11.11\text{ m/s}$) representativa del flujo urbano promedio.
@@ -443,7 +491,7 @@ Documentado formalmente en las guias oficiales del creador del juego (*Subway Bu
 
 Este calculo garantiza valores fisicamente plausibles, evita discontinuidades numericas y sirve como salvaguarda absoluta en todo el sistema.
 
-### 8.3. Laboratorio Experimental de Competitividad Modal (`modal_experiment`)
+### 8.6. Laboratorio Experimental de Competitividad Modal (`modal_experiment`)
 En ciudades latinoamericanas con niveles de congestion vehicular atipicos o donde la tasa de motorizacion privada es reducida y gran parte de la clase trabajadora depende de transporte colectivo de superficie de baja velocidad (combis, microbuses, autobuses urbanos con paradas continuas), los planificadores pueden requerir simular condiciones de competitividad modal reforzada.
 
 Para este fin, `sb_mexico` provee el modulo opcional `modal_experiment` en la seccion `macroeconomics` del YAML.
@@ -670,6 +718,16 @@ En la cartografia de *Subway Builder*, los poligonos de zonificacion urbana (res
 | **Esquema JSON** | Canonico de Colin / Kronifer | 5 propiedades en points, 6 en pops, cero llaves espurias | Compatibilidad nativa sin cierres inesperados del juego |
 | **Suite de Pruebas** | Calidad Rigurosa Garantizada | **162 pruebas unitarias automatizadas aprobadas** | Cobertura integral de pipeline, algoritmos y codificacion |
 | **Integridad de Codificacion** | Universal UTF-8 sin BOM | Terminaciones LF, sin emojis SMP en cabeceras | Cero mojibake o errores de decodificacion en Windows |
+| **Ruteo de Pasajeros (Runtime)** | range-RAPTOR (rRAPTOR) | Delling, Pajor & Werneck (2012), ventana 30 min y transbordos a pie | Evaluacion inteligente de servicios locales vs. expres |
+| **Tiempo Percibido (Perceived Time)** | Metanalisis de Wardman et al. | Ponderaciones empiricas (1.0x tren, 1.39x caminata, 1.37x andén, 0.4x retardo) | Modelado exacto del costo generalizado |
+| **Eleccion Modal por Ingreso** | Modelo de Eleccion Discreta | Tao, Wu et al. (2020), VOT heterogeneo por nivel de ingreso barrial | Curva elastica y gradual de captacion de pasajeros |
 
+---
 
+## 16. Referencias Bibliograficas y Fuentes Cientificas
 
+1. **Delling, D., Pajor, T., & Werneck, R. F. (2012).** *Round-based public transit routing (RAPTOR).* In Proceedings of the Fourteenth Workshop on Algorithm Engineering and Experiments (ALENEX), pp. 130–140. SIAM / Microsoft Research. [Enlace ALENEX](https://www.microsoft.com/en-us/research/wp-content/uploads/2012/01/raptor_alenex.pdf).
+2. **Wardman, M. et al. (2026).** *Values of travel time savings and perceived-time multipliers: A worldwide meta-analysis.* Transportation Research Part A / Part B. [Enlace ScienceDirect](https://www.sciencedirect.com/science/article/pii/S0965856426000662).
+3. **Tao, S., Wu, J., Liang, C., & Wang, W. (2020).** *Unraveling the impact of travel time, cost, and transit burdens on commute mode choice for different income and age groups.* Transportation Research Part A: Policy and Practice, 141, 360–377. [DOI: 10.1016/j.tra.2020.07.020](https://doi.org/10.1016/j.tra.2020.07.020).
+4. **Miller, C. (2026).** *How the game simulates commuters: Timetables, rRAPTOR routing, perceived time, and mode choice.* Redistricter, LLC. [Subway Builder Simulation](https://www.subwaybuilder.com/simulation).
+5. **Furness, K. P. (1965).** *Time Function Iteration.* Traffic Engineering & Control, 7(7), 458–460.
