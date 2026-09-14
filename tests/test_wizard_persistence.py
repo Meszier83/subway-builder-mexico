@@ -30,8 +30,10 @@ class TestWizardPersistence(unittest.TestCase):
                     "building_filter_size": 22.5,
                     "building_simplification": 0.35,
                     "urban_parks_only": True,
+                    "bbox_locked": True,
                     "seed": 999
                 },
+
                 "data_dir": "data/prs_test",
                 "data_exclusions": ["archivo_desvinculado.csv"],
                 "macroeconomics": {
@@ -110,7 +112,9 @@ class TestWizardPersistence(unittest.TestCase):
             self.assertEqual(c["building_filter_size"], 22.5)
             self.assertEqual(c["building_simplification"], 0.35)
             self.assertTrue(c["urban_parks_only"])
+            self.assertTrue(c["bbox_locked"])
             self.assertEqual(c["seed"], 999)
+
 
             m = reloaded["macroeconomics"]
             self.assertEqual(m["min_pop_size"], 35)
@@ -203,6 +207,7 @@ class TestWizardPersistence(unittest.TestCase):
             self.assertEqual(c.get("min_residents"), 10)
             self.assertEqual(c.get("min_jobs"), 3)
             self.assertFalse(c.get("urban_parks_only", True))
+            self.assertFalse(c.get("bbox_locked", True))
 
             self.assertIn("exclusion_zones", data)
             self.assertEqual(data["exclusion_zones"], [])
@@ -210,6 +215,34 @@ class TestWizardPersistence(unittest.TestCase):
         finally:
             if os.path.exists(created_path):
                 os.remove(created_path)
+
+    def test_bbox_locked_persistence_roundtrip(self):
+        """Verifica que el estado de bloqueo de BBOX (True y False) persista exactamente en disco."""
+        tmp_yaml = os.path.join(os.path.dirname(__file__), "tmp_bbox_lock_test.yaml")
+        try:
+            # Caso 1: bbox_locked = True
+            data_locked = {
+                "city": {
+                    "code": "LCK",
+                    "name": "Locked City",
+                    "bbox": [-87.0, 21.0, -86.8, 21.2],
+                    "bbox_locked": True
+                }
+            }
+            save_full_city_data(tmp_yaml, data_locked)
+            reloaded_locked = load_city_data(tmp_yaml)
+            self.assertTrue(reloaded_locked["city"]["bbox_locked"])
+
+            # Caso 2: bbox_locked = False
+            reloaded_locked["city"]["bbox_locked"] = False
+            save_full_city_data(tmp_yaml, reloaded_locked)
+            reloaded_unlocked = load_city_data(tmp_yaml)
+            self.assertFalse(reloaded_unlocked["city"]["bbox_locked"])
+
+        finally:
+            if os.path.exists(tmp_yaml):
+                os.remove(tmp_yaml)
+
 
 
 if __name__ == "__main__":

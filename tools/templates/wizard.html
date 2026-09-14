@@ -222,6 +222,67 @@
       white-space: pre-wrap;
       word-break: break-all;
     }
+
+    /* Estilos para Marcadores de Toponimia Urbana (Places) */
+    .place-marker-pill {
+      background: rgba(14, 116, 144, 0.94) !important;
+      border: 1.5px solid #38bdf8 !important;
+      color: #ffffff !important;
+      font-size: 11px !important;
+      font-weight: 700 !important;
+      border-radius: 9999px !important;
+      padding: 2px 8px !important;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35) !important;
+      cursor: grab !important;
+      user-select: none !important;
+      white-space: nowrap !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 4px !important;
+      transition: transform 0.15s ease-out, background 0.15s;
+    }
+    .place-marker-pill:hover {
+      transform: scale(1.15);
+      background: rgba(2, 132, 199, 0.98) !important;
+      box-shadow: 0 4px 14px rgba(56, 189, 248, 0.5) !important;
+    }
+    .place-marker-pill:active {
+      cursor: grabbing !important;
+    }
+    .place-marker-pill.selected {
+      border-color: #f59e0b !important;
+      background: rgba(217, 95, 24, 0.95) !important;
+      box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.45) !important;
+    }
+    .place-marker-dot {
+      width: 14px;
+      height: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .place-marker-dot:hover {
+      transform: scale(1.7);
+      z-index: 1000 !important;
+    }
+    .place-marker-dot.selected {
+      transform: scale(1.9);
+      z-index: 1001 !important;
+    }
+    .place-dot-core {
+      width: 7px;
+      height: 7px;
+      border-radius: 9999px;
+      box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.95), 0 2px 4px rgba(0, 0, 0, 0.45);
+      display: block;
+      transition: all 0.15s ease;
+    }
+    .place-marker-dot.selected .place-dot-core {
+      box-shadow: 0 0 0 2.5px #f59e0b, 0 2px 6px rgba(0, 0, 0, 0.7);
+      background-color: #f59e0b !important;
+    }
   </style>
 </head>
 
@@ -284,6 +345,7 @@
         <i data-lucide="save" class="w-4 h-4"></i>
         <span>Guardar YAML</span>
       </button>
+    </div>
   </header>
 
   <!-- BANNER DE RECUPERACIÓN DE BORRADOR LOCAL -->
@@ -412,6 +474,32 @@
                 <span>Centrar Mapa</span>
               </button>
             </div>
+
+            <!-- Selector de Presets Oficiales (Canon Subway Builder) -->
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-stone-700 font-semibold text-xs flex items-center space-x-1">
+                  <i data-lucide="maximize-2" class="w-3 h-3 text-metro-orange"></i>
+                  <span>Tamaño / Preset de BBOX</span>
+                </label>
+                <span id="bbox_preset_help" class="text-[10px] text-stone-400">Centrado en mapa</span>
+              </div>
+              <select id="cfg_bbox_preset" onchange="onBboxPresetChanged(this.value)" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-medium text-xs focus:border-metro-orange focus:outline-none">
+                <option value="custom" selected>Personalizado (Ajuste manual)</option>
+                <option value="compact">🏙️ Compacta (115 × 115 km · ~13,200 km²)</option>
+                <option value="standard">🚇 Estándar Oficial (145 × 145 km · ~21,000 km²)</option>
+                <option value="megacity">🌐 Megaciudad (180 × 180 km · ~32,400 km²)</option>
+                <option value="corridor_v">🏖️ Corredor N-S (120 × 280 km · ~33,600 km²)</option>
+                <option value="corridor_h">🛤️ Corredor E-W (280 × 120 km · ~33,600 km²)</option>
+              </select>
+            </div>
+
+            <!-- Dimensiones Calculadas en Tiempo Real (Telemetría de Terreno) -->
+            <div id="bbox_dims_badge" class="bg-white px-2.5 py-1.5 rounded-lg border border-stone-200 flex items-center justify-between text-[11px] font-mono text-stone-700 shadow-2xs">
+              <span id="bbox_dim_w_h" class="font-semibold text-stone-800">↔ 0.0 km × ↕ 0.0 km</span>
+              <span id="bbox_dim_area" class="text-metro-orange font-bold">~0 km²</span>
+            </div>
+
             <div class="grid grid-cols-2 gap-2 font-mono text-[11px]">
               <div>
                 <span class="text-stone-500">Min Lon (Oeste):</span>
@@ -433,7 +521,7 @@
             <!-- Toggle de Bloqueo de BBOX -->
             <div class="pt-2 border-t border-stone-200 flex items-center justify-between">
               <label class="flex items-center space-x-2 cursor-pointer select-none">
-                <input type="checkbox" id="cfg_bbox_locked" onchange="toggleBboxLock(this.checked)" class="w-3.5 h-3.5 rounded text-metro-orange accent-metro-orange focus:ring-0 cursor-pointer">
+                <input type="checkbox" id="cfg_bbox_locked" onchange="toggleBboxLock(this.checked, true)" class="w-3.5 h-3.5 rounded text-metro-orange accent-metro-orange focus:ring-0 cursor-pointer">
                 <span class="text-[11px] font-bold text-stone-700 flex items-center space-x-1">
                   <i id="bboxLockIcon" data-lucide="unlock" class="w-3 h-3 text-stone-400"></i>
                   <span id="bboxLockLabel">Bloquear BBOX</span>
@@ -442,6 +530,7 @@
               <span class="text-[10px] text-stone-400">Evita arrastre accidental</span>
             </div>
           </div>
+
 
           <!-- Parámetros de Malla y Filtros -->
           <div class="grid grid-cols-2 gap-3">
@@ -863,10 +952,28 @@
               </div>
               <span id="val_gravity_beta" class="text-metro-pink font-mono font-bold text-sm">0.120</span>
             </div>
-            <input type="range" min="0.05" max="0.25" step="0.005" id="cfg_gravity_beta" oninput="document.getElementById('val_gravity_beta').innerText = parseFloat(this.value).toFixed(3)" class="w-full accent-metro-pink cursor-pointer">
-            <p class="text-[11px] text-stone-600 mt-1 leading-relaxed">
-              <strong>Efecto en el juego:</strong> Resistencia a la distancia. Valores bajos (0.08–0.10) generan trayectos metropolitanos largos a través de toda la ciudad; valores altos (0.15–0.20) concentran viajes cortos vecinales.
-            </p>
+            <input type="range" min="0.05" max="0.25" step="0.005" id="cfg_gravity_beta" oninput="onGravityBetaChanged(parseFloat(this.value))" class="w-full accent-metro-pink cursor-pointer">
+
+            <!-- Botones de Calibración por Arquetipo Urbano (Colin Miller Standard) -->
+            <div class="flex items-center gap-1.5 mt-2 pt-2 border-t border-metro-border/60">
+              <span class="text-[10px] font-semibold text-stone-600 uppercase tracking-wider shrink-0">Arquetipos:</span>
+              <div class="grid grid-cols-3 gap-1.5 w-full">
+                <button type="button" onclick="setBetaArchetype('compacta', 0.150)" class="px-2 py-1 bg-white hover:bg-stone-100 border border-stone-200 text-stone-800 text-[10px] font-semibold rounded text-center transition-colors">
+                  🏙️ Compacta <span class="text-metro-pink block font-mono font-normal">0.150 (~7 km)</span>
+                </button>
+                <button type="button" onclick="setBetaArchetype('intermedia', 0.120)" class="px-2 py-1 bg-white hover:bg-stone-100 border border-stone-200 text-stone-800 text-[10px] font-semibold rounded text-center transition-colors">
+                  🌆 Intermedia <span class="text-metro-pink block font-mono font-normal">0.120 (~12 km)</span>
+                </button>
+                <button type="button" onclick="setBetaArchetype('megaciudad', 0.085)" class="px-2 py-1 bg-white hover:bg-stone-100 border border-stone-200 text-stone-800 text-[10px] font-semibold rounded text-center transition-colors">
+                  🌐 Megaciudad <span class="text-metro-pink block font-mono font-normal">0.085 (~22 km)</span>
+                </button>
+              </div>
+            </div>
+
+            <div id="beta_recommendation_box" class="mt-2 text-[11px] text-stone-600 bg-white/70 p-2 rounded border border-metro-border/50">
+              <span id="beta_expected_median" class="font-bold text-stone-800">Mediana esperada: ~10 – 15 km.</span>
+              <span id="beta_rationale_text" class="block text-[10px] text-stone-500 mt-0.5">Calibrado para coincidir con la distribución real de distancias de viaje (Trip Length Distribution) de Subway Builder.</span>
+            </div>
           </div>
 
           <!-- Distancia Máx. de Viaje -->
@@ -1393,26 +1500,104 @@
 
         <!-- CONTENIDO PESTAÑA 4: COLONIAS Y TOPONIMIA (PLACES) -->
         <div id="poiTab-places" class="hidden flex-1 overflow-y-auto p-3.5 space-y-3">
+          <!-- Cabecera de Toponimia -->
           <div class="flex justify-between items-center border-b border-metro-border pb-2">
             <div>
               <h3 class="text-xs font-bold text-metro-text">Toponimia y Colonias</h3>
               <p class="text-[10px] text-metro-muted">Rotulación de asentamientos en Subway Builder.</p>
             </div>
-            <button onclick="requestSettlementSuggestions()" id="btnAutoPlaces" class="px-2 py-1 bg-metro-orange/20 text-metro-orange hover:bg-metro-orange/30 text-[10px] font-bold rounded border border-metro-orange/40 flex items-center space-x-1 transition">
-              <i data-lucide="sparkles" class="w-3 h-3"></i>
-              <span>Sugerencias</span>
-            </button>
+            <div class="flex items-center space-x-1">
+              <!-- Botón Escaneo Rápido 1-Clic con Menú de Opciones -->
+              <div class="inline-flex rounded shadow-xs">
+                <button onclick="quickScanAndPopulateToponymy(this)" id="btnScanPlaces" class="px-2 py-1 bg-sky-700 hover:bg-sky-600 text-white text-[10px] font-bold rounded-l flex items-center space-x-1 transition" title="Escanear asentamientos desde OSM y DENUE e incorporar en 1 clic">
+                  <i data-lucide="scan" class="w-3 h-3"></i>
+                  <span>Escanear</span>
+                </button>
+                <button onclick="openScanToponymyDialog()" class="px-1.5 py-1 bg-sky-800 hover:bg-sky-900 text-sky-200 text-[10px] font-bold rounded-r border-l border-sky-900/40 transition" title="Opciones avanzadas de escaneo (umbral DENUE, modo reemplazo)">
+                  <i data-lucide="chevron-down" class="w-2.5 h-2.5"></i>
+                </button>
+              </div>
+
+              <!-- Homogeneizador -->
+              <button onclick="openHomogenizerModal()" id="btnHomogenizePlaces" class="px-2 py-1 bg-metro-orange hover:bg-orange-600 text-white text-[10px] font-bold rounded shadow-xs flex items-center space-x-1 transition" title="Homogeneizar prefijos, casing y expresiones regulares">
+                <i data-lucide="sparkles" class="w-3 h-3"></i>
+                <span>Homogeneizar</span>
+              </button>
+
+              <!-- Zonificador Espacial y Poda por Radio -->
+              <button onclick="openZoneThinningModal()" id="btnZoneThinningPlaces" class="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded shadow-xs flex items-center space-x-1 transition" title="Poda espacial y zonificación por radio (mantener 1 colonia por cada X metros)">
+                <i data-lucide="target" class="w-3 h-3"></i>
+                <span>Zonificar</span>
+              </button>
+
+              <!-- Caja de Selección en Mapa -->
+              <button onclick="toggleBoxSelectPlacesMode()" id="btnBoxSelectPlaces" class="px-2 py-1 bg-stone-100 hover:bg-stone-200 text-stone-700 text-[10px] font-bold rounded border border-stone-300 flex items-center space-x-1 transition" title="Seleccionar colonias arrastrando un cuadro en el mapa">
+                <i data-lucide="box-select" class="w-3 h-3"></i>
+                <span>Caja</span>
+              </button>
+
+              <!-- Deduplicador -->
+              <button onclick="deduplicateNearbyPlaces()" id="btnDeduplicatePlaces" class="px-2 py-1 bg-stone-100 hover:bg-stone-200 text-stone-700 text-[10px] font-bold rounded border border-stone-300 flex items-center space-x-1 transition" title="Deduplicar asentamientos cercanos duplicados (<500m)">
+                <i data-lucide="copy-minus" class="w-3 h-3"></i>
+                <span>Deduplicar</span>
+              </button>
+
+              <!-- Toggle de Rótulos / Dots en Mapa -->
+              <button onclick="togglePlaceLabels()" id="btnTogglePlaceLabels" class="px-2 py-1 bg-stone-100 hover:bg-stone-200 text-stone-600 text-[10px] font-bold rounded border border-stone-200 flex items-center space-x-1 transition" title="Alternar entre rótulos de texto y puntos compactos en el mapa">
+                <i data-lucide="tag" class="w-3 h-3"></i>
+                <span>Rótulos</span>
+              </button>
+
+              <!-- Botón Deshacer -->
+              <button onclick="undoPlacesLastAction()" id="btnUndoPlaces" class="hidden px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 text-[10px] font-bold rounded border border-amber-300 flex items-center space-x-1 transition" title="Deshacer última acción de toponimia">
+                <i data-lucide="undo-2" class="w-3 h-3"></i>
+                <span>Deshacer</span>
+              </button>
+            </div>
           </div>
 
-          <div class="flex justify-between items-center">
-            <span id="placesCountBadge" class="text-[11px] font-mono text-metro-muted">0 colonias</span>
-            <button onclick="addNewPlaceRow()" class="text-[11px] text-metro-orange hover:underline font-bold flex items-center space-x-1">
-              <i data-lucide="plus" class="w-3 h-3"></i>
-              <span>Añadir colonia</span>
-            </button>
+          <!-- Barra de Búsqueda y Filtro de Tipo -->
+          <div class="space-y-1.5">
+            <div class="flex gap-2 items-center">
+              <div class="relative flex-1">
+                <i data-lucide="search" class="w-3.5 h-3.5 absolute left-2.5 top-2 text-stone-400"></i>
+                <input type="text" id="placesSearchInput" oninput="filterPlacesList(this.value)" placeholder="Buscar colonia o supermanzana..." class="w-full pl-8 pr-2 py-1 text-xs bg-white rounded-lg border border-metro-border text-metro-text focus:outline-none focus:border-metro-orange">
+              </div>
+              <select id="placesTypeFilter" onchange="filterPlacesByType(this.value)" class="text-[11px] bg-white border border-metro-border rounded-lg px-2 py-1 text-stone-700">
+                <option value="all">Todos los tipos</option>
+                <option value="suburb">suburb</option>
+                <option value="quarter">quarter</option>
+                <option value="neighbourhood">neighbourhood</option>
+              </select>
+            </div>
+
+            <!-- Controles de Selección Múltiple y Acciones en Lote -->
+            <div class="flex justify-between items-center px-1 text-[11px] text-metro-muted">
+              <div class="flex items-center space-x-2">
+                <label class="flex items-center space-x-1.5 cursor-pointer select-none">
+                  <input type="checkbox" id="chkSelectAllPlaces" onchange="toggleSelectAllPlaces(this.checked)" class="rounded border-stone-300 text-metro-orange focus:ring-0">
+                  <span class="font-medium text-stone-600">Todos</span>
+                </label>
+                <button type="button" onclick="selectFilteredPlacesOnly()" class="text-[10px] text-stone-500 hover:text-metro-orange hover:underline font-medium" title="Seleccionar sólo los elementos visibles que coinciden con la búsqueda">
+                  Visibles
+                </button>
+                <span id="placesCountBadge" class="font-mono font-bold text-stone-700">0 colonias</span>
+              </div>
+              <div class="flex items-center space-x-2">
+                <button id="btnDeleteSelectedPlaces" onclick="deleteSelectedPlaces()" class="hidden text-rose-600 hover:text-rose-800 font-bold flex items-center space-x-1">
+                  <i data-lucide="trash-2" class="w-3 h-3"></i>
+                  <span>Eliminar selección (<span id="selectedPlacesCount">0</span>)</span>
+                </button>
+                <button onclick="addNewPlaceRow()" class="text-metro-orange hover:underline font-bold flex items-center space-x-1">
+                  <i data-lucide="plus" class="w-3 h-3"></i>
+                  <span>Añadir</span>
+                </button>
+              </div>
+            </div>
           </div>
 
-          <div id="placesListContainer" class="space-y-2 overflow-y-auto flex-1 max-h-[380px]">
+          <!-- Contenedor de Lista de Colonias -->
+          <div id="placesListContainer" class="space-y-1.5 overflow-y-auto flex-1 max-h-[380px] pr-1">
             <!-- Renderizado dinámico de colonias -->
           </div>
         </div>
@@ -1777,6 +1962,36 @@
           <div class="bg-metro-panel p-3 rounded-lg border border-metro-border">
             <span class="text-gray-400 block text-[11px]">Conservación de Masa (&sum; Tij &equiv; PEA)</span>
             <span id="metricMassBalance" class="text-sm font-bold text-emerald-400">100.00% &check;</span>
+          </div>
+
+          <!-- Panel de Auditoría de Distancias de Viaje (Trip Length Distribution - Colin Miller) -->
+          <div id="panelDistanceDistribution" class="bg-metro-panel p-3 rounded-lg border border-metro-border space-y-2">
+            <div class="flex justify-between items-center">
+              <span class="text-gray-300 font-bold text-[11px] flex items-center gap-1.5">
+                <i data-lucide="route" class="w-3.5 h-3.5 text-cyan-400"></i>
+                <span>Longitud de Viajes (TLD)</span>
+              </span>
+              <span id="badgeTldProfile" class="text-[9px] px-1.5 py-0.5 bg-cyan-900/50 border border-cyan-500/40 text-cyan-200 rounded font-semibold">Calculando...</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-center font-mono">
+              <div class="bg-stone-900/60 p-1.5 rounded border border-stone-800">
+                <span class="text-[9px] text-gray-400 block font-sans">Mediana (P50)</span>
+                <span id="metricTldMedian" class="text-sm font-bold text-cyan-400">-- km</span>
+              </div>
+              <div class="bg-stone-900/60 p-1.5 rounded border border-stone-800">
+                <span class="text-[9px] text-gray-400 block font-sans">Promedio</span>
+                <span id="metricTldMean" class="text-sm font-bold text-white">-- km</span>
+              </div>
+            </div>
+            <div class="flex justify-between text-[10px] text-gray-400 px-0.5 font-mono">
+              <span>P25: <strong id="metricTldP25" class="text-gray-200">--</strong></span>
+              <span>P75: <strong id="metricTldP75" class="text-gray-200">--</strong></span>
+              <span>P95: <strong id="metricTldP95" class="text-gray-200">--</strong></span>
+            </div>
+            <!-- Barras de Estratos -->
+            <div id="tldBracketsContainer" class="space-y-1 pt-1 text-[10px]">
+              <!-- Inyectado dinámicamente -->
+            </div>
           </div>
         </div>
 
@@ -2368,6 +2583,386 @@
     </div>
   </div>
 
+  <!-- Modal Escaneo de Toponimia Urbana (OSM + DENUE) -->
+  <div id="modalScanToponymy" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white border border-stone-200 rounded-2xl p-6 w-full max-w-2xl shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+      <div class="flex justify-between items-center border-b border-stone-200 pb-3 shrink-0">
+        <div>
+          <h3 class="text-base font-bold text-stone-900 flex items-center space-x-2">
+            <i data-lucide="scan" class="w-5 h-5 text-sky-700"></i>
+            <span>Escaneo Integral de Toponimia Urbana</span>
+          </h3>
+          <p class="text-xs text-stone-500 mt-0.5">Explora asentamientos densos desde OpenStreetMap y DENUE del INEGI para la ciudad.</p>
+        </div>
+        <button onclick="closeScanToponymyDialog()" class="text-stone-400 hover:text-stone-800 p-1.5 rounded-lg hover:bg-stone-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Contenido del Escaneo -->
+      <div class="space-y-3.5 text-xs flex-1 overflow-y-auto pr-1">
+        <div class="p-3 bg-sky-50 rounded-xl border border-sky-200 flex justify-between items-center">
+          <div>
+            <span class="font-bold text-sky-950 block">Umbral de Establecimientos DENUE</span>
+            <span class="text-sky-700 text-[11px]">Mínimo de comercios por asentamiento para calificar como polo denso</span>
+          </div>
+          <div class="flex items-center space-x-2">
+            <input type="number" id="scanMinCount" value="8" min="3" max="50" class="w-16 text-center font-bold text-stone-900 bg-white border border-stone-300 rounded px-2 py-1">
+            <button onclick="executeCityToponymyScan()" id="btnExecuteScan" class="px-3 py-1.5 bg-sky-700 hover:bg-sky-600 text-white font-bold rounded-lg shadow-xs flex items-center space-x-1">
+              <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+              <span>Escanear</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Indicador de Carga -->
+        <div id="scanLoadingIndicator" class="hidden p-8 text-center space-y-2">
+          <i data-lucide="loader-2" class="w-8 h-8 text-sky-700 animate-spin mx-auto"></i>
+          <p class="text-stone-600 font-bold">Escaneando OpenStreetMap y microdatos DENUE...</p>
+        </div>
+
+        <!-- Resultados del Diagnóstico -->
+        <div id="scanResultsSection" class="hidden space-y-3">
+          <div class="grid grid-cols-4 gap-2 text-center">
+            <div class="p-2 bg-stone-50 border border-stone-200 rounded-lg">
+              <span class="text-[10px] text-stone-500 font-bold block">TOTAL DETECTADOS</span>
+              <span id="scanTotalCount" class="text-lg font-mono font-black text-stone-900">0</span>
+            </div>
+            <div class="p-2 bg-sky-50 border border-sky-200 rounded-lg">
+              <span class="text-[10px] text-sky-700 font-bold block">SUPERMANZANAS</span>
+              <span id="scanSmCount" class="text-lg font-mono font-black text-sky-800">0</span>
+            </div>
+            <div class="p-2 bg-amber-50 border border-amber-200 rounded-lg">
+              <span class="text-[10px] text-amber-700 font-bold block">FRACCIONAMIENTOS</span>
+              <span id="scanFraccCount" class="text-lg font-mono font-black text-amber-800">0</span>
+            </div>
+            <div class="p-2 bg-emerald-50 border border-emerald-200 rounded-lg">
+              <span class="text-[10px] text-emerald-700 font-bold block">COLONIAS / OTROS</span>
+              <span id="scanColCount" class="text-lg font-mono font-black text-emerald-800">0</span>
+            </div>
+          </div>
+
+          <!-- Muestra de Resultados con Scroll -->
+          <div>
+            <div class="flex justify-between items-center mb-1">
+              <span class="font-bold text-stone-700">Muestra de Asentamientos Detectados:</span>
+              <span id="scanCandidateCount" class="text-stone-500 font-mono text-[10px]">0 elementos</span>
+            </div>
+            <div id="scanCandidatesList" class="max-h-52 overflow-y-auto border border-stone-200 rounded-lg divide-y divide-stone-100 bg-stone-50/50 text-[11px]">
+              <!-- Items dinámicos -->
+            </div>
+          </div>
+
+          <!-- Modo de Importación -->
+          <div class="p-3 bg-stone-100 rounded-xl border border-stone-200 flex items-center justify-between">
+            <span class="font-bold text-stone-700">Modo de Inserción:</span>
+            <div class="flex items-center space-x-4">
+              <label class="flex items-center space-x-1.5 cursor-pointer">
+                <input type="radio" name="scanImportMode" value="merge" checked class="text-sky-700">
+                <span>Fusionar sin duplicar (Recomendado)</span>
+              </label>
+              <label class="flex items-center space-x-1.5 cursor-pointer">
+                <input type="radio" name="scanImportMode" value="replace" class="text-sky-700">
+                <span>Reemplazar lista actual</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="flex justify-end space-x-2 pt-3 border-t border-stone-200 shrink-0">
+        <button onclick="closeScanToponymyDialog()" class="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-semibold rounded-lg transition">
+          Cancelar
+        </button>
+        <button id="btnConfirmImportScan" onclick="importScannedPlaces()" disabled class="px-5 py-2 bg-sky-700 hover:bg-sky-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg transition shadow-xs flex items-center space-x-1.5">
+          <i data-lucide="download" class="w-4 h-4"></i>
+          <span>Incorporar a la Ciudad</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Homogeneizador en Masa de Toponimia -->
+  <div id="modalHomogenizer" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white border border-stone-200 rounded-2xl p-6 w-full max-w-3xl shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+      <div class="flex justify-between items-center border-b border-stone-200 pb-3 shrink-0">
+        <div>
+          <h3 class="text-base font-bold text-stone-900 flex items-center space-x-2">
+            <i data-lucide="sparkles" class="w-5 h-5 text-metro-orange"></i>
+            <span>Homogeneizador de Toponimia Urbana</span>
+          </h3>
+          <p class="text-xs text-stone-500 mt-0.5">Estandarización masiva, diagnóstico de prefijos, Smart Title Case y expresiones regulares.</p>
+        </div>
+        <button onclick="closeHomogenizerModal()" class="text-stone-400 hover:text-stone-800 p-1.5 rounded-lg hover:bg-stone-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Diagnóstico y Acciones -->
+      <div class="space-y-3.5 text-xs flex-1 overflow-y-auto pr-1">
+        <!-- Diagnóstico Rápido -->
+        <div class="p-3 bg-stone-50 rounded-xl border border-stone-200 space-y-1.5">
+          <div class="flex justify-between items-center">
+            <span class="font-bold text-stone-800">Diagnóstico de la Colección Actual (<span id="homoTotalBadge">0</span> colonias):</span>
+            <button onclick="runHomogenizerDiagnosis()" class="text-metro-orange hover:underline font-bold text-[11px] flex items-center space-x-1">
+              <i data-lucide="refresh-cw" class="w-3 h-3"></i>
+              <span>Actualizar diagnóstico</span>
+            </button>
+          </div>
+          <div id="homoDiagnosisBadges" class="flex flex-wrap gap-1.5">
+            <!-- Badges taxonómicos -->
+          </div>
+        </div>
+
+        <!-- Opciones de Transformación en Tarjetas -->
+        <div class="grid grid-cols-2 gap-3">
+          <!-- Tarjeta 1: Unificación de Supermanzanas -->
+          <div class="p-3 bg-white border border-stone-200 rounded-xl space-y-2">
+            <div class="flex items-center space-x-1.5 text-stone-900 font-bold">
+              <i data-lucide="layers" class="w-4 h-4 text-sky-600"></i>
+              <span>Unificar Supermanzanas / Regiones</span>
+            </div>
+            <p class="text-[11px] text-stone-500">Convierte todas las variantes (`SM`, `Región`, `Supermanzana`, números sueltos) a un estándar:</p>
+            <select id="homoSmFormat" class="w-full bg-stone-50 border border-stone-300 rounded px-2 py-1 font-mono font-bold text-stone-900">
+              <option value="Supermanzana {num}">Supermanzana {num} (ej. Supermanzana 94)</option>
+              <option value="SM {num}">SM {num} (ej. SM 94)</option>
+              <option value="Región {num}">Región {num} (ej. Región 94)</option>
+              <option value="{num}">{num} (Solo número suelto)</option>
+            </select>
+            <button onclick="previewHomogenizeAction('unify_sm')" class="w-full py-1.5 bg-sky-700 hover:bg-sky-600 text-white font-bold rounded transition">
+              Previsualizar Unificación
+            </button>
+          </div>
+
+          <!-- Tarjeta 2: Supresión de Prefijos Redundantes -->
+          <div class="p-3 bg-white border border-stone-200 rounded-xl space-y-2">
+            <div class="flex items-center space-x-1.5 text-stone-900 font-bold">
+              <i data-lucide="scissors" class="w-4 h-4 text-amber-600"></i>
+              <span>Prefijos Redundantes</span>
+            </div>
+            <div class="space-y-1.5">
+              <label class="flex items-center space-x-2 cursor-pointer">
+                <input type="checkbox" id="homoStripColonia" checked class="rounded text-amber-600">
+                <span class="text-stone-700">Remover 'Colonia' / 'Col.' (ej. Roma Norte)</span>
+              </label>
+              <div class="flex items-center justify-between">
+                <span class="text-stone-700">Fraccionamientos:</span>
+                <select id="homoFraccMode" class="bg-stone-50 border border-stone-300 rounded px-1.5 py-0.5 text-[11px]">
+                  <option value="Fracc.">Abreviar a 'Fracc.'</option>
+                  <option value="strip">Remover prefijo</option>
+                  <option value="keep">Mantener intacto</option>
+                </select>
+              </div>
+              <label class="flex items-center space-x-2 cursor-pointer">
+                <input type="checkbox" id="homoStripResidencial" class="rounded text-amber-600">
+                <span class="text-stone-700">Remover 'Residencial' / 'Privada'</span>
+              </label>
+            </div>
+            <button onclick="previewHomogenizeAction('strip_prefixes')" class="w-full py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded transition">
+              Previsualizar Limpieza
+            </button>
+          </div>
+
+          <!-- Tarjeta 3: Smart Title Case (Español) -->
+          <div class="p-3 bg-white border border-stone-200 rounded-xl space-y-2">
+            <div class="flex items-center space-x-1.5 text-stone-900 font-bold">
+              <i data-lucide="type" class="w-4 h-4 text-emerald-600"></i>
+              <span>Smart Spanish Title Case</span>
+            </div>
+            <p class="text-[11px] text-stone-500">Normaliza mayúsculas sostenidas respetando partículas (`de`, `del`, `de la`) y números romanos (`IV`, `XXI`).</p>
+            <button onclick="previewHomogenizeAction('smart_case')" class="w-full py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white font-bold rounded transition">
+              Previsualizar Capitalización
+            </button>
+          </div>
+
+          <!-- Tarjeta 4: Búsqueda y Reemplazo (Regex) -->
+          <div class="p-3 bg-white border border-stone-200 rounded-xl space-y-2">
+            <div class="flex items-center space-x-1.5 text-stone-900 font-bold">
+              <i data-lucide="replace" class="w-4 h-4 text-purple-600"></i>
+              <span>Búsqueda y Reemplazo (Regex)</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <input type="text" id="homoRegexPattern" placeholder="Patrón (ej. ^R-(\d+))" class="bg-stone-50 border border-stone-300 rounded px-2 py-1 font-mono text-[11px]">
+              <input type="text" id="homoRegexReplacement" placeholder="Reemplazo (ej. Región $1)" class="bg-stone-50 border border-stone-300 rounded px-2 py-1 font-mono text-[11px]">
+            </div>
+            <button onclick="previewHomogenizeAction('regex')" class="w-full py-1.5 bg-purple-700 hover:bg-purple-600 text-white font-bold rounded transition">
+              Previsualizar Reemplazo Regex
+            </button>
+          </div>
+        </div>
+
+        <!-- Tabla de Vista Previa Diferencial (Diff) -->
+        <div class="border border-stone-200 rounded-xl p-3 bg-stone-50/50 space-y-2">
+          <div class="flex justify-between items-center">
+            <div class="flex items-center space-x-2">
+              <span class="font-bold text-stone-800">Vista Previa Diferencial</span>
+              <span id="homoDiffCountBadge" class="font-mono text-[10px] bg-metro-orange text-white px-1.5 py-0.5 rounded font-bold">0 cambios</span>
+            </div>
+            <span class="text-[10px] text-stone-500">Revisa los cambios antes de aplicarlos</span>
+          </div>
+
+          <div class="max-h-44 overflow-y-auto border border-stone-200 rounded-lg bg-white">
+            <table class="w-full text-left text-[11px]">
+              <thead class="bg-stone-100 border-b border-stone-200 sticky top-0">
+                <tr>
+                  <th class="p-1.5 font-bold text-stone-600 w-8">#</th>
+                  <th class="p-1.5 font-bold text-stone-600">Nombre Original</th>
+                  <th class="p-1.5 font-bold text-stone-600">Nombre Transformado</th>
+                </tr>
+              </thead>
+              <tbody id="homoDiffTableBody" class="divide-y divide-stone-100 font-mono">
+                <tr>
+                  <td colspan="3" class="p-4 text-center text-stone-400 font-sans">Selecciona una acción arriba para previsualizar cambios.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="flex justify-between items-center pt-3 border-t border-stone-200 shrink-0">
+        <span id="homoActionStatus" class="text-stone-500 text-[11px]">Listo para homogeneizar.</span>
+        <div class="flex space-x-2">
+          <button onclick="closeHomogenizerModal()" class="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-semibold rounded-lg transition">
+            Cancelar
+          </button>
+          <button id="btnApplyHomogenize" onclick="applyPendingHomogenization()" disabled class="px-5 py-2 bg-metro-orange hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg transition shadow-xs flex items-center space-x-1.5">
+            <i data-lucide="check" class="w-4 h-4"></i>
+            <span>Confirmar y Guardar Cambios</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Asistente de Zonificación Espacial y Poda por Radio -->
+  <div id="modalZoneThinning" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white border border-stone-200 rounded-2xl p-6 w-full max-w-5xl shadow-2xl space-y-4 max-h-[92vh] flex flex-col">
+      <!-- Encabezado -->
+      <div class="flex justify-between items-center border-b border-stone-200 pb-3 shrink-0">
+        <div>
+          <h3 class="text-base font-bold text-stone-900 flex items-center space-x-2">
+            <i data-lucide="target" class="w-5 h-5 text-indigo-600"></i>
+            <span>Zonificación Espacial y Poda por Radio</span>
+          </h3>
+          <p class="text-xs text-stone-500 mt-0.5">Agrupa colonias compitiendo en radios de proximidad y conserva el asentamiento más representativo de cada zona, con control total.</p>
+        </div>
+        <button onclick="closeZoneThinningModal()" class="text-stone-400 hover:text-stone-800 p-1.5 rounded-lg hover:bg-stone-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Barra de Configuración y Métricas -->
+      <div class="bg-stone-50 border border-stone-200 rounded-xl p-3 shrink-0 space-y-2.5">
+        <div class="flex flex-wrap items-center justify-between gap-3 text-xs">
+          <!-- Slider de Radio -->
+          <div class="flex items-center space-x-3 flex-1 min-w-[280px]">
+            <span class="font-bold text-stone-700 shrink-0">Radio de Zona:</span>
+            <input type="range" id="zoneRadiusSlider" min="300" max="3000" step="50" value="1000" oninput="onZoneRadiusSliderInput(this.value)" class="flex-1 accent-indigo-600 cursor-pointer">
+            <span id="zoneRadiusVal" class="font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded text-xs shrink-0">1,000 m (1.0 km)</span>
+          </div>
+
+          <!-- Presets Rápidos -->
+          <div class="flex items-center space-x-1 shrink-0">
+            <span class="text-[11px] text-stone-500 mr-1">Presets:</span>
+            <button type="button" onclick="setZoneRadiusPreset(500)" class="px-2 py-0.5 bg-white hover:bg-stone-100 border border-stone-200 rounded text-[10px] font-bold text-stone-700">500m</button>
+            <button type="button" onclick="setZoneRadiusPreset(800)" class="px-2 py-0.5 bg-white hover:bg-stone-100 border border-stone-200 rounded text-[10px] font-bold text-stone-700">800m</button>
+            <button type="button" onclick="setZoneRadiusPreset(1000)" class="px-2 py-0.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded text-[10px] font-bold text-indigo-800">1000m</button>
+            <button type="button" onclick="setZoneRadiusPreset(1500)" class="px-2 py-0.5 bg-white hover:bg-stone-100 border border-stone-200 rounded text-[10px] font-bold text-stone-700">1500m</button>
+            <button type="button" onclick="setZoneRadiusPreset(2000)" class="px-2 py-0.5 bg-white hover:bg-stone-100 border border-stone-200 rounded text-[10px] font-bold text-stone-700">2000m</button>
+          </div>
+
+          <!-- Criterio Heurístico -->
+          <div class="flex items-center space-x-2 shrink-0">
+            <span class="text-stone-700 font-semibold text-[11px]">Sugerencia:</span>
+            <select id="zoneRankHeuristic" onchange="recalculateZoneClusters()" class="bg-white border border-stone-300 rounded px-2 py-1 text-[11px] font-medium text-stone-800">
+              <option value="density">Mayor Actividad DENUE / Prestigio (Recomendado)</option>
+              <option value="shortest">Nombre Más Corto y Conciso</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Badges de Conteo -->
+        <div class="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-stone-200/70 text-[11px]">
+          <div class="flex items-center space-x-2">
+            <span class="text-stone-500">Total colonias: <strong id="zoneTotalPlacesBadge" class="text-stone-800 font-mono">0</strong></span>
+            <span class="text-stone-300">•</span>
+            <span class="text-stone-500">Zonas resultantes: <strong id="zoneTotalClustersBadge" class="text-stone-800 font-mono">0</strong></span>
+            <span class="text-stone-300">•</span>
+            <span class="text-stone-500">En conflicto: <strong id="zoneConflictClustersBadge" class="text-amber-700 font-mono">0</strong></span>
+            <span class="text-stone-300">•</span>
+            <span class="text-stone-500">Aisladas: <strong id="zoneIsolatedClustersBadge" class="text-emerald-700 font-mono">0</strong></span>
+          </div>
+          <div class="flex items-center space-x-1.5">
+            <span class="text-stone-600 font-medium">A podar:</span>
+            <span id="zonePrunedBadge" class="font-mono font-bold bg-rose-100 text-rose-800 border border-rose-200 px-2 py-0.5 rounded text-[11px]">0 colonias</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Contenido Principal: Split View (Izquierda: Lista de Zonas, Derecha: Mapa Leaflet) -->
+      <div class="grid grid-cols-12 gap-3 flex-1 overflow-hidden min-h-[420px]">
+        <!-- Columna Izquierda (7 cols): Lista interactiva de zonas con radios -->
+        <div class="col-span-7 flex flex-col space-y-2 overflow-hidden border border-stone-200 rounded-xl p-3 bg-stone-50/50">
+          <div class="flex items-center justify-between gap-2 shrink-0">
+            <div class="relative flex-1">
+              <i data-lucide="search" class="w-3.5 h-3.5 absolute left-2.5 top-2 text-stone-400"></i>
+              <input type="text" id="zoneFilterInput" oninput="filterZoneCards(this.value)" placeholder="Buscar zona o colonia..." class="w-full pl-8 pr-2 py-1 text-xs bg-white rounded-lg border border-stone-300 text-stone-800 focus:outline-none focus:border-indigo-500">
+            </div>
+            <label class="flex items-center space-x-1.5 cursor-pointer select-none shrink-0 text-[11px] text-stone-600 font-medium">
+              <input type="checkbox" id="chkOnlyConflicts" checked onchange="toggleOnlyConflicts(this.checked)" class="rounded border-stone-300 text-indigo-600">
+              <span>Solo conflictos</span>
+            </label>
+            <button type="button" onclick="resetAllZonesToSuggested()" class="text-[11px] text-indigo-600 hover:text-indigo-800 hover:underline font-bold shrink-0">
+              Restablecer sugeridos
+            </button>
+          </div>
+
+          <!-- Contenedor Scrollable de Zonas -->
+          <div id="zoneClustersListContainer" class="flex-1 overflow-y-auto space-y-2.5 pr-1">
+            <!-- Renderizado dinámico de tarjetas de zonas -->
+          </div>
+        </div>
+
+        <!-- Columna Derecha (5 cols): Mapa Leaflet Interactivo de Previsualización -->
+        <div class="col-span-5 flex flex-col space-y-2 overflow-hidden border border-stone-200 rounded-xl p-2.5 bg-stone-900 shadow-inner">
+          <div class="flex items-center justify-between text-xs text-stone-300 px-1 shrink-0">
+            <span class="font-bold flex items-center space-x-1">
+              <i data-lucide="map" class="w-3.5 h-3.5 text-indigo-400"></i>
+              <span>Previsualización Espacial</span>
+            </span>
+            <span class="text-[10px] text-stone-400 font-mono" id="zoneMapStatus">Círculos de radio X m</span>
+          </div>
+          <div id="mapZonePreview" class="flex-1 w-full rounded-lg overflow-hidden border border-stone-800 relative z-0"></div>
+          <div class="flex items-center justify-between text-[10px] text-stone-400 px-1 pt-1 border-t border-stone-800 shrink-0">
+            <div class="flex items-center space-x-2">
+              <span class="flex items-center space-x-1"><span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span><span>Ganador</span></span>
+              <span class="flex items-center space-x-1"><span class="w-2 h-2 rounded-full bg-rose-400/60 inline-block"></span><span>A podar</span></span>
+              <span class="flex items-center space-x-1"><span class="w-2 h-2 rounded-full bg-indigo-400 inline-block"></span><span>Excepción</span></span>
+            </div>
+            <span>Haz clic en 📍 para enfocar</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="flex justify-between items-center pt-3 border-t border-stone-200 shrink-0">
+        <span id="zoneThinningStatus" class="text-stone-600 text-xs font-medium">Configura el radio y selecciona los ganadores deseados.</span>
+        <div class="flex space-x-2">
+          <button onclick="closeZoneThinningModal()" class="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-semibold rounded-lg transition">
+            Cancelar
+          </button>
+          <button id="btnApplyZoneThinning" onclick="applyZoneThinningSelections()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition shadow-xs flex items-center space-x-1.5">
+            <i data-lucide="scissors" class="w-4 h-4"></i>
+            <span>Aplicar Poda a la Ciudad</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ========================================================================= -->
   <!-- SISTEMA REACTIVO JAVASCRIPT & ESTADO DEL WIZARD -->
   <!-- ========================================================================= -->
@@ -2387,6 +2982,12 @@
     let zoomPreviewRectangle = null;
     let zoomPreviewGroup = null;
     let poiMarkersGroup = null;
+    let placesMarkersGroup = null;
+    let selectedPlaceIndices = new Set();
+    let placeFilterText = "";
+    let placeFilterType = "all";
+    let scannedPlacesCatalog = null;
+    let pendingHomogenizeResult = null;
     let demandLayers = { residents: null, jobs: null, pois: null };
     let editingPoiIndex = -1;
     let sseSource = null;
@@ -2916,11 +3517,13 @@
       const b2 = createBaseLayers();
       mapPoi = L.map('mapPoi', { ...mapOptions, layers: [b2.baseMapDefault] }).setView([21.16, -86.85], 11);
       poiMarkersGroup = L.layerGroup().addTo(mapPoi);
+      placesMarkersGroup = L.layerGroup().addTo(mapPoi);
       bboxPoiGroup = L.layerGroup().addTo(mapPoi);
       affluenceZonesGroup = L.featureGroup().addTo(mapPoi);
       exclusionZonesGroup = L.featureGroup().addTo(mapPoi);
       const poiOverlays = {
         "📍 POIs y Marcadores": poiMarkersGroup,
+        "🏷️ Toponimia y Colonias": placesMarkersGroup,
         "📐 Delimitación BBOX": bboxPoiGroup,
         "✨ Zonas de Afluencia": affluenceZonesGroup,
         "🚫 Zonas de Exclusión": exclusionZonesGroup
@@ -2928,6 +3531,11 @@
       L.control.layers(b2.layerControl, poiOverlays, { position: 'topright' }).addTo(mapPoi);
       mapPoi.on('mousemove', (e) => { lastMapMouseLatLng = e.latlng; });
       mapPoi.on('mouseout', () => { lastMapMouseLatLng = null; });
+      mapPoi.on('zoomend', () => {
+        if (cityData && cityData.places && cityData.places.length > 0) {
+          renderPlacesMarkersOnMap();
+        }
+      });
 
       setupBoxSelectionForPoi();
       setupAffluenceDrawingEvents();
@@ -3076,6 +3684,7 @@
         if (bboxCornerMarkers.SE) bboxCornerMarkers.SE.setLatLng([newB1, newB2]);
         if (bboxCornerMarkers.SW) bboxCornerMarkers.SW.setLatLng([newB1, newB0]);
         updateZoomPreviewLayer();
+        updateBboxDimensionsDisplay([newB0, newB1, newB2, newB3]);
       }
 
       function onBoxDragEnd() {
@@ -3158,6 +3767,11 @@
             document.getElementById('cfg_bbox_2').value = b2.toFixed(4);
             document.getElementById('cfg_bbox_3').value = b3.toFixed(4);
 
+            const presetSel = document.getElementById('cfg_bbox_preset');
+            if (presetSel && presetSel.value !== 'custom') {
+              presetSel.value = 'custom';
+            }
+
             cityData.city.bbox = [b0, b1, b2, b3];
             bboxRectangle.setBounds([[b1, b0], [b3, b2]]);
 
@@ -3166,6 +3780,7 @@
             if (bboxCornerMarkers.SE && key !== 'SE') bboxCornerMarkers.SE.setLatLng([b1, b2]);
             if (bboxCornerMarkers.SW && key !== 'SW') bboxCornerMarkers.SW.setLatLng([b1, b0]);
             updateZoomPreviewLayer();
+            updateBboxDimensionsDisplay([b0, b1, b2, b3]);
           });
 
           marker.on('dragend', () => {
@@ -3176,7 +3791,9 @@
         });
       }
       updateZoomPreviewLayer();
+      updateBboxDimensionsDisplay([minLon, minLat, maxLon, maxLat]);
     }
+
 
     function getBboxCenter() {
       const b0 = parseFloat(document.getElementById('cfg_bbox_0')?.value);
@@ -3409,6 +4026,88 @@
       }
     }
 
+    const BBOX_PRESETS = {
+      compact: { widthKm: 115, heightKm: 115, label: "Compacta" },
+      standard: { widthKm: 145, heightKm: 145, label: "Estándar Oficial" },
+      megacity: { widthKm: 180, heightKm: 180, label: "Megaciudad" },
+      corridor_v: { widthKm: 120, heightKm: 280, label: "Corredor N-S" },
+      corridor_h: { widthKm: 280, heightKm: 120, label: "Corredor E-W" }
+    };
+
+    function calculateBboxDimensions(bbox) {
+      if (!Array.isArray(bbox) || bbox.length !== 4) return null;
+      const minLon = Math.min(parseFloat(bbox[0]), parseFloat(bbox[2]));
+      const minLat = Math.min(parseFloat(bbox[1]), parseFloat(bbox[3]));
+      const maxLon = Math.max(parseFloat(bbox[0]), parseFloat(bbox[2]));
+      const maxLat = Math.max(parseFloat(bbox[1]), parseFloat(bbox[3]));
+      if (isNaN(minLon) || isNaN(minLat) || isNaN(maxLon) || isNaN(maxLat)) return null;
+
+      const midLat = (minLat + maxLat) / 2.0;
+      const rad = Math.PI / 180.0;
+      const heightKm = (maxLat - minLat) * 111.32;
+      const widthKm = (maxLon - minLon) * 111.32 * Math.cos(midLat * rad);
+      const areaSqKm = widthKm * heightKm;
+
+      return {
+        widthKm: Math.max(0.1, widthKm),
+        heightKm: Math.max(0.1, heightKm),
+        areaSqKm: Math.max(0.01, areaSqKm),
+        center: [(minLon + maxLon) / 2.0, midLat]
+      };
+    }
+
+    function updateBboxDimensionsDisplay(bbox) {
+      const b = bbox || (cityData && cityData.city ? cityData.city.bbox : null);
+      const dims = calculateBboxDimensions(b);
+      const whEl = document.getElementById('bbox_dim_w_h');
+      const areaEl = document.getElementById('bbox_dim_area');
+      if (!dims || !whEl || !areaEl) return;
+
+      whEl.innerText = `↔ ${dims.widthKm.toFixed(1)} km × ↕ ${dims.heightKm.toFixed(1)} km`;
+      areaEl.innerText = `~${Math.round(dims.areaSqKm).toLocaleString()} km²`;
+    }
+
+    function onBboxPresetChanged(presetKey) {
+      if (!presetKey || presetKey === 'custom') return;
+      if (isBboxLocked) {
+        showToast("🔒 Desbloquea la BBOX primero para aplicar un preset", "warning");
+        const sel = document.getElementById('cfg_bbox_preset');
+        if (sel) sel.value = 'custom';
+        return;
+      }
+      applyBboxPreset(presetKey);
+    }
+
+    function applyBboxPreset(presetKey) {
+      const preset = BBOX_PRESETS[presetKey];
+      if (!preset) return;
+
+      const currentBbox = (cityData && cityData.city && cityData.city.bbox) ? cityData.city.bbox : [-87.05, 21.0, -86.72, 21.31];
+      const dims = calculateBboxDimensions(currentBbox);
+      const centerLon = dims ? dims.center[0] : ((parseFloat(document.getElementById('cfg_bbox_0')?.value) + parseFloat(document.getElementById('cfg_bbox_2')?.value)) / 2 || -86.88);
+      const centerLat = dims ? dims.center[1] : ((parseFloat(document.getElementById('cfg_bbox_1')?.value) + parseFloat(document.getElementById('cfg_bbox_3')?.value)) / 2 || 21.15);
+
+      const rad = Math.PI / 180.0;
+      const deltaLat = preset.heightKm / 111.32;
+      const deltaLon = preset.widthKm / (111.32 * Math.cos(centerLat * rad));
+
+      const newMinLon = parseFloat((centerLon - deltaLon / 2.0).toFixed(4));
+      const newMaxLon = parseFloat((centerLon + deltaLon / 2.0).toFixed(4));
+      const newMinLat = parseFloat((centerLat - deltaLat / 2.0).toFixed(4));
+      const newMaxLat = parseFloat((centerLat + deltaLat / 2.0).toFixed(4));
+
+      document.getElementById('cfg_bbox_0').value = newMinLon.toFixed(4);
+      document.getElementById('cfg_bbox_1').value = newMinLat.toFixed(4);
+      document.getElementById('cfg_bbox_2').value = newMaxLon.toFixed(4);
+      document.getElementById('cfg_bbox_3').value = newMaxLat.toFixed(4);
+
+      cityData.city.bbox = [newMinLon, newMinLat, newMaxLon, newMaxLat];
+      updateBboxLayer(cityData.city.bbox, true);
+      updateBboxDimensionsDisplay(cityData.city.bbox);
+      showToast(`Preset aplicado: ${preset.label} (${preset.widthKm} × ${preset.heightKm} km)`, "success");
+      triggerAutoSave();
+    }
+
     function updateBboxFromInputs() {
       let b0 = parseFloat(document.getElementById('cfg_bbox_0').value);
       let b1 = parseFloat(document.getElementById('cfg_bbox_1').value);
@@ -3429,13 +4128,22 @@
       document.getElementById('cfg_bbox_2').value = maxLon.toFixed(4);
       document.getElementById('cfg_bbox_3').value = maxLat.toFixed(4);
 
+      const presetSel = document.getElementById('cfg_bbox_preset');
+      if (presetSel && presetSel.value !== 'custom') {
+        presetSel.value = 'custom';
+      }
+
       cityData.city.bbox = [minLon, minLat, maxLon, maxLat];
       updateBboxLayer(cityData.city.bbox, false);
+      updateBboxDimensionsDisplay(cityData.city.bbox);
       triggerAutoSave();
     }
 
-    function toggleBboxLock(locked) {
+    function toggleBboxLock(locked, showToastMsg = true) {
       isBboxLocked = Boolean(locked);
+      if (cityData && cityData.city) {
+        cityData.city.bbox_locked = isBboxLocked;
+      }
       const icon = document.getElementById('bboxLockIcon');
       const label = document.getElementById('bboxLockLabel');
       const chk = document.getElementById('cfg_bbox_locked');
@@ -3456,10 +4164,20 @@
           else el.classList.remove('bg-stone-100', 'text-stone-500', 'cursor-not-allowed');
         }
       });
+      const presetSel = document.getElementById('cfg_bbox_preset');
+      if (presetSel) {
+        presetSel.disabled = isBboxLocked;
+        if (isBboxLocked) presetSel.classList.add('bg-stone-100', 'text-stone-500', 'cursor-not-allowed');
+        else presetSel.classList.remove('bg-stone-100', 'text-stone-500', 'cursor-not-allowed');
+      }
       lucide.createIcons();
       updateBboxLayer(cityData?.city?.bbox, false);
-      showToast(isBboxLocked ? "🔒 BBOX bloqueada contra movimientos accidentales" : "🔓 BBOX desbloqueada para edición", "info");
+      if (showToastMsg) {
+        showToast(isBboxLocked ? "🔒 BBOX bloqueada contra movimientos accidentales" : "🔓 BBOX desbloqueada para edición", "info");
+        triggerAutoSave();
+      }
     }
+
 
     function renderBboxOnPoiMap() {
       if (!mapPoi || !bboxPoiGroup || !cityData || !cityData.city || !cityData.city.bbox) return;
@@ -5322,6 +6040,10 @@
         if (bboxPoiGroup) {
           bboxPoiGroup.clearLayers();
         }
+        if (placesMarkersGroup) {
+          placesMarkersGroup.clearLayers();
+        }
+        selectedPlaceIndices.clear();
       }
       if (urbanCoreGroup) urbanCoreGroup.clearLayers();
       if (urbanCoreLayer && mapBbox) {
@@ -5348,6 +6070,13 @@
           el.classList.remove('bg-stone-100', 'text-stone-500', 'cursor-not-allowed');
         }
       });
+      const presetSel = document.getElementById('cfg_bbox_preset');
+      if (presetSel) {
+        presetSel.value = 'custom';
+        presetSel.disabled = false;
+        presetSel.classList.remove('bg-stone-100', 'text-stone-500', 'cursor-not-allowed');
+      }
+
       document.getElementById('btnToggleDensityJobs')?.classList.remove('bg-rose-500/30', 'border-rose-500');
       document.getElementById('btnToggleDensityPop')?.classList.remove('bg-blue-500/30', 'border-blue-500');
       document.getElementById('btnToggleBoxSelect')?.classList.remove('bg-amber-600/30', 'border-amber-600');
@@ -5588,7 +6317,12 @@
         parseFloat(Math.max(b1, b3).toFixed(4))
       ];
 
+      const bboxLockedEl = document.getElementById('cfg_bbox_locked');
+      if (bboxLockedEl) cityData.city.bbox_locked = bboxLockedEl.checked;
+      else if (cityData.city.bbox_locked === undefined) cityData.city.bbox_locked = isBboxLocked;
+
       const peaEl = document.getElementById('cfg_tasa_pea');
+
       if (peaEl) cityData.macroeconomics.tasa_pea = parseFloat(peaEl.value);
 
       const tilEl = document.getElementById('cfg_til_1');
@@ -5740,8 +6474,15 @@
       document.getElementById('cfg_bbox_2').value = normBbox[2];
       document.getElementById('cfg_bbox_3').value = normBbox[3];
       updateBboxLayer(normBbox);
+      updateBboxDimensionsDisplay(normBbox);
+
+      const locked = Boolean(c.bbox_locked);
+      toggleBboxLock(locked, false);
+      const presetSel = document.getElementById('cfg_bbox_preset');
+      if (presetSel) presetSel.value = 'custom';
 
       // Paso 3
+
       const pea = m.tasa_pea || 0.62;
       document.getElementById('cfg_tasa_pea').value = pea;
       document.getElementById('val_tasa_pea').innerText = (pea * 100).toFixed(2) + "%";
@@ -5849,6 +6590,7 @@
       renderPoiList();
       renderPoiMarkersOnMap();
       renderPlacesList();
+      renderPlacesMarkersOnMap();
       if (!cityData.isolated_zones) {
         cityData.isolated_zones = (cityData.city && Array.isArray(cityData.city.isolated_zones)) ? cityData.city.isolated_zones : [];
       }
@@ -6191,6 +6933,10 @@
             txt.innerText = data.source;
           }
 
+          if (data.beta_recommendation) {
+            updateBetaRecommendationUI(data.beta_recommendation);
+          }
+
           triggerAutoSave();
           showToast(`Parámetros macroeconómicos: ${data.source}`, data.method === 'enoe_file' ? "success" : "info");
         } else {
@@ -6200,6 +6946,51 @@
         showToast(`Error al consultar parámetros: ${e.message}`, "error");
       } finally {
         if (btn) btn.disabled = false;
+      }
+    }
+
+    function setBetaArchetype(arch, betaVal) {
+      const betaInput = document.getElementById('cfg_gravity_beta');
+      const betaValEl = document.getElementById('val_gravity_beta');
+      if (betaInput) betaInput.value = betaVal;
+      if (betaValEl) betaValEl.innerText = parseFloat(betaVal).toFixed(3);
+      if (!cityData.macroeconomics) cityData.macroeconomics = {};
+      cityData.macroeconomics.gravity_beta = parseFloat(betaVal);
+      onGravityBetaChanged(betaVal, arch);
+      triggerAutoSave();
+    }
+
+    function onGravityBetaChanged(val, forceArch = null) {
+      const betaValEl = document.getElementById('val_gravity_beta');
+      if (betaValEl) betaValEl.innerText = parseFloat(val).toFixed(3);
+      if (!cityData.macroeconomics) cityData.macroeconomics = {};
+      cityData.macroeconomics.gravity_beta = parseFloat(val);
+
+      const medianEl = document.getElementById('beta_expected_median');
+      const ratEl = document.getElementById('beta_rationale_text');
+      if (medianEl && ratEl) {
+        if (val >= 0.14) {
+          medianEl.innerText = "Mediana esperada: ~6 – 9 km (Perfil Compacto).";
+          ratEl.innerText = "Fricción alta: concentra los viajes en el núcleo urbano y zonas contiguas.";
+        } else if (val <= 0.095) {
+          medianEl.innerText = "Mediana esperada: ~18 – 25 km (Perfil Megaciudad).";
+          ratEl.innerText = "Fricción baja: favorece flujos intermunicipales de largo alcance.";
+        } else {
+          medianEl.innerText = "Mediana esperada: ~10 – 15 km (Perfil Intermedio).";
+          ratEl.innerText = "Fricción equilibrada: balance entre desplazamientos locales y suburbanos.";
+        }
+      }
+    }
+
+    function updateBetaRecommendationUI(rec) {
+      if (!rec) return;
+      const medianEl = document.getElementById('beta_expected_median');
+      const ratEl = document.getElementById('beta_rationale_text');
+      if (medianEl && rec.expected_median_km) {
+        medianEl.innerText = `Mediana esperada: ~${rec.expected_median_km} (${rec.label || rec.archetype}).`;
+      }
+      if (ratEl && rec.rationale) {
+        ratEl.innerText = rec.rationale;
       }
     }
 
@@ -6645,7 +7436,10 @@
           if (content) content.classList.add('hidden');
         }
       });
-      if (tabName === 'places') renderPlacesList();
+      if (tabName === 'places') {
+        renderPlacesList();
+        renderPlacesMarkersOnMap();
+      }
       if (tabName === 'editor') updatePoiPreviewFromForm();
       if (tabName === 'zones') renderAffluenceZones();
       if (tabName === 'exclusions') renderExclusionZones();
@@ -7539,38 +8333,262 @@
       });
     }
 
-    // Toponimia y Colonias (places)
+    // =========================================================================
+    // TOPONIMIA, COLONIAS Y HOMOGENEIZADOR URBANO (PLACES STUDIO)
+    // =========================================================================
+
+    let placesHistorySnapshot = null;
+    let forceShowPlaceLabels = false;
+
+    function getPlaceTaxonomyColor(name, type) {
+      const n = (name || '').toLowerCase();
+      if (/supermanzana|s\.?m\.?|smz|regi[oó]n|\br-\d+/i.test(n)) return '#0284c7'; // Azul cielo (Supermanzanas)
+      if (/fracc|fraccionamiento|residencial|privada/i.test(n)) return '#d97706'; // Ámbar (Fraccionamientos)
+      if (/barrio|pueblo|ejido|u\.?h\.?|unidad\s+habitacional/i.test(n)) return '#7c3aed'; // Púrpura (Barrios/UH)
+      return '#059669'; // Esmeralda (Colonias estándar)
+    }
+
+    function createPlaceIcon(name, type, isSelected = false, isCompactDot = false) {
+      const color = getPlaceTaxonomyColor(name, type);
+      const selClass = isSelected ? 'selected' : '';
+
+      if (isCompactDot) {
+        return L.divIcon({
+          className: 'place-dot-wrapper',
+          html: `<div class="place-marker-dot ${selClass}">
+                   <span class="place-dot-core" style="background-color: ${color};"></span>
+                 </div>`,
+          iconSize: [14, 14],
+          iconAnchor: [7, 7]
+        });
+      }
+
+      const typeEmoji = type === 'suburb' ? '🏘️' : (type === 'quarter' ? '🏙️' : '🏡');
+      return L.divIcon({
+        className: 'place-marker-wrapper',
+        html: `<div class="place-marker-pill ${selClass}" style="border-left: 3px solid ${color} !important;">
+                 <span>${typeEmoji}</span>
+                 <span class="max-w-[130px] truncate">${name || 'Colonia'}</span>
+               </div>`,
+        iconSize: null,
+        iconAnchor: [12, 10]
+      });
+    }
+
+    function togglePlaceLabels() {
+      forceShowPlaceLabels = !forceShowPlaceLabels;
+      const btn = document.getElementById('btnTogglePlaceLabels');
+      if (btn) {
+        if (forceShowPlaceLabels) {
+          btn.className = "px-2 py-1 bg-sky-100 text-sky-800 text-[10px] font-bold rounded border border-sky-300 flex items-center space-x-1 transition";
+          showToast("🏷️ Rótulos visibles en todos los niveles de zoom", "info");
+        } else {
+          btn.className = "px-2 py-1 bg-stone-100 hover:bg-stone-200 text-stone-600 text-[10px] font-bold rounded border border-stone-200 flex items-center space-x-1 transition";
+          showToast("✨ Modo adaptativo activo (puntos a escala general, rótulos a zoom alto)", "info");
+        }
+      }
+      renderPlacesMarkersOnMap();
+    }
+
+    function undoPlacesLastAction() {
+      if (!placesHistorySnapshot) return;
+      cityData.places = JSON.parse(JSON.stringify(placesHistorySnapshot));
+      placesHistorySnapshot = null;
+      updateUndoButtonUI();
+      selectedPlaceIndices.clear();
+      renderPlacesList();
+      renderPlacesMarkersOnMap();
+      triggerAutoSave();
+      showToast("↩️ Se restauró la toponimia al estado anterior", "info");
+    }
+
+    function updateUndoButtonUI() {
+      const btn = document.getElementById('btnUndoPlaces');
+      if (btn) {
+        if (placesHistorySnapshot && Array.isArray(placesHistorySnapshot)) {
+          btn.classList.remove('hidden');
+        } else {
+          btn.classList.add('hidden');
+        }
+      }
+    }
+
+    function renderPlacesMarkersOnMap() {
+      if (!mapPoi || !placesMarkersGroup) return;
+      placesMarkersGroup.clearLayers();
+      const places = cityData.places || [];
+      if (places.length === 0) return;
+
+      const currentZoom = mapPoi.getZoom ? mapPoi.getZoom() : 11;
+      const useCompactDots = (!forceShowPlaceLabels && currentZoom < 13);
+
+      places.forEach((pl, idx) => {
+        if (!pl.loc || pl.loc.length !== 2) return;
+        const latLng = [pl.loc[1], pl.loc[0]];
+        const isSel = selectedPlaceIndices.has(idx);
+
+        const marker = L.marker(latLng, {
+          icon: createPlaceIcon(pl.name, pl.type, isSel, useCompactDots),
+          draggable: !useCompactDots
+        }).addTo(placesMarkersGroup);
+
+        const color = getPlaceTaxonomyColor(pl.name, pl.type);
+        const tooltipHtml = `
+          <div class="p-2 bg-white text-stone-900 rounded-lg shadow-xl text-xs space-y-1 min-w-[170px] border border-stone-200 font-sans">
+            <div class="flex items-center justify-between space-x-2">
+              <strong class="text-stone-900 truncate flex items-center space-x-1">
+                <span class="w-2 h-2 rounded-full inline-block shrink-0" style="background-color: ${color};"></span>
+                <span>${pl.name || 'Sin Nombre'}</span>
+              </strong>
+              <span class="px-1.5 py-0.5 rounded text-[9px] font-mono bg-stone-100 text-stone-700 border border-stone-300 font-bold">${pl.type || 'suburb'}</span>
+            </div>
+            <div class="text-[10px] font-mono text-stone-500">Coord: [${pl.loc[0].toFixed(5)}, ${pl.loc[1].toFixed(5)}]</div>
+            ${pl.source ? `<div class="text-[10px] text-stone-500">Origen: <strong>${pl.source}</strong></div>` : ''}
+            <div class="text-[10px] text-stone-400 pt-1 border-t border-stone-100 flex items-center justify-between">
+              <span>📍 Clic para enfocar</span>
+              <span>🔍 Zoom para rótulo</span>
+            </div>
+          </div>
+        `;
+        marker.bindTooltip(tooltipHtml, {
+          direction: 'top',
+          offset: useCompactDots ? [0, -6] : [0, -10],
+          className: 'poi-custom-tooltip'
+        });
+
+        if (!useCompactDots) {
+          marker.on('drag', (e) => {
+            const newPos = e.target.getLatLng();
+            pl.loc = [parseFloat(newPos.lng.toFixed(5)), parseFloat(newPos.lat.toFixed(5))];
+            const coordEl = document.getElementById(`placeCoordBadge_${idx}`);
+            if (coordEl) {
+              coordEl.innerText = `${pl.loc[0].toFixed(3)}, ${pl.loc[1].toFixed(3)}`;
+            }
+          });
+
+          marker.on('dragend', () => {
+            triggerAutoSave();
+          });
+        }
+
+        marker.on('click', (e) => {
+          L.DomEvent.stopPropagation(e);
+          highlightPlaceRowInList(idx);
+          if (useCompactDots) {
+            mapPoi.flyTo(latLng, 14, { duration: 0.5 });
+          }
+        });
+      });
+    }
+
+    function flyToPlaceOnMap(idx) {
+      if (!cityData.places || !cityData.places[idx]) return;
+      const pl = cityData.places[idx];
+      if (!pl.loc || pl.loc.length !== 2 || !mapPoi) return;
+      mapPoi.flyTo([pl.loc[1], pl.loc[0]], 15, { duration: 0.8 });
+      highlightPlaceRowInList(idx);
+    }
+
+    function highlightPlaceRowInList(idx) {
+      const row = document.getElementById(`placeRow_${idx}`);
+      if (row) {
+        row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        row.classList.add('ring-2', 'ring-metro-orange', 'bg-orange-50');
+        setTimeout(() => {
+          row.classList.remove('ring-2', 'ring-metro-orange', 'bg-orange-50');
+        }, 1800);
+      }
+    }
+
     function renderPlacesList() {
       const places = cityData.places || [];
-      const badge = document.getElementById('placesCountBadge');
-      if (badge) badge.innerText = `${places.length} colonias`;
       const cont = document.getElementById('placesListContainer');
+      const badge = document.getElementById('placesCountBadge');
       if (!cont) return;
+
       cont.innerHTML = '';
+
+      const textQuery = (placeFilterText || '').trim().toLowerCase();
+      const typeQuery = placeFilterType || 'all';
+
+      const filtered = places.map((pl, idx) => ({ ...pl, originalIndex: idx })).filter(item => {
+        const matchesText = !textQuery || (item.name && item.name.toLowerCase().includes(textQuery));
+        const matchesType = typeQuery === 'all' || item.type === typeQuery;
+        return matchesText && matchesType;
+      });
+
+      if (badge) {
+        if (filtered.length !== places.length) {
+          badge.innerText = `${filtered.length} de ${places.length} colonias`;
+        } else {
+          badge.innerText = `${places.length} colonias`;
+        }
+      }
+
+      updateSelectedPlacesUI();
 
       if (places.length === 0) {
         cont.innerHTML = `
-          <div class="p-6 text-center text-metro-muted text-xs bg-metro-panel/50 rounded-lg border border-metro-border">
-            <span>No hay colonias asignadas. Usa 'Sugerencias' para detectarlas automáticamente.</span>
+          <div class="p-6 text-center text-metro-muted text-xs bg-metro-panel/50 rounded-xl border border-metro-border space-y-2.5">
+            <i data-lucide="map-pin-off" class="w-8 h-8 mx-auto text-stone-400"></i>
+            <span class="block font-bold text-stone-800 text-sm">No hay toponimia curada asignada.</span>
+            <p class="text-[11px] text-stone-500 max-w-xs mx-auto">Escanea automáticamente asentamientos desde OpenStreetMap y microdatos DENUE del INEGI para rotular el mapa.</p>
+            <div class="flex flex-col sm:flex-row justify-center items-center gap-2 pt-2">
+              <button onclick="quickScanAndPopulateToponymy(this)" id="btnEmptyStateScan" class="w-full sm:w-auto px-4 py-2 bg-sky-700 hover:bg-sky-600 text-white font-bold rounded-lg shadow transition flex items-center justify-center space-x-1.5 text-xs">
+                <i data-lucide="scan" class="w-4 h-4"></i>
+                <span>Escanear e incorporar toponimia</span>
+              </button>
+              <div class="flex items-center gap-1.5">
+                <button onclick="openScanToponymyDialog()" class="px-2.5 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 font-semibold rounded-lg border border-stone-200 text-[11px] transition" title="Opciones avanzadas de escaneo">
+                  <i data-lucide="sliders-horizontal" class="w-3.5 h-3.5 inline"></i>
+                </button>
+                <button onclick="addNewPlaceRow()" class="px-3 py-2 bg-metro-orange hover:bg-orange-600 text-white font-bold rounded-lg shadow-xs flex items-center space-x-1 text-[11px] transition">
+                  <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                  <span>Manual</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+        lucide.createIcons();
+        return;
+      }
+
+      if (filtered.length === 0) {
+        cont.innerHTML = `
+          <div class="p-4 text-center text-stone-500 text-xs bg-stone-50 rounded-lg border border-stone-200">
+            <span>Ninguna colonia coincide con el filtro "${textQuery}".</span>
           </div>
         `;
         return;
       }
 
-      places.forEach((pl, idx) => {
+      filtered.forEach(item => {
+        const idx = item.originalIndex;
+        const isChecked = selectedPlaceIndices.has(idx);
         const row = document.createElement('div');
-        row.className = "p-2 bg-metro-panel border border-metro-border rounded-lg text-xs flex items-center justify-between space-x-2";
+        row.id = `placeRow_${idx}`;
+        row.className = `p-2 bg-metro-panel border border-metro-border rounded-lg text-xs flex items-center justify-between space-x-2 transition-colors ${isChecked ? 'bg-orange-50/80 border-orange-300' : 'hover:bg-metro-card'}`;
+
+        const typeEmoji = item.type === 'suburb' ? '🏘️' : (item.type === 'quarter' ? '🏙️' : '🏡');
+        const loc = item.loc || [0, 0];
+
         row.innerHTML = `
-          <div class="flex items-center space-x-2 flex-1">
-            <span class="w-2 h-2 rounded-full bg-sky-500 shrink-0"></span>
-            <input type="text" value="${pl.name || ''}" onchange="updatePlaceName(${idx}, this.value)" class="w-full text-xs font-bold text-metro-text bg-metro-card px-2 py-1 rounded border border-metro-border">
+          <div class="flex items-center space-x-2 flex-1 min-w-0">
+            <input type="checkbox" ${isChecked ? 'checked' : ''} onclick="handlePlaceCheckboxClick(event, ${idx})" class="rounded border-stone-300 text-metro-orange focus:ring-0 shrink-0 cursor-pointer">
+            <span class="text-sm shrink-0 cursor-pointer" onclick="flyToPlaceOnMap(${idx})" title="Volar a la colonia en el mapa">${typeEmoji}</span>
+            <input type="text" value="${item.name || ''}" onchange="updatePlaceName(${idx}, this.value)" class="w-full text-xs font-bold text-metro-text bg-metro-card px-2 py-1 rounded border border-metro-border focus:border-metro-orange focus:outline-none">
           </div>
+          <button onclick="flyToPlaceOnMap(${idx})" class="font-mono text-[10px] text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 px-1.5 py-0.5 rounded shrink-0 flex items-center space-x-0.5" title="Centrar en el mapa">
+            <i data-lucide="map-pin" class="w-2.5 h-2.5"></i>
+            <span id="placeCoordBadge_${idx}">${loc[0].toFixed(3)}, ${loc[1].toFixed(3)}</span>
+          </button>
           <select onchange="updatePlaceType(${idx}, this.value)" class="text-[11px] bg-metro-card border border-metro-border rounded px-1.5 py-1 text-metro-muted shrink-0">
-            <option value="suburb" ${pl.type === 'suburb' ? 'selected' : ''}>suburb</option>
-            <option value="quarter" ${pl.type === 'quarter' ? 'selected' : ''}>quarter</option>
-            <option value="neighbourhood" ${pl.type === 'neighbourhood' ? 'selected' : ''}>neighbourhood</option>
+            <option value="suburb" ${item.type === 'suburb' ? 'selected' : ''}>suburb</option>
+            <option value="quarter" ${item.type === 'quarter' ? 'selected' : ''}>quarter</option>
+            <option value="neighbourhood" ${item.type === 'neighbourhood' ? 'selected' : ''}>neighbourhood</option>
           </select>
-          <button onclick="deletePlaceByIndex(${idx})" class="text-metro-muted hover:text-rose-600 p-1 shrink-0" title="Eliminar colonia">
+          <button onclick="deletePlaceByIndex(${idx})" class="text-metro-muted hover:text-rose-600 p-1 shrink-0 transition" title="Eliminar colonia">
             <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
           </button>
         `;
@@ -7579,25 +8597,164 @@
       lucide.createIcons();
     }
 
+    // Acciones de Selección y Manipulación en Lista
+    let lastSelectedPlaceIndex = null;
+
+    function handlePlaceCheckboxClick(event, idx) {
+      const isChecked = event.target.checked;
+
+      if (event.shiftKey && lastSelectedPlaceIndex !== null && lastSelectedPlaceIndex !== idx) {
+        const places = cityData.places || [];
+        const textQuery = (placeFilterText || '').trim().toLowerCase();
+        const typeQuery = placeFilterType || 'all';
+
+        const filtered = places.map((pl, i) => ({ ...pl, originalIndex: i })).filter(item => {
+          const matchesText = !textQuery || (item.name && item.name.toLowerCase().includes(textQuery));
+          const matchesType = typeQuery === 'all' || item.type === typeQuery;
+          return matchesText && matchesType;
+        });
+
+        const pos1 = filtered.findIndex(item => item.originalIndex === lastSelectedPlaceIndex);
+        const pos2 = filtered.findIndex(item => item.originalIndex === idx);
+
+        if (pos1 !== -1 && pos2 !== -1) {
+          const start = Math.min(pos1, pos2);
+          const end = Math.max(pos1, pos2);
+          for (let i = start; i <= end; i++) {
+            const itemIdx = filtered[i].originalIndex;
+            if (isChecked) {
+              selectedPlaceIndices.add(itemIdx);
+            } else {
+              selectedPlaceIndices.delete(itemIdx);
+            }
+          }
+          lastSelectedPlaceIndex = idx;
+          updateSelectedPlacesUI();
+          renderPlacesList();
+          renderPlacesMarkersOnMap();
+          return;
+        }
+      }
+
+      togglePlaceSelection(idx, isChecked);
+      lastSelectedPlaceIndex = idx;
+    }
+
+    function togglePlaceSelection(idx, isChecked) {
+      if (isChecked) {
+        selectedPlaceIndices.add(idx);
+      } else {
+        selectedPlaceIndices.delete(idx);
+      }
+      updateSelectedPlacesUI();
+      renderPlacesMarkersOnMap();
+    }
+
+    function selectFilteredPlacesOnly() {
+      const places = cityData.places || [];
+      const textQuery = (placeFilterText || '').trim().toLowerCase();
+      const typeQuery = placeFilterType || 'all';
+      let count = 0;
+      places.forEach((item, idx) => {
+        const matchesText = !textQuery || (item.name && item.name.toLowerCase().includes(textQuery));
+        const matchesType = typeQuery === 'all' || item.type === typeQuery;
+        if (matchesText && matchesType) {
+          selectedPlaceIndices.add(idx);
+          count++;
+        }
+      });
+      updateSelectedPlacesUI();
+      renderPlacesList();
+      renderPlacesMarkersOnMap();
+      showToast(`Se seleccionaron ${count} colonias visibles`, "info");
+    }
+
+    function toggleSelectAllPlaces(checked) {
+      const places = cityData.places || [];
+      if (checked) {
+        places.forEach((_, idx) => selectedPlaceIndices.add(idx));
+      } else {
+        selectedPlaceIndices.clear();
+      }
+      renderPlacesList();
+      renderPlacesMarkersOnMap();
+    }
+
+    function updateSelectedPlacesUI() {
+      const btnDel = document.getElementById('btnDeleteSelectedPlaces');
+      const countSpan = document.getElementById('selectedPlacesCount');
+      const chkAll = document.getElementById('chkSelectAllPlaces');
+      const places = cityData.places || [];
+
+      if (btnDel && countSpan) {
+        const count = selectedPlaceIndices.size;
+        countSpan.innerText = count;
+        if (count > 0) {
+          btnDel.classList.remove('hidden');
+        } else {
+          btnDel.classList.add('hidden');
+        }
+      }
+      if (chkAll) {
+        chkAll.checked = places.length > 0 && selectedPlaceIndices.size === places.length;
+      }
+    }
+
+    function deleteSelectedPlaces() {
+      if (selectedPlaceIndices.size === 0 || !cityData.places) return;
+      const count = selectedPlaceIndices.size;
+      if (!confirm(`¿Eliminar ${count} colonias seleccionadas?`)) return;
+
+      placesHistorySnapshot = JSON.parse(JSON.stringify(cityData.places));
+      updateUndoButtonUI();
+
+      cityData.places = cityData.places.filter((_, idx) => !selectedPlaceIndices.has(idx));
+      selectedPlaceIndices.clear();
+      lastSelectedPlaceIndex = null;
+      renderPlacesList();
+      renderPlacesMarkersOnMap();
+      triggerAutoSave();
+      showToast(`Se eliminaron ${count} colonias`, "info");
+    }
+
+    function filterPlacesList(query) {
+      placeFilterText = query;
+      renderPlacesList();
+    }
+
+    function filterPlacesByType(type) {
+      placeFilterType = type;
+      renderPlacesList();
+    }
+
     function updatePlaceName(idx, val) {
       if (cityData.places && cityData.places[idx]) {
         cityData.places[idx].name = val;
+        renderPlacesMarkersOnMap();
         triggerAutoSave();
       }
     }
+
     function updatePlaceType(idx, val) {
       if (cityData.places && cityData.places[idx]) {
         cityData.places[idx].type = val;
+        renderPlacesMarkersOnMap();
         triggerAutoSave();
       }
     }
+
     function deletePlaceByIndex(idx) {
       if (cityData.places) {
+        placesHistorySnapshot = JSON.parse(JSON.stringify(cityData.places));
+        updateUndoButtonUI();
         cityData.places.splice(idx, 1);
+        selectedPlaceIndices.delete(idx);
         renderPlacesList();
+        renderPlacesMarkersOnMap();
         triggerAutoSave();
       }
     }
+
     function addNewPlaceRow() {
       if (!cityData.places) cityData.places = [];
       const center = mapPoi ? mapPoi.getCenter() : { lng: -86.85, lat: 21.16 };
@@ -7607,34 +8764,801 @@
         type: "suburb"
       });
       renderPlacesList();
+      renderPlacesMarkersOnMap();
       triggerAutoSave();
+      flyToPlaceOnMap(cityData.places.length - 1);
     }
-    async function requestSettlementSuggestions() {
-      showToast("Extrayendo sugerencias de colonias desde DENUE y Censo...", "info");
+
+    // -------------------------------------------------------------------------
+    // FLUJO DE ESCANEO RÁPIDO 1-CLIC Y DIÁLOGO AVANZADO (OSM + DENUE)
+    // -------------------------------------------------------------------------
+
+    async function quickScanAndPopulateToponymy(btnElement = null) {
+      if (!currentCityFile) {
+        showToast("Selecciona un proyecto de ciudad primero", "error");
+        return;
+      }
+
+      // Guardar snapshot para deshacer
+      if (cityData.places && cityData.places.length > 0) {
+        placesHistorySnapshot = JSON.parse(JSON.stringify(cityData.places));
+        updateUndoButtonUI();
+      }
+
+      // Estado de carga en el botón
+      const originalHtml = btnElement ? btnElement.innerHTML : null;
+      if (btnElement) {
+        btnElement.disabled = true;
+        btnElement.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin inline mr-1"></i><span>Escaneando...</span>`;
+        if (window.lucide) lucide.createIcons();
+      }
+      showToast("🔍 Escaneando toponimia urbana desde OpenStreetMap y DENUE...", "info");
+
       try {
-        const res = await fetch(`/api/settlement_suggestions?file=${encodeURIComponent(currentCityFile)}`);
+        const res = await fetch(`/api/toponymy/scan?file=${encodeURIComponent(currentCityFile)}&min_count=8`);
         const data = await res.json();
-        if (data.status === 'ok' && data.suggestions && data.suggestions.length > 0) {
+        if (data.status === 'ok' && data.catalog && data.catalog.places) {
+          const scanned = data.catalog.places;
           if (!cityData.places) cityData.places = [];
+
           let added = 0;
-          data.suggestions.slice(0, 15).forEach(s => {
-            if (!cityData.places.some(p => p.name.toLowerCase() === s.name.toLowerCase())) {
+          const existingMap = new Set(cityData.places.map(p => (p.name || '').trim().toLowerCase()));
+          scanned.forEach(p => {
+            const nm = (p.name || '').trim().toLowerCase();
+            if (!existingMap.has(nm)) {
+              existingMap.add(nm);
               cityData.places.push({
-                name: s.name,
-                loc: s.loc,
-                type: s.type || 'suburb'
+                name: p.name,
+                loc: p.loc,
+                type: p.type || 'suburb',
+                source: p.source
               });
               added++;
             }
           });
+
           renderPlacesList();
+          renderPlacesMarkersOnMap();
           triggerAutoSave();
-          showToast(`Se incorporaron ${added} colonias sugeridas`, "success");
+
+          const diag = data.catalog.diagnosis ? data.catalog.diagnosis.categories : {};
+          const smCount = (diag.SUPERMANZANA || 0) + (diag.REGION || 0);
+          const fraccCount = diag.FRACCIONAMIENTO || 0;
+          const colCount = (diag.COLONIA || 0) + (diag.GENERIC || 0);
+
+          showToast(`🎉 ¡Escaneo exitoso! Se incorporaron ${added} colonias (${smCount} Supermanzanas, ${fraccCount} Fraccionamientos, ${colCount} Colonias)`, "success");
         } else {
-          showToast("No se encontraron sugerencias adicionales", "info");
+          showToast(`Error al escanear toponimia: ${data.message || 'Sin resultados'}`, "error");
         }
-      } catch (e) {
-        showToast(`Error al consultar sugerencias: ${e.message}`, "error");
+      } catch (err) {
+        showToast(`Fallo de conexión al escanear toponimia: ${err.message}`, "error");
+      } finally {
+        if (btnElement && originalHtml) {
+          btnElement.disabled = false;
+          btnElement.innerHTML = originalHtml;
+          if (window.lucide) lucide.createIcons();
+        }
+      }
+    }
+
+    function openScanToponymyDialog() {
+      const modal = document.getElementById('modalScanToponymy');
+      if (modal) modal.classList.remove('hidden');
+      executeCityToponymyScan();
+      lucide.createIcons();
+    }
+
+    function closeScanToponymyDialog() {
+      const modal = document.getElementById('modalScanToponymy');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    async function executeCityToponymyScan() {
+      if (!currentCityFile) {
+        showToast("Selecciona una ciudad primero para escanear toponimia", "error");
+        return;
+      }
+      const minCount = document.getElementById('scanMinCount')?.value || 8;
+      const loader = document.getElementById('scanLoadingIndicator');
+      const resultsSec = document.getElementById('scanResultsSection');
+      const btnConfirm = document.getElementById('btnConfirmImportScan');
+
+      if (loader) loader.classList.remove('hidden');
+      if (resultsSec) resultsSec.classList.add('hidden');
+      if (btnConfirm) btnConfirm.disabled = true;
+
+      try {
+        const res = await fetch(`/api/toponymy/scan?file=${encodeURIComponent(currentCityFile)}&min_count=${minCount}`);
+        const data = await res.json();
+        if (data.status === 'ok' && data.catalog) {
+          scannedPlacesCatalog = data.catalog;
+          renderScanResultsUI(data.catalog);
+        } else {
+          showToast(`Error al escanear: ${data.message || 'Sin resultados'}`, "error");
+        }
+      } catch (err) {
+        showToast(`Fallo de conexión al escanear: ${err.message}`, "error");
+      } finally {
+        if (loader) loader.classList.add('hidden');
+      }
+    }
+
+    function renderScanResultsUI(cat) {
+      const resultsSec = document.getElementById('scanResultsSection');
+      const btnConfirm = document.getElementById('btnConfirmImportScan');
+      if (!resultsSec) return;
+
+      resultsSec.classList.remove('hidden');
+      if (btnConfirm) btnConfirm.disabled = (cat.total === 0);
+
+      document.getElementById('scanTotalCount').innerText = cat.total || 0;
+      const diag = cat.diagnosis ? cat.diagnosis.categories : {};
+      document.getElementById('scanSmCount').innerText = (diag.SUPERMANZANA || 0) + (diag.REGION || 0);
+      document.getElementById('scanFraccCount').innerText = diag.FRACCIONAMIENTO || 0;
+      document.getElementById('scanColCount').innerText = (diag.COLONIA || 0) + (diag.GENERIC || 0);
+
+      const listCont = document.getElementById('scanCandidatesList');
+      const candCount = document.getElementById('scanCandidateCount');
+      if (candCount) candCount.innerText = `${cat.total} elementos detectados`;
+      if (listCont) {
+        listCont.innerHTML = '';
+        (cat.places || []).slice(0, 150).forEach(p => {
+          const item = document.createElement('div');
+          item.className = "px-3 py-1.5 flex items-center justify-between hover:bg-white transition";
+          const srcBadge = p.source === 'OSM_POLYGON' ? '<span class="text-[9px] bg-cyan-100 text-cyan-800 font-bold px-1 rounded">OSM Polígono</span>' :
+                           (p.source === 'OSM_NODE' ? '<span class="text-[9px] bg-blue-100 text-blue-800 font-bold px-1 rounded">OSM Nodo</span>' :
+                           '<span class="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-1 rounded">DENUE</span>');
+          item.innerHTML = `
+            <div class="flex items-center space-x-2">
+              <span class="font-bold text-stone-900">${p.name}</span>
+              ${srcBadge}
+            </div>
+            <div class="font-mono text-[10px] text-stone-500">[${p.loc[0].toFixed(3)}, ${p.loc[1].toFixed(3)}]</div>
+          `;
+          listCont.appendChild(item);
+        });
+        if (cat.total > 150) {
+          const moreEl = document.createElement('div');
+          moreEl.className = "p-2 text-center text-stone-400 text-[10px] font-bold";
+          moreEl.innerText = `... y ${cat.total - 150} asentamientos adicionales`;
+          listCont.appendChild(moreEl);
+        }
+      }
+      lucide.createIcons();
+    }
+
+    function importScannedPlaces() {
+      if (!scannedPlacesCatalog || !scannedPlacesCatalog.places) return;
+      const mode = document.querySelector('input[name="scanImportMode"]:checked')?.value || 'merge';
+      const scanned = scannedPlacesCatalog.places;
+
+      if (!cityData.places) cityData.places = [];
+      placesHistorySnapshot = JSON.parse(JSON.stringify(cityData.places));
+      updateUndoButtonUI();
+
+      let added = 0;
+      if (mode === 'replace') {
+        cityData.places = scanned.map(p => ({
+          name: p.name,
+          loc: p.loc,
+          type: p.type || 'suburb',
+          source: p.source
+        }));
+        added = cityData.places.length;
+      } else {
+        const existingMap = new Set(cityData.places.map(p => (p.name || '').trim().toLowerCase()));
+        scanned.forEach(p => {
+          const nm = (p.name || '').trim().toLowerCase();
+          if (!existingMap.has(nm)) {
+            existingMap.add(nm);
+            cityData.places.push({
+              name: p.name,
+              loc: p.loc,
+              type: p.type || 'suburb',
+              source: p.source
+            });
+            added++;
+          }
+        });
+      }
+
+      renderPlacesList();
+      renderPlacesMarkersOnMap();
+      triggerAutoSave();
+      closeScanToponymyDialog();
+      showToast(`Se incorporaron ${added} colonias a la ciudad`, "success");
+    }
+
+    // -------------------------------------------------------------------------
+    // HOMOGENEIZADOR EN MASA (BATCH HOMOGENIZER MODAL)
+    // -------------------------------------------------------------------------
+    function openHomogenizerModal() {
+      const modal = document.getElementById('modalHomogenizer');
+      if (modal) modal.classList.remove('hidden');
+      runHomogenizerDiagnosis();
+      resetHomogenizerPreview();
+      lucide.createIcons();
+    }
+
+    function closeHomogenizerModal() {
+      const modal = document.getElementById('modalHomogenizer');
+      if (modal) modal.classList.add('hidden');
+      pendingHomogenizeResult = null;
+    }
+
+    function resetHomogenizerPreview() {
+      pendingHomogenizeResult = null;
+      document.getElementById('homoDiffCountBadge').innerText = "0 cambios";
+      document.getElementById('btnApplyHomogenize').disabled = true;
+      document.getElementById('homoActionStatus').innerText = "Selecciona una acción para previsualizar.";
+      const tb = document.getElementById('homoDiffTableBody');
+      if (tb) {
+        tb.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-stone-400 font-sans">Selecciona una acción arriba para previsualizar cambios.</td></tr>`;
+      }
+    }
+
+    async function runHomogenizerDiagnosis() {
+      const places = cityData.places || [];
+      document.getElementById('homoTotalBadge').innerText = places.length;
+      const badgesCont = document.getElementById('homoDiagnosisBadges');
+      if (!badgesCont) return;
+
+      badgesCont.innerHTML = '<span class="text-stone-400">Analizando...</span>';
+
+      try {
+        const res = await fetch('/api/toponymy/homogenize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ places: places, options: {} })
+        });
+        const data = await res.json();
+        if (data.status === 'ok' && data.result && data.result.diagnosis) {
+          const cats = data.result.diagnosis.categories || {};
+          badgesCont.innerHTML = `
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-300">SM / Regiones: <strong>${(cats.SUPERMANZANA || 0) + (cats.REGION || 0)}</strong></span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">Números Sueltos: <strong>${cats.BARE_NUMERIC || 0}</strong></span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300">Prefijo 'Colonia': <strong>${cats.COLONIA || 0}</strong></span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-300">Fraccionamientos: <strong>${cats.FRACCIONAMIENTO || 0}</strong></span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-stone-200 text-stone-800">Otros / Genéricos: <strong>${cats.GENERIC || 0}</strong></span>
+          `;
+        }
+      } catch (err) {
+        badgesCont.innerHTML = `<span class="text-rose-500">Error en diagnóstico: ${err.message}</span>`;
+      }
+    }
+
+    async function previewHomogenizeAction(actionType) {
+      const places = cityData.places || [];
+      if (places.length === 0) {
+        showToast("No hay colonias en la lista para homogeneizar", "info");
+        return;
+      }
+
+      const options = {};
+      if (actionType === 'unify_sm') {
+        const fmt = document.getElementById('homoSmFormat')?.value || "Supermanzana {num}";
+        options.unify_supermanzanas = fmt;
+      } else if (actionType === 'strip_prefixes') {
+        options.strip_prefixes = {
+          strip_colonia: document.getElementById('homoStripColonia')?.checked ?? true,
+          fracc_mode: document.getElementById('homoFraccMode')?.value || "Fracc.",
+          strip_residencial: document.getElementById('homoStripResidencial')?.checked ?? false
+        };
+      } else if (actionType === 'smart_case') {
+        options.smart_casing = true;
+      } else if (actionType === 'regex') {
+        const pat = document.getElementById('homoRegexPattern')?.value;
+        const rep = document.getElementById('homoRegexReplacement')?.value || "";
+        if (!pat) {
+          showToast("Ingresa un patrón regex para buscar", "error");
+          return;
+        }
+        options.regex_rule = { pattern: pat, replacement: rep, ignore_case: true };
+      }
+
+      document.getElementById('homoActionStatus').innerText = "Calculando vista previa...";
+
+      try {
+        const res = await fetch('/api/toponymy/homogenize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ places: places, options: options })
+        });
+        const data = await res.json();
+        if (data.status === 'ok' && data.result) {
+          pendingHomogenizeResult = data.result;
+          renderHomogenizerDiffUI(data.result);
+        } else {
+          showToast(`Error al procesar: ${data.message || 'Error desconocido'}`, "error");
+        }
+      } catch (err) {
+        showToast(`Fallo de conexión: ${err.message}`, "error");
+      }
+    }
+
+    function renderHomogenizerDiffUI(result) {
+      const diffs = result.diffs || [];
+      const tb = document.getElementById('homoDiffTableBody');
+      const badge = document.getElementById('homoDiffCountBadge');
+      const btnApply = document.getElementById('btnApplyHomogenize');
+      const status = document.getElementById('homoActionStatus');
+
+      badge.innerText = `${diffs.length} cambios`;
+      btnApply.disabled = (diffs.length === 0);
+      status.innerText = diffs.length > 0 ? `Se encontraron ${diffs.length} modificaciones listas para aplicar.` : "No se requieren modificaciones con los parámetros actuales.";
+
+      if (!tb) return;
+      tb.innerHTML = '';
+
+      if (diffs.length === 0) {
+        tb.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-emerald-600 font-sans font-bold">¡Excelente! Los nombres ya cumplen con esta regla.</td></tr>`;
+        return;
+      }
+
+      diffs.slice(0, 100).forEach((d, i) => {
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-orange-50/50 transition";
+        tr.innerHTML = `
+          <td class="p-1.5 text-stone-400 text-[10px]">${i + 1}</td>
+          <td class="p-1.5 text-rose-700 line-through">${d.old}</td>
+          <td class="p-1.5 text-emerald-700 font-bold">${d.new}</td>
+        `;
+        tb.appendChild(tr);
+      });
+      if (diffs.length > 100) {
+        const moreRow = document.createElement('tr');
+        moreRow.innerHTML = `<td colspan="3" class="p-2 text-center text-stone-400 font-sans font-bold">... y ${diffs.length - 100} cambios adicionales</td>`;
+        tb.appendChild(moreRow);
+      }
+    }
+
+    function applyPendingHomogenization() {
+      if (!pendingHomogenizeResult || !pendingHomogenizeResult.places) return;
+      const count = pendingHomogenizeResult.diffs ? pendingHomogenizeResult.diffs.length : 0;
+      if (cityData.places && cityData.places.length > 0) {
+        placesHistorySnapshot = JSON.parse(JSON.stringify(cityData.places));
+        updateUndoButtonUI();
+      }
+      cityData.places = pendingHomogenizeResult.places;
+      renderPlacesList();
+      renderPlacesMarkersOnMap();
+      triggerAutoSave();
+      closeHomogenizerModal();
+      showToast(`¡Homogeneización aplicada con éxito! (${count} nombres actualizados)`, "success");
+    }
+
+    async function deduplicateNearbyPlaces() {
+      const places = cityData.places || [];
+      if (places.length < 2) {
+        showToast("Se requieren al menos 2 colonias para deduplicar", "info");
+        return;
+      }
+
+      if (!confirm("¿Deduplicar automáticamente asentamientos idénticos o equivalentes a menos de 500m de distancia?")) {
+        return;
+      }
+
+      placesHistorySnapshot = JSON.parse(JSON.stringify(cityData.places));
+      updateUndoButtonUI();
+
+      showToast("Buscando duplicados espaciales cercanos...", "info");
+      try {
+        const res = await fetch('/api/toponymy/deduplicate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ places: places, distance_m: 500.0 })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          const removed = data.removed_count || 0;
+          cityData.places = data.kept;
+          selectedPlaceIndices.clear();
+          renderPlacesList();
+          renderPlacesMarkersOnMap();
+          triggerAutoSave();
+          if (removed > 0) {
+            showToast(`Deduplicación exitosa: se eliminaron ${removed} colonias duplicadas`, "success");
+          } else {
+            showToast("No se detectaron colonias duplicadas cercanas", "info");
+          }
+        } else {
+          showToast(`Error: ${data.message}`, "error");
+        }
+      } catch (err) {
+        showToast(`Fallo de conexión al deduplicar: ${err.message}`, "error");
+      }
+    }
+
+    // =========================================================================
+    // ZONIFICACIÓN ESPACIAL Y PODA POR RADIO (TOPONYMY CLUSTER RESOLVER)
+    // =========================================================================
+    let isPlacesBoxSelectActive = false;
+    let activeZoneClustersData = null;
+    let mapZonePreview = null;
+    let zonePreviewLayerGroup = null;
+    let zoneClusterRadiusTimer = null;
+    let zoneFilterText = "";
+    let zoneOnlyConflicts = true;
+
+    function toggleBoxSelectPlacesMode() {
+      isPlacesBoxSelectActive = !isPlacesBoxSelectActive;
+      const btn = document.getElementById('btnBoxSelectPlaces');
+      if (btn) {
+        if (isPlacesBoxSelectActive) {
+          btn.className = "px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded border border-indigo-700 flex items-center space-x-1 transition shadow-inner";
+          if (mapPoi && mapPoi.getContainer()) mapPoi.getContainer().style.cursor = 'crosshair';
+          showToast("Modo Caja Activo: Arrastra un cuadro sobre el mapa para seleccionar colonias", "info");
+        } else {
+          btn.className = "px-2 py-1 bg-stone-100 hover:bg-stone-200 text-stone-700 text-[10px] font-bold rounded border border-stone-300 flex items-center space-x-1 transition";
+          if (mapPoi && mapPoi.getContainer()) mapPoi.getContainer().style.cursor = '';
+        }
+      }
+    }
+
+    function openZoneThinningModal() {
+      const places = cityData.places || [];
+      if (places.length < 2) {
+        showToast("Se requieren al menos 2 colonias para zonificar y podar", "info");
+        return;
+      }
+
+      const modal = document.getElementById('modalZoneThinning');
+      if (modal) {
+        modal.classList.remove('hidden');
+        initZonePreviewMapIfNeeded();
+        setTimeout(() => {
+          if (mapZonePreview) {
+            mapZonePreview.invalidateSize();
+            if (mapPoi) {
+              mapZonePreview.setView(mapPoi.getCenter(), Math.max(11, mapPoi.getZoom() - 1));
+            }
+          }
+        }, 150);
+        recalculateZoneClusters();
+      }
+    }
+
+    function closeZoneThinningModal() {
+      const modal = document.getElementById('modalZoneThinning');
+      if (modal) modal.classList.add('hidden');
+      if (zonePreviewLayerGroup) zonePreviewLayerGroup.clearLayers();
+    }
+
+    function initZonePreviewMapIfNeeded() {
+      if (mapZonePreview) return;
+      const el = document.getElementById('mapZonePreview');
+      if (!el) return;
+
+      mapZonePreview = L.map('mapZonePreview', {
+        zoomControl: true,
+        attributionControl: false,
+        wheelPxPerZoomLevel: 60,
+        wheelDebounceTime: 10,
+        zoomSnap: 0.5
+      }).setView([21.16, -86.85], 11);
+
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 19,
+        maxNativeZoom: 16
+      }).addTo(mapZonePreview);
+
+      zonePreviewLayerGroup = L.layerGroup().addTo(mapZonePreview);
+    }
+
+    function onZoneRadiusSliderInput(val) {
+      const intVal = parseInt(val);
+      const km = (intVal / 1000.0).toFixed(1);
+      const lbl = document.getElementById('zoneRadiusVal');
+      if (lbl) lbl.innerText = `${intVal.toLocaleString()} m (${km} km)`;
+
+      if (zoneClusterRadiusTimer) clearTimeout(zoneClusterRadiusTimer);
+      zoneClusterRadiusTimer = setTimeout(() => {
+        recalculateZoneClusters();
+      }, 350);
+    }
+
+    function setZoneRadiusPreset(val) {
+      const slider = document.getElementById('zoneRadiusSlider');
+      if (slider) {
+        slider.value = val;
+        onZoneRadiusSliderInput(val);
+      }
+    }
+
+    function toggleOnlyConflicts(val) {
+      zoneOnlyConflicts = val;
+      renderZoneClustersUI();
+    }
+
+    function filterZoneCards(query) {
+      zoneFilterText = (query || '').trim().toLowerCase();
+      renderZoneClustersUI();
+    }
+
+    async function recalculateZoneClusters() {
+      const places = cityData.places || [];
+      const slider = document.getElementById('zoneRadiusSlider');
+      const heuristicSelect = document.getElementById('zoneRankHeuristic');
+      const status = document.getElementById('zoneThinningStatus');
+
+      const radius = slider ? parseFloat(slider.value) : 1000.0;
+      const heuristic = heuristicSelect ? heuristicSelect.value : 'density';
+
+      if (status) status.innerText = "Calculando zonas de influencia Voronoi y puntuaciones...";
+
+      try {
+        const res = await fetch('/api/toponymy/cluster-zones', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            places: places,
+            radius_m: radius,
+            rank_heuristic: heuristic,
+            city_file: currentCityFile
+          })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          activeZoneClustersData = data;
+          updateZoneMetricsUI(data);
+          renderZoneClustersUI();
+          renderZoneClustersOnMap();
+          if (status) {
+            status.innerText = `Zonificación calculada: ${data.conflict_zones_count} zonas en conflicto de ${data.anchors_count} totales.`;
+          }
+        } else {
+          showToast(`Error al agrupar zonas: ${data.message}`, "error");
+          if (status) status.innerText = "Error al procesar zonificación.";
+        }
+      } catch (err) {
+        showToast(`Fallo de conexión: ${err.message}`, "error");
+        if (status) status.innerText = "Fallo de conexión con el servidor.";
+      }
+    }
+
+    function updateZoneMetricsUI(data) {
+      const elTotal = document.getElementById('zoneTotalPlacesBadge');
+      const elClusters = document.getElementById('zoneTotalClustersBadge');
+      const elConflicts = document.getElementById('zoneConflictClustersBadge');
+      const elIsolated = document.getElementById('zoneIsolatedClustersBadge');
+      const elPruned = document.getElementById('zonePrunedBadge');
+
+      if (elTotal) elTotal.innerText = data.total_places || 0;
+      if (elClusters) elClusters.innerText = data.anchors_count || 0;
+      if (elConflicts) elConflicts.innerText = data.conflict_zones_count || 0;
+      if (elIsolated) elIsolated.innerText = data.isolated_zones_count || 0;
+
+      let prunedCount = 0;
+      (data.zones || []).forEach(z => {
+        if (!z.is_exception && z.candidates && z.candidates.length > 1) {
+          prunedCount += (z.candidates.length - 1);
+        }
+      });
+      if (elPruned) elPruned.innerText = `${prunedCount} colonias`;
+    }
+
+    function renderZoneClustersUI() {
+      const cont = document.getElementById('zoneClustersListContainer');
+      if (!cont || !activeZoneClustersData) return;
+
+      const zones = activeZoneClustersData.zones || [];
+      const query = zoneFilterText;
+
+      cont.innerHTML = '';
+
+      const filteredZones = zones.filter(z => {
+        if (zoneOnlyConflicts && !z.is_conflict) return false;
+        if (!query) return true;
+        if (z.title && z.title.toLowerCase().includes(query)) return true;
+        return (z.candidates || []).some(c => c.name && c.name.toLowerCase().includes(query));
+      });
+
+      if (filteredZones.length === 0) {
+        cont.innerHTML = `
+          <div class="p-6 text-center text-stone-500 text-xs bg-white rounded-xl border border-stone-200">
+            ${zoneOnlyConflicts ? 'No hay zonas en conflicto con los filtros actuales.' : 'No se encontraron zonas que coincidan con la búsqueda.'}
+          </div>
+        `;
+        return;
+      }
+
+      filteredZones.forEach((z, zIdx) => {
+        const card = document.createElement('div');
+        const isExcept = z.is_exception === true;
+        const candidates = z.candidates || [];
+        const currentWinner = z.selected_index;
+
+        card.className = `p-3 rounded-xl border transition text-xs space-y-2.5 ${isExcept ? 'bg-indigo-50/40 border-indigo-200' : (z.is_conflict ? 'bg-white border-stone-200 shadow-2xs' : 'bg-stone-50/70 border-stone-200/80')}`;
+
+        let candidatesHtml = '';
+        candidates.forEach(c => {
+          const isSelected = (c.original_index === currentWinner);
+          const isRec = c.recommended === true;
+          const estText = c.establishments > 0 ? `🏢 ${c.establishments} DENUE` : '🏢 Sin DENUE';
+          const distText = c.distance_m > 0 ? `📍 a ${Math.round(c.distance_m)}m` : '📍 Anchor';
+
+          candidatesHtml += `
+            <label class="flex items-center justify-between p-1.5 rounded-lg border cursor-pointer transition ${isSelected ? 'bg-emerald-50/80 border-emerald-300 text-stone-900 font-semibold shadow-2xs' : 'bg-stone-50/60 border-stone-200 hover:bg-stone-100 text-stone-700'}">
+              <div class="flex items-center space-x-2 min-w-0 flex-1">
+                <input type="radio" name="zone_cand_${z.zone_id}" value="${c.original_index}" ${isSelected ? 'checked' : ''} onchange="onSelectZoneCandidate('${z.zone_id}', ${c.original_index})" class="text-emerald-600 focus:ring-0 shrink-0">
+                <div class="truncate flex items-center space-x-1.5">
+                  <span class="truncate">${c.name || 'Sin nombre'}</span>
+                  ${isRec ? '<span class="px-1.5 py-0.2 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded text-[9px] font-bold shrink-0">★ Sugerido</span>' : ''}
+                </div>
+              </div>
+              <div class="flex items-center space-x-1.5 shrink-0 text-[10px] text-stone-500 font-mono ml-2">
+                <span class="px-1 py-0.2 bg-white rounded border border-stone-200">${estText}</span>
+                <span class="text-stone-400">${distText}</span>
+              </div>
+            </label>
+          `;
+        });
+
+        card.innerHTML = `
+          <div class="flex items-center justify-between border-b border-stone-100 pb-1.5">
+            <div class="flex items-center space-x-2 min-w-0">
+              <span class="w-2 h-2 rounded-full ${isExcept ? 'bg-indigo-500' : (z.is_conflict ? 'bg-amber-500' : 'bg-emerald-500')} shrink-0"></span>
+              <span class="font-bold text-stone-900 truncate">Zona ${z.zone_number}: ${z.title}</span>
+              <span class="text-[10px] font-mono px-1.5 py-0.2 rounded bg-stone-100 text-stone-600 border border-stone-200 shrink-0">${candidates.length} candidatas</span>
+            </div>
+            <button onclick="focusZoneOnPreviewMap('${z.zone_id}')" class="text-indigo-600 hover:text-indigo-800 font-bold text-[11px] flex items-center space-x-0.5 shrink-0" title="Centrar zona en el mapa">
+              <i data-lucide="map-pin" class="w-3 h-3"></i>
+              <span>Ver</span>
+            </button>
+          </div>
+
+          <div class="space-y-1">
+            ${candidatesHtml}
+          </div>
+
+          <div class="flex items-center justify-between pt-1 border-t border-stone-100 text-[11px]">
+            <label class="flex items-center space-x-1.5 cursor-pointer select-none text-stone-600 font-medium hover:text-indigo-700">
+              <input type="checkbox" ${isExcept ? 'checked' : ''} onchange="onToggleZoneException('${z.zone_id}', this.checked)" class="rounded border-stone-300 text-indigo-600 focus:ring-0">
+              <span>Excepción: Mantener todas las de esta zona</span>
+            </label>
+            ${isExcept ? '<span class="text-indigo-600 font-bold text-[10px]">No se podará nada</span>' : `<span class="text-rose-600 text-[10px] font-medium">Se podarán ${Math.max(0, candidates.length - 1)}</span>`}
+          </div>
+        `;
+        cont.appendChild(card);
+      });
+      lucide.createIcons();
+    }
+
+    function renderZoneClustersOnMap() {
+      if (!mapZonePreview || !zonePreviewLayerGroup || !activeZoneClustersData) return;
+      zonePreviewLayerGroup.clearLayers();
+
+      const zones = activeZoneClustersData.zones || [];
+      const status = document.getElementById('zoneMapStatus');
+      const radius = activeZoneClustersData.radius_m || 1000;
+      if (status) status.innerText = `${zones.length} zonas · Radio ${radius} m`;
+
+      zones.forEach(z => {
+        if (!z.center || z.center.length !== 2) return;
+        const latLng = [z.center[1], z.center[0]];
+        const isExcept = z.is_exception === true;
+        const isConflict = z.is_conflict === true;
+
+        L.circle(latLng, {
+          radius: z.radius_m || radius,
+          color: isExcept ? '#6366f1' : (isConflict ? '#d97706' : '#10b981'),
+          weight: isConflict ? 1.5 : 1,
+          dashArray: '3, 4',
+          fillColor: isExcept ? '#818cf8' : (isConflict ? '#f59e0b' : '#34d399'),
+          fillOpacity: 0.08
+        }).addTo(zonePreviewLayerGroup);
+
+        (z.candidates || []).forEach(c => {
+          if (!c.loc || c.loc.length !== 2) return;
+          const cLatLng = [c.loc[1], c.loc[0]];
+          const isWinner = (c.original_index === z.selected_index);
+
+          const markerColor = isExcept ? '#6366f1' : (isWinner ? '#10b981' : '#f43f5e');
+          const markerRadius = isWinner ? 6 : (isExcept ? 5 : 3.5);
+
+          const cm = L.circleMarker(cLatLng, {
+            radius: markerRadius,
+            fillColor: markerColor,
+            color: '#ffffff',
+            weight: 1.5,
+            opacity: 1,
+            fillOpacity: isWinner || isExcept ? 0.9 : 0.4
+          }).addTo(zonePreviewLayerGroup);
+
+          cm.bindTooltip(`
+            <div class="p-1.5 text-stone-900 text-xs font-sans">
+              <strong class="${isWinner ? 'text-emerald-700' : (isExcept ? 'text-indigo-700' : 'text-stone-500 line-through')}">${c.name}</strong>
+              <div class="text-[10px] text-stone-500">🏢 ${c.establishments || 0} DENUE | ${isWinner ? '★ Ganador' : (isExcept ? 'Excepción' : 'A descartar')}</div>
+            </div>
+          `, { direction: 'top', className: 'poi-custom-tooltip' });
+
+          cm.on('click', () => {
+            onSelectZoneCandidate(z.zone_id, c.original_index);
+            renderZoneClustersUI();
+          });
+        });
+      });
+    }
+
+    function focusZoneOnPreviewMap(zoneId) {
+      if (!mapZonePreview || !activeZoneClustersData) return;
+      const zone = (activeZoneClustersData.zones || []).find(z => z.zone_id === zoneId);
+      if (zone && zone.center && zone.center.length === 2) {
+        mapZonePreview.flyTo([zone.center[1], zone.center[0]], 14, { duration: 0.6 });
+      }
+    }
+
+    function onSelectZoneCandidate(zoneId, originalIndex) {
+      if (!activeZoneClustersData) return;
+      const zone = (activeZoneClustersData.zones || []).find(z => z.zone_id === zoneId);
+      if (zone) {
+        zone.selected_index = originalIndex;
+        updateZoneMetricsUI(activeZoneClustersData);
+        renderZoneClustersOnMap();
+      }
+    }
+
+    function onToggleZoneException(zoneId, isChecked) {
+      if (!activeZoneClustersData) return;
+      const zone = (activeZoneClustersData.zones || []).find(z => z.zone_id === zoneId);
+      if (zone) {
+        zone.is_exception = isChecked;
+        updateZoneMetricsUI(activeZoneClustersData);
+        renderZoneClustersUI();
+        renderZoneClustersOnMap();
+      }
+    }
+
+    function resetAllZonesToSuggested() {
+      if (!activeZoneClustersData) return;
+      (activeZoneClustersData.zones || []).forEach(z => {
+        z.selected_index = z.recommended_index;
+        z.is_exception = false;
+      });
+      updateZoneMetricsUI(activeZoneClustersData);
+      renderZoneClustersUI();
+      renderZoneClustersOnMap();
+      showToast("Se restablecieron todas las zonas a la sugerencia óptima", "info");
+    }
+
+    async function applyZoneThinningSelections() {
+      if (!activeZoneClustersData || !activeZoneClustersData.zones) return;
+      const places = cityData.places || [];
+      const zones = activeZoneClustersData.zones;
+
+      const btn = document.getElementById('btnApplyZoneThinning');
+      if (btn) btn.disabled = true;
+
+      showToast("Aplicando poda espacial y guardando cambios...", "info");
+
+      try {
+        const res = await fetch('/api/toponymy/apply-thinning', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ places: places, zones: zones })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          if (places.length > 0) {
+            placesHistorySnapshot = JSON.parse(JSON.stringify(places));
+            updateUndoButtonUI();
+          }
+
+          cityData.places = data.places || [];
+          selectedPlaceIndices.clear();
+          lastSelectedPlaceIndex = null;
+          renderPlacesList();
+          renderPlacesMarkersOnMap();
+          triggerAutoSave();
+          closeZoneThinningModal();
+          showToast(`¡Poda exitosa! Se conservaron ${data.total_kept} colonias y se podaron ${data.total_pruned}`, "success");
+        } else {
+          showToast(`Error al aplicar poda: ${data.message}`, "error");
+        }
+      } catch (err) {
+        showToast(`Fallo de conexión: ${err.message}`, "error");
+      } finally {
+        if (btn) btn.disabled = false;
       }
     }
 
@@ -7939,7 +9863,8 @@
       if (!mapPoi) return;
 
       mapPoi.on('mousedown', (e) => {
-        if (isBoxSelectActive || e.originalEvent.shiftKey) {
+        const isPlacesTabOpen = document.getElementById('poiTab-places') && !document.getElementById('poiTab-places').classList.contains('hidden');
+        if (isBoxSelectActive || isPlacesBoxSelectActive || (isPlacesTabOpen && e.originalEvent.shiftKey) || e.originalEvent.shiftKey) {
           isMouseDownForBox = true;
           boxStartLatLng = e.latlng;
           mapPoi.dragging.disable();
@@ -7957,26 +9882,70 @@
       mapPoi.on('mousemove', (e) => {
         if (isMouseDownForBox && boxStartLatLng) {
           const bounds = L.latLngBounds(boxStartLatLng, e.latlng);
+          const isPlacesTabOpen = document.getElementById('poiTab-places') && !document.getElementById('poiTab-places').classList.contains('hidden');
+          const isPlacesMode = isPlacesBoxSelectActive || (isPlacesTabOpen && e.originalEvent.shiftKey);
+
           if (!boxSelectionLayer) {
             boxSelectionLayer = L.rectangle(bounds, {
-              color: '#d97706',
+              color: isPlacesMode ? '#6366f1' : '#d97706',
               weight: 2,
               dashArray: '4, 4',
-              fillColor: '#f59e0b',
-              fillOpacity: 0.2
+              fillColor: isPlacesMode ? '#818cf8' : '#f59e0b',
+              fillOpacity: isPlacesMode ? 0.25 : 0.2
             }).addTo(mapPoi);
           } else {
             boxSelectionLayer.setBounds(bounds);
           }
-          runAreaSimulationInWizard('box', bounds);
+          if (!isPlacesMode) {
+            runAreaSimulationInWizard('box', bounds);
+          }
         }
       });
 
       mapPoi.on('mouseup', (e) => {
         if (isMouseDownForBox) {
           isMouseDownForBox = false;
-          if (!isBoxSelectActive && !e.originalEvent.shiftKey) {
+          const isPlacesTabOpen = document.getElementById('poiTab-places') && !document.getElementById('poiTab-places').classList.contains('hidden');
+          const isPlacesMode = isPlacesBoxSelectActive || (isPlacesTabOpen && e.originalEvent.shiftKey);
+
+          if (!isBoxSelectActive && !isPlacesBoxSelectActive && !e.originalEvent.shiftKey) {
             mapPoi.dragging.enable();
+          }
+
+          if (isPlacesMode && boxStartLatLng) {
+            const bounds = L.latLngBounds(boxStartLatLng, e.latlng);
+            let newlySelected = 0;
+            const places = cityData.places || [];
+
+            places.forEach((pl, idx) => {
+              if (pl.loc && pl.loc.length >= 2) {
+                const latLng = L.latLng(pl.loc[1], pl.loc[0]);
+                if (bounds.contains(latLng)) {
+                  selectedPlaceIndices.add(idx);
+                  newlySelected++;
+                }
+              }
+            });
+
+            renderPlacesList();
+            renderPlacesMarkersOnMap();
+
+            if (newlySelected > 0) {
+              showToast(`Se seleccionaron ${newlySelected} colonias dentro del cuadro`, "info");
+            } else {
+              showToast("No se encontraron colonias dentro del cuadro", "info");
+            }
+
+            setTimeout(() => {
+              if (boxSelectionLayer && mapPoi) {
+                mapPoi.removeLayer(boxSelectionLayer);
+                boxSelectionLayer = null;
+              }
+            }, 400);
+
+            if (isPlacesBoxSelectActive) {
+              toggleBoxSelectPlacesMode();
+            }
           }
         }
       });
@@ -8557,6 +10526,52 @@
         });
 
         document.getElementById('metricTotalPea').innerText = totalResidents.toLocaleString();
+
+        // Renderizar Auditoría de Distancias de Viaje (Trip Length Distribution - TLD)
+        const dDist = data.distance_distribution;
+        const panelTld = document.getElementById('panelDistanceDistribution');
+        if (dDist && dDist.total_commuters > 0) {
+          if (panelTld) panelTld.classList.remove('hidden');
+          const medEl = document.getElementById('metricTldMedian');
+          const meanEl = document.getElementById('metricTldMean');
+          const p25El = document.getElementById('metricTldP25');
+          const p75El = document.getElementById('metricTldP75');
+          const p95El = document.getElementById('metricTldP95');
+          const badgeEl = document.getElementById('badgeTldProfile');
+          const bContainer = document.getElementById('tldBracketsContainer');
+
+          if (medEl) medEl.innerText = `${dDist.median_km} km`;
+          if (meanEl) meanEl.innerText = `${dDist.mean_km} km`;
+          if (p25El) p25El.innerText = `${dDist.p25_km} km`;
+          if (p75El) p75El.innerText = `${dDist.p75_km} km`;
+          if (p95El) p95El.innerText = `${dDist.p95_km} km`;
+          if (badgeEl) {
+            badgeEl.innerText = (dDist.profile || 'intermedia').toUpperCase();
+            if (dDist.profile === 'compacta') {
+              badgeEl.className = "text-[9px] px-1.5 py-0.5 bg-blue-900/60 border border-blue-500/40 text-blue-200 rounded font-semibold";
+            } else if (dDist.profile === 'megaciudad') {
+              badgeEl.className = "text-[9px] px-1.5 py-0.5 bg-purple-900/60 border border-purple-500/40 text-purple-200 rounded font-semibold";
+            } else {
+              badgeEl.className = "text-[9px] px-1.5 py-0.5 bg-cyan-900/60 border border-cyan-500/40 text-cyan-200 rounded font-semibold";
+            }
+          }
+
+          if (bContainer && Array.isArray(dDist.brackets)) {
+            bContainer.innerHTML = dDist.brackets.map(b => `
+              <div class="space-y-0.5">
+                <div class="flex justify-between items-center text-[10px]">
+                  <span class="text-gray-300">${b.label} <span class="text-gray-500 text-[9px]">(${b.category})</span></span>
+                  <span class="font-mono text-cyan-300 font-bold">${b.percentage.toFixed(1)}% <span class="text-gray-500 text-[9px]">(${b.commuters.toLocaleString()})</span></span>
+                </div>
+                <div class="w-full bg-stone-800 rounded-full h-1.5 overflow-hidden">
+                  <div class="bg-gradient-to-r from-cyan-500 to-metro-pink h-1.5 rounded-full" style="width: ${Math.min(100, Math.max(0, b.percentage))}%"></div>
+                </div>
+              </div>
+            `).join('');
+          }
+        } else {
+          if (panelTld) panelTld.classList.add('hidden');
+        }
 
         renderIsolatedZonesOnDemandMap();
         renderAffluenceZonesOnDemandMap();

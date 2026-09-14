@@ -7,7 +7,9 @@ city:
   name: "Nombre Completo de la Ciudad" # Nombre oficial de la zona metropolitana
   description: "Descripción breve"    # Menor a 80 caracteres para el juego
   bbox: [-87.00, 21.00, -86.70, 21.30] # [min_lon, min_lat, max_lon, max_lat]
+  bbox_locked: false                  # true para bloquear la BBOX contra arrastres accidentales
   creator: "TuNombre"                 # Nombre o alias del creador
+
   grid_size: 0.0025                   # Tamaño de celda (~250m: 0.0025, ~180m: 0.0018, ~380m: 0.0035)
   min_residents: 10                   # Mínimo de habitantes para activar nodo de origen
   min_jobs: 3                         # Mínimo de empleos para activar nodo de destino

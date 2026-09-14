@@ -187,6 +187,11 @@ def load_city_data(rel_or_abs_path: str) -> Dict[str, Any]:
         city["lod_peripheral_labels"] = "none"
     if "lod_peripheral_buildings" not in city:
         city["lod_peripheral_buildings"] = "none"
+    if "bbox_locked" not in city:
+        city["bbox_locked"] = False
+    else:
+        city["bbox_locked"] = bool(city["bbox_locked"])
+
 
     if "min_pop_size" not in macro:
 
@@ -277,7 +282,9 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         f'  building_simplification: {float(city_cfg.get("building_simplification", 0.2))}',
         f'  include_ocean: {"true" if city_cfg.get("include_ocean") else "false"}',
         f'  urban_parks_only: {"true" if city_cfg.get("urban_parks_only") else "false"}',
+        f'  bbox_locked: {"true" if city_cfg.get("bbox_locked") else "false"}',
     ])
+
     if city_cfg.get("initial_center") and isinstance(city_cfg.get("initial_center"), (list, tuple)) and len(city_cfg["initial_center"]) == 2:
         try:
             ic = [round(float(city_cfg["initial_center"][0]), 5), round(float(city_cfg["initial_center"][1]), 5)]
@@ -545,8 +552,10 @@ def create_new_project(name: str, code: str, creator: str = "Creador", data_dir:
             "lod_peripheral_roads": "standard",
             "include_pedestrian_paths": False,
             "lod_peripheral_labels": "none",
-            "lod_peripheral_buildings": "none"
+            "lod_peripheral_buildings": "none",
+            "bbox_locked": False
         },
+
         "data_dir": resolved_data_dir,
         "data_exclusions": [],
         "macroeconomics": {
@@ -1190,12 +1199,18 @@ def detect_macro_parameters(city_file: str) -> Dict[str, Any]:
         source_msg = "Valores estándar de referencia base (sin archivos locales)"
         method = "default"
 
+    from sb_mexico.gravity import recommend_gravity_beta
+    bbox_cand = cdata.get("city", {}).get("bbox")
+    beta_rec = recommend_gravity_beta(bbox=bbox_cand)
+    rec_beta = beta_rec.get("recommended_beta", 0.120)
+
     return {
         "status": "ok",
         "source": source_msg,
         "method": method,
         "cve_ent": cve_ent,
         "has_enoe_file": bool(enoe_files),
+        "beta_recommendation": beta_rec,
         "parameters": {
             "tasa_pea": round(float(tasa_pea), 4),
             "til_1_state": round(float(til_1), 4),
@@ -1716,6 +1731,16 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 self.serve_json({"suggestions": suggs})
             except Exception as e:
                 self.serve_json({"suggestions": [], "error": str(e)})
+        elif path == "/api/toponymy/scan":
+            try:
+                city_file = query.get("file", [""])[0]
+                min_count = int(query.get("min_count", ["8"])[0])
+                from sb_mexico.toponymy import scan_city_settlements_catalog
+                resolved_f = _resolve_city_path(city_file) if city_file else ""
+                catalog = scan_city_settlements_catalog(resolved_f, min_count=min_count)
+                self.serve_json({"status": "ok", "catalog": catalog})
+            except Exception as e:
+                self.serve_json({"status": "error", "message": str(e), "catalog": {"total": 0, "places": []}})
         elif path == "/api/demand-preview":
             city_file = query.get("file", [""])[0]
             city_base = os.path.splitext(os.path.basename(city_file))[0].lower() if city_file else ""
@@ -1726,11 +1751,15 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 try:
                     with open(target_path, "r", encoding="utf-8") as f:
                         demand_json = json.load(f)
+                    from sb_mexico.gravity import calculate_commute_distance_distribution
+                    pops = demand_json.get("pops", [])
+                    points = demand_json.get("points", [])
+                    demand_json["distance_distribution"] = calculate_commute_distance_distribution(pops, points)
                     self.serve_json(demand_json)
                 except Exception as e:
                     self.serve_error(f"Error al leer demand_data.json de {city_base}: {e}", 500)
             else:
-                self.serve_json({"points": [], "metadata": {"status": "not_compiled", "city": city_base}})
+                self.serve_json({"points": [], "pops": [], "distance_distribution": None, "metadata": {"status": "not_compiled", "city": city_base}})
         elif path == "/api/build/stream":
             self.serve_sse_stream()
         elif path == "/api/build/status":
@@ -1800,6 +1829,72 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
 
                 saved_path = save_full_city_data(city_file, req_data)
                 self.serve_json({"status": "ok", "saved_path": saved_path})
+            except Exception as e:
+                self.serve_error(str(e), 500)
+
+        elif path == "/api/toponymy/homogenize":
+            try:
+                content_len = int(self.headers.get('Content-Length', 0))
+                post_body = self.rfile.read(content_len)
+                req_data = json.loads(post_body.decode('utf-8'))
+
+                places = req_data.get("places", [])
+                options = req_data.get("options", {})
+
+                from sb_mexico.toponymy_homogenizer import ToponymyHomogenizer
+                res = ToponymyHomogenizer.apply_pipeline(places, options)
+                self.serve_json({"status": "ok", "result": res})
+            except Exception as e:
+                self.serve_error(str(e), 500)
+
+        elif path == "/api/toponymy/deduplicate":
+            try:
+                content_len = int(self.headers.get('Content-Length', 0))
+                post_body = self.rfile.read(content_len)
+                req_data = json.loads(post_body.decode('utf-8'))
+
+                places = req_data.get("places", [])
+                dist_m = float(req_data.get("distance_m", 500.0))
+
+                from sb_mexico.toponymy_homogenizer import ToponymyHomogenizer
+                kept, removed = ToponymyHomogenizer.spatial_deduplicate(places, distance_threshold_m=dist_m)
+                self.serve_json({
+                    "status": "ok",
+                    "kept": kept,
+                    "removed": removed,
+                    "removed_count": len(removed)
+                })
+            except Exception as e:
+                self.serve_error(str(e), 500)
+
+        elif path == "/api/toponymy/cluster-zones":
+            try:
+                content_len = int(self.headers.get('Content-Length', 0))
+                post_body = self.rfile.read(content_len)
+                req_data = json.loads(post_body.decode('utf-8'))
+
+                places = req_data.get("places", [])
+                radius_m = float(req_data.get("radius_m", 1000.0))
+                heuristic = str(req_data.get("heuristic", "density"))
+
+                from sb_mexico.toponymy_homogenizer import cluster_places_by_proximity
+                result = cluster_places_by_proximity(places, radius_m=radius_m, rank_heuristic=heuristic)
+                self.serve_json(result)
+            except Exception as e:
+                self.serve_error(str(e), 500)
+
+        elif path == "/api/toponymy/apply-thinning":
+            try:
+                content_len = int(self.headers.get('Content-Length', 0))
+                post_body = self.rfile.read(content_len)
+                req_data = json.loads(post_body.decode('utf-8'))
+
+                places = req_data.get("places", [])
+                zones = req_data.get("zones", [])
+
+                from sb_mexico.toponymy_homogenizer import apply_zone_thinning_selection
+                result = apply_zone_thinning_selection(places, zones)
+                self.serve_json(result)
             except Exception as e:
                 self.serve_error(str(e), 500)
 
