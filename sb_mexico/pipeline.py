@@ -38,7 +38,9 @@ from sb_mexico.gravity import (
     consolidate_small_pops,
     cluster_demand_points,
     sync_demand_points_and_pops,
-    apply_modal_competitiveness_experiment
+    apply_modal_competitiveness_experiment,
+    calculate_commute_distance_distribution,
+    recommend_gravity_beta
 )
 from sb_mexico.osrm import (
     is_docker_available,
@@ -677,6 +679,41 @@ def execute_pipeline(
             f"Velocidad Tráfico: [bold]{v_speed} km/h[/bold] | "
             f"Tasa Motorización: [bold]{int(round(float(p_motor)*100))}%[/bold][/magenta]"
         )
+
+    # =========================================================================
+    # 5.2. AUDITORÍA DE DISTRIBUCIÓN DE DISTANCIAS DE VIAJE (COLIN MILLER STANDARD)
+    # =========================================================================
+    distrib = calculate_commute_distance_distribution(pops, demand_points)
+    tabla_tld = Table(
+        title="Auditoría de Curva de Distancias de Viaje (Trip Length Distribution - Colin Miller Standard)",
+        header_style="bold cyan"
+    )
+    tabla_tld.add_column("Estrato de Movilidad", style="white")
+    tabla_tld.add_column("Rango", style="cyan")
+    tabla_tld.add_column("Viajeros", justify="right", style="green")
+    tabla_tld.add_column("Participación", justify="right", style="bold yellow")
+    tabla_tld.add_column("Cohortes", justify="right", style="dim white")
+    tabla_tld.add_column("Barra de Distribución", style="magenta")
+
+    for b in distrib.get("brackets", []):
+        pct = b["percentage"]
+        bar_len = int(round(pct / 4.0))
+        bar_str = "█" * bar_len + "░" * max(0, 25 - bar_len)
+        tabla_tld.add_row(
+            b["category"],
+            b["label"],
+            f"{b['commuters']:,}",
+            f"{pct:.1f}%",
+            f"{b['pops_count']:,}",
+            bar_str
+        )
+    console.print(tabla_tld)
+    console.print(
+        f"   • Mediana Ponderada (P50): [bold green]{distrib['median_km']:.1f} km[/bold green] "
+        f"([dim]P25: {distrib['p25_km']:.1f} km | P75: {distrib['p75_km']:.1f} km | P95: {distrib['p95_km']:.1f} km[/dim])\n"
+        f"   • Promedio Ponderado: [cyan]{distrib['mean_km']:.1f} km[/cyan] | Tiempo Medio Manejo: [cyan]{distrib['mean_minutes']:.1f} min[/cyan]\n"
+        f"   • Perfil Metropolitano: [bold]{distrib['profile_label']}[/bold]"
+    )
 
     # =========================================================================
     # 6. SANITIZACIÓN NATIVA CON DEPOT Y EXPORTACIÓN

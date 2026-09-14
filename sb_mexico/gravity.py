@@ -1692,3 +1692,256 @@ def apply_modal_competitiveness_experiment(
 
     return pops
 
+
+def calculate_commute_distance_distribution(
+    pops: List[Dict[str, Any]],
+    demand_points: Optional[List[Dict[str, Any]]] = None
+) -> Dict[str, Any]:
+    """
+    Calcula la Distribución de Longitud de Viajes (Trip Length Distribution - TLD)
+    de las cohortes de viajeros, ponderada por volumen de pasajeros (size).
+    Sigue el estándar oficial de calibración de Subway Builder (Colin Miller).
+    """
+    if not pops:
+        return {
+            "total_pops": 0,
+            "total_commuters": 0,
+            "mean_km": 0.0,
+            "median_km": 0.0,
+            "p10_km": 0.0,
+            "p25_km": 0.0,
+            "p75_km": 0.0,
+            "p90_km": 0.0,
+            "p95_km": 0.0,
+            "min_km": 0.0,
+            "max_km": 0.0,
+            "mean_minutes": 0.0,
+            "median_minutes": 0.0,
+            "profile": "sin_datos",
+            "profile_label": "Sin datos de demanda",
+            "brackets": []
+        }
+
+    distances_km = []
+    weights = []
+    durations_min = []
+
+    pt_coords = {}
+    if demand_points:
+        for pt in demand_points:
+            if "id" in pt and "location" in pt:
+                pt_coords[pt["id"]] = pt["location"]
+
+    for p in pops:
+        w = max(1, int(p.get("size", 1)))
+        d_m = float(p.get("drivingDistance", 0))
+        sec = float(p.get("drivingSeconds", 0))
+
+        if d_m <= 0 and pt_coords:
+            r_id = p.get("residenceId")
+            j_id = p.get("jobId")
+            if r_id in pt_coords and j_id in pt_coords:
+                r_loc = pt_coords[r_id]
+                j_loc = pt_coords[j_id]
+                rlon, rlat = np.radians(r_loc[0]), np.radians(r_loc[1])
+                jlon, jlat = np.radians(j_loc[0]), np.radians(j_loc[1])
+                dlat = jlat - rlat
+                dlon = jlon - rlon
+                a = np.sin(dlat / 2.0)**2 + np.cos(rlat) * np.cos(jlat) * np.sin(dlon / 2.0)**2
+                euclid_km = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
+                d_m = euclid_km * 1000.0 * 1.3
+
+        d_km = max(0.0, d_m / 1000.0)
+        t_min = max(0.0, sec / 60.0)
+
+        distances_km.append(d_km)
+        weights.append(w)
+        durations_min.append(t_min)
+
+    d_arr = np.array(distances_km, dtype=np.float64)
+    w_arr = np.array(weights, dtype=np.float64)
+    t_arr = np.array(durations_min, dtype=np.float64)
+
+    total_commuters = int(w_arr.sum())
+    total_pops = len(pops)
+
+    if total_commuters <= 0:
+        return {
+            "total_pops": total_pops,
+            "total_commuters": 0,
+            "mean_km": 0.0,
+            "median_km": 0.0,
+            "p10_km": 0.0,
+            "p25_km": 0.0,
+            "p75_km": 0.0,
+            "p90_km": 0.0,
+            "p95_km": 0.0,
+            "min_km": 0.0,
+            "max_km": 0.0,
+            "mean_minutes": 0.0,
+            "median_minutes": 0.0,
+            "profile": "sin_datos",
+            "profile_label": "Sin masa activa",
+            "brackets": []
+        }
+
+    mean_km = float((d_arr * w_arr).sum() / total_commuters)
+    mean_min = float((t_arr * w_arr).sum() / total_commuters)
+
+    sorter = np.argsort(d_arr)
+    d_sorted = d_arr[sorter]
+    w_sorted = w_arr[sorter]
+    cum_w = np.cumsum(w_sorted)
+
+    def _weighted_pct(pct: float) -> float:
+        cutoff = (pct / 100.0) * total_commuters
+        idx = np.searchsorted(cum_w, cutoff)
+        idx = min(idx, len(d_sorted) - 1)
+        return float(d_sorted[idx])
+
+    p10_km = _weighted_pct(10.0)
+    p25_km = _weighted_pct(25.0)
+    median_km = _weighted_pct(50.0)
+    p75_km = _weighted_pct(75.0)
+    p90_km = _weighted_pct(90.0)
+    p95_km = _weighted_pct(95.0)
+    min_km = float(d_arr.min())
+    max_km = float(d_arr.max())
+
+    t_sorter = np.argsort(t_arr)
+    t_sorted = t_arr[t_sorter]
+    tw_sorted = w_arr[t_sorter]
+    t_cum_w = np.cumsum(tw_sorted)
+    t_cutoff = 0.5 * total_commuters
+    t_idx = min(np.searchsorted(t_cum_w, t_cutoff), len(t_sorted) - 1)
+    median_min = float(t_sorted[t_idx])
+
+    bracket_defs = [
+        {"id": "micro", "label": "< 5 km", "min": 0.0, "max": 5.0, "category": "Barrial / Micromovilidad"},
+        {"id": "short", "label": "5 – 10 km", "min": 5.0, "max": 10.0, "category": "Urbano Corto"},
+        {"id": "medium", "label": "10 – 15 km", "min": 10.0, "max": 15.0, "category": "Metropolitano Medio"},
+        {"id": "suburban", "label": "15 – 25 km", "min": 15.0, "max": 25.0, "category": "Conurbación Suburbana"},
+        {"id": "regional", "label": "> 25 km", "min": 25.0, "max": 1e9, "category": "Metropolitano Largo / Regional"},
+    ]
+
+    brackets = []
+    for b in bracket_defs:
+        mask = (d_arr >= b["min"]) & (d_arr < b["max"])
+        c_count = int(w_arr[mask].sum())
+        p_count = int(mask.sum())
+        pct = (c_count / total_commuters) * 100.0 if total_commuters > 0 else 0.0
+        brackets.append({
+            "id": b["id"],
+            "label": b["label"],
+            "category": b["category"],
+            "min_km": b["min"],
+            "max_km": b["max"] if b["max"] < 1e6 else None,
+            "commuters": c_count,
+            "pops_count": p_count,
+            "percentage": round(pct, 2)
+        })
+
+    if median_km < 8.0:
+        profile = "compacta"
+        profile_label = "Ciudad Compacta (Alta densidad de viajes cortos < 8 km)"
+    elif median_km <= 16.0:
+        profile = "intermedia"
+        profile_label = "Metrópoli Intermedia (Equilibrio de trayectos medios 8–16 km)"
+    else:
+        profile = "megaciudad"
+        profile_label = "Megaciudad Extendida (Predominio de trayectos largos > 16 km)"
+
+    return {
+        "total_pops": total_pops,
+        "total_commuters": total_commuters,
+        "mean_km": round(mean_km, 2),
+        "median_km": round(median_km, 2),
+        "p10_km": round(p10_km, 2),
+        "p25_km": round(p25_km, 2),
+        "p75_km": round(p75_km, 2),
+        "p90_km": round(p90_km, 2),
+        "p95_km": round(p95_km, 2),
+        "min_km": round(min_km, 2),
+        "max_km": round(max_km, 2),
+        "mean_minutes": round(mean_min, 1),
+        "median_minutes": round(median_min, 1),
+        "profile": profile,
+        "profile_label": profile_label,
+        "brackets": brackets
+    }
+
+
+def recommend_gravity_beta(
+    bbox: Optional[List[float]] = None,
+    city_archetype: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Recomienda el coeficiente de fricción espacial óptimo (beta) según la extensión
+    geográfica (diagonal del BBOX) o el arquetipo urbano de la metrópoli.
+    Emula la calibración empírica oficial de Colin Miller en Subway Builder.
+    """
+    arch = str(city_archetype or "").strip().lower()
+
+    if arch in ["compacta", "compact", "pequeña"]:
+        return {
+            "archetype": "compacta",
+            "label": "Ciudad Compacta",
+            "recommended_beta": 0.150,
+            "expected_median_km": "6 – 9 km",
+            "rationale": "Metrópoli concentrada o costera. Fricción alta para evitar dispersión ficticia hacia la periferia rural."
+        }
+    elif arch in ["megaciudad", "metropolis", "megacity", "extendida"]:
+        return {
+            "archetype": "megaciudad",
+            "label": "Megaciudad Extendida",
+            "recommended_beta": 0.085,
+            "expected_median_km": "18 – 25 km",
+            "rationale": "Gran valle conurbado con múltiples municipios. Fricción reducida para permitir flujos metropolitanos de largo alcance."
+        }
+    elif arch in ["intermedia", "intermediate", "media"]:
+        return {
+            "archetype": "intermedia",
+            "label": "Metrópoli Intermedia",
+            "recommended_beta": 0.120,
+            "expected_median_km": "10 – 15 km",
+            "rationale": "Escala metropolitana estándar con balance entre centralidad y expansión suburbana."
+        }
+
+    diag_km = 40.0
+    if bbox and len(bbox) == 4:
+        min_lon, min_lat, max_lon, max_lat = [float(x) for x in bbox]
+        rlat1, rlon1 = np.radians(min_lat), np.radians(min_lon)
+        rlat2, rlon2 = np.radians(max_lat), np.radians(max_lon)
+        dlat = rlat2 - rlat1
+        dlon = rlon2 - rlon1
+        a = np.sin(dlat / 2.0)**2 + np.cos(rlat1) * np.cos(rlat2) * np.sin(dlon / 2.0)**2
+        diag_km = float(6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0)))
+
+    if diag_km < 28.0:
+        return {
+            "archetype": "compacta",
+            "label": "Ciudad Compacta",
+            "diagonal_km": round(diag_km, 1),
+            "recommended_beta": 0.150,
+            "expected_median_km": "6 – 9 km",
+            "rationale": f"BBOX diagonal de {diag_km:.1f} km (< 28 km). Perfil compacto detectado."
+        }
+    elif diag_km > 65.0:
+        return {
+            "archetype": "megaciudad",
+            "label": "Megaciudad Extendida",
+            "diagonal_km": round(diag_km, 1),
+            "recommended_beta": 0.085,
+            "expected_median_km": "18 – 25 km",
+            "rationale": f"BBOX diagonal de {diag_km:.1f} km (> 65 km). Conurbación masiva detectada."
+        }
+    else:
+        return {
+            "archetype": "intermedia",
+            "label": "Metrópoli Intermedia",
+            "diagonal_km": round(diag_km, 1),
+            "recommended_beta": 0.120,
+            "expected_median_km": "10 – 15 km",
+            "rationale": f"BBOX diagonal de {diag_km:.1f} km (28–65 km). Escala metropolitana típica."
+        }
+
