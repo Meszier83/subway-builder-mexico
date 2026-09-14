@@ -9,9 +9,10 @@ y extraer sugerencias deduplicadas desde microdatos del DENUE.
 import os
 import re
 import math
+import json
 import xml.sax.saxutils as saxutils
 import pandas as pd
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Set, Any
 
 
 def format_clean_place_name(nomb_raw: str, tipo_raw: str = "") -> Tuple[str, str]:
@@ -168,11 +169,17 @@ def extract_settlement_suggestions(
         tipo_mode = str(group['tipo_clean'].mode().iloc[0]) if not group['tipo_clean'].empty else 'COLONIA'
         clean_name, place_type = format_clean_place_name(str(raw_name), tipo_mode)
 
-        # Clave canónica de deduplicación (ej. solo el número para supermanzanas o nombre sin signos)
-        norm_key = re.sub(r'[^a-zA-Z0-9]', '', clean_name.lower())
-        num_match = re.findall(r'\d+', clean_name)
-        if num_match:
-            norm_key = f"num_{num_match[0]}"
+        # Clave canónica de deduplicación: si es Supermanzana/Región/número puro, aislar el número.
+        # Si es fraccionamiento o colonia general, usar el nombre completo alfanumérico normalizado.
+        clean_upper = clean_name.upper()
+        if any(w in clean_upper for w in ["SUPERMANZANA", "SM", "REGION", "REG"]) or clean_name.isdigit():
+            num_match = re.findall(r'\d+', clean_name)
+            if num_match:
+                norm_key = f"sm_{num_match[0]}"
+            else:
+                norm_key = re.sub(r'[^a-zA-Z0-9]', '', clean_name.lower())
+        else:
+            norm_key = re.sub(r'[^a-zA-Z0-9]', '', clean_name.lower())
 
         if norm_key in grouped_data:
             # Si ya existe, nos quedamos con el que tenga mayor cantidad de comercios
@@ -198,3 +205,247 @@ def extract_settlement_suggestions(
     suggestions = list(grouped_data.values())
     suggestions.sort(key=lambda x: int(x['establishments']), reverse=True)
     return suggestions
+
+
+def generate_denue_neighborhoods_geojson(
+    denue_path: str,
+    bbox: List[float],
+    output_geojson: str,
+    urban_core_geojson: Optional[str] = None,
+    min_count: int = 15,
+    exclude_existing_names: Optional[Set[str]] = None
+) -> Optional[str]:
+    """
+    Extrae asentamientos humanos de alta densidad desde el DENUE del INEGI y los exporta
+    como un archivo GeoJSON de puntos ('neighborhood_labels') listo para Tippecanoe / MapGen.
+
+    Aplica:
+    1. Filtro espacial por BBOX y opcionalmente por urban_core_geojson.
+    2. Mediana de coordenadas GPS para evitar distorsiones por outliers censales.
+    3. Normalizacion de nombres al estandar mexicano (ej. 'Supermanzana 228', 'Fracc. Paseos del Mar').
+    4. Deduplicacion con clave canonica y exclusion de toponimia ya presente en OSM.
+    """
+    suggestions = extract_settlement_suggestions(
+        denue_path=denue_path,
+        bbox=bbox,
+        min_count=min_count
+    )
+    if not suggestions:
+        return None
+
+    core_geom = None
+    if urban_core_geojson and os.path.exists(urban_core_geojson):
+        try:
+            from shapely.geometry import shape, Point
+            import shapely
+            with open(urban_core_geojson, "r", encoding="utf-8") as cf:
+                cdata = json.load(cf)
+            if cdata.get("type") == "FeatureCollection" and cdata.get("features"):
+                core_geoms = [shape(f["geometry"]) for f in cdata["features"] if f.get("geometry")]
+                core_geom = shapely.unary_union(core_geoms) if core_geoms else None
+            elif cdata.get("type") == "Feature" and cdata.get("geometry"):
+                core_geom = shape(cdata["geometry"])
+            elif cdata.get("type") in ("Polygon", "MultiPolygon"):
+                core_geom = shape(cdata)
+            if core_geom and not core_geom.is_valid:
+                core_geom = core_geom.buffer(0)
+        except Exception:
+            core_geom = None
+
+    exclude_set = {n.strip().lower() for n in exclude_existing_names} if exclude_existing_names else set()
+
+    features = []
+    seen_names = set()
+
+    for item in suggestions:
+        name = item.get("name", "").strip()
+        if not name:
+            continue
+
+        norm_name = name.lower()
+        if norm_name in exclude_set or norm_name in seen_names:
+            continue
+
+        loc = item.get("loc")
+        if not loc or len(loc) != 2:
+            continue
+
+        lon, lat = float(loc[0]), float(loc[1])
+
+        # Si hay nucleo urbano definido, descartar asentamientos rurales remotos
+        if core_geom is not None:
+            from shapely.geometry import Point
+            pt = Point(lon, lat)
+            if not core_geom.intersects(pt):
+                continue
+
+        seen_names.add(norm_name)
+        features.append({
+            "type": "Feature",
+            "properties": {
+                "name": name,
+                "place": item.get("type", "neighbourhood"),
+                "establishments": item.get("establishments", 0),
+                "source": "INEGI_DENUE"
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [round(lon, 6), round(lat, 6)]
+            }
+        })
+
+    if not features:
+        return None
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_geojson)), exist_ok=True)
+    geojson_doc = {
+        "type": "FeatureCollection",
+        "features": features
+    }
+
+    with open(output_geojson, "w", encoding="utf-8") as gf:
+        json.dump(geojson_doc, gf, ensure_ascii=False, indent=2)
+
+    return output_geojson
+
+
+def scan_city_settlements_catalog(
+    city_file: str,
+    min_count: int = 8
+) -> Dict[str, Any]:
+    """
+    Escanea y cataloga todos los asentamientos disponibles para una ciudad desde:
+    1. DENUE del INEGI (agrupados por asentamiento con mediana espacial).
+    2. Manifiesto toponímico dist/<city>/toponymy_manifest.json (si existe).
+    3. Archivo de configuración YAML de la ciudad (places existentes).
+
+    Devuelve un catálogo completo con diagnóstico taxonómico de prefijos.
+    """
+    from sb_mexico.toponymy_homogenizer import ToponymyAnalyzer
+
+    # Cargar archivo de configuración YAML de la ciudad
+    cdata = {}
+    if os.path.exists(city_file):
+        try:
+            import yaml
+            with open(city_file, "r", encoding="utf-8") as f:
+                cdata = yaml.safe_load(f) or {}
+        except Exception:
+            cdata = {}
+
+    city_cfg = cdata.get("city", {})
+    city_name = city_cfg.get("name", os.path.splitext(os.path.basename(city_file))[0])
+    city_code = str(city_cfg.get("code", "")).lower()
+    city_base = os.path.splitext(os.path.basename(city_file))[0].lower()
+    bbox = city_cfg.get("bbox")
+
+    discovered: List[Dict[str, Any]] = []
+    seen_keys: Set[str] = set()
+
+    # 1. Incorporar places ya curados en el YAML
+    existing_places = cdata.get("places", [])
+    if isinstance(existing_places, list):
+        for ep in existing_places:
+            name = ep.get("name", "").strip()
+            loc = ep.get("loc", [0.0, 0.0])
+            if name and len(loc) == 2:
+                norm_k = re.sub(r'[^a-zA-Z0-9]', '', name.lower())
+                seen_keys.add(norm_k)
+                discovered.append({
+                    "name": name,
+                    "loc": [float(loc[0]), float(loc[1])],
+                    "type": ep.get("type", "suburb"),
+                    "source": "YAML_CURATED",
+                    "establishments": 0
+                })
+
+    # 2. Revisar manifiesto toponímico en dist/<city>/toponymy_manifest.json
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    manifest_candidates = [
+        os.path.join(root_dir, "dist", city_base, "toponymy_manifest.json"),
+        os.path.join(root_dir, "dist", city_code, "toponymy_manifest.json")
+    ]
+    for mf_path in manifest_candidates:
+        if os.path.exists(mf_path):
+            try:
+                with open(mf_path, "r", encoding="utf-8") as mff:
+                    mf = json.load(mff)
+                # Nodos OSM
+                for n in mf.get("osm_nodes", []):
+                    nm = n.get("name", "").strip()
+                    lon = float(n.get("lon", 0.0))
+                    lat = float(n.get("lat", 0.0))
+                    norm_k = re.sub(r'[^a-zA-Z0-9]', '', nm.lower())
+                    if nm and norm_k not in seen_keys:
+                        seen_keys.add(norm_k)
+                        discovered.append({
+                            "name": nm,
+                            "loc": [round(lon, 5), round(lat, 5)],
+                            "type": n.get("place", "suburb"),
+                            "source": "OSM_NODE",
+                            "establishments": 0
+                        })
+                # Polígonos OSM (centroides)
+                for p in mf.get("osm_polygons", []):
+                    nm = p.get("name", "").strip()
+                    lon = float(p.get("lon", 0.0))
+                    lat = float(p.get("lat", 0.0))
+                    norm_k = re.sub(r'[^a-zA-Z0-9]', '', nm.lower())
+                    if nm and norm_k not in seen_keys:
+                        seen_keys.add(norm_k)
+                        discovered.append({
+                            "name": nm,
+                            "loc": [round(lon, 5), round(lat, 5)],
+                            "type": p.get("place", "suburb"),
+                            "source": "OSM_POLYGON",
+                            "establishments": 0
+                        })
+            except Exception:
+                pass
+            break
+
+    # 3. Extraer desde DENUE si existe archivo CSV
+    denue_candidates = [
+        os.path.join(root_dir, "data", city_base),
+        os.path.join(root_dir, "data", city_code),
+        os.path.join(root_dir, "data")
+    ]
+    denue_file_found = None
+    for d_dir in denue_candidates:
+        if os.path.isdir(d_dir):
+            for fname in os.listdir(d_dir):
+                if fname.lower().startswith("denue") and fname.lower().endswith(".csv"):
+                    denue_file_found = os.path.join(d_dir, fname)
+                    break
+        if denue_file_found:
+            break
+
+    if denue_file_found and bbox and len(bbox) == 4:
+        suggs = extract_settlement_suggestions(denue_file_found, bbox, min_count=min_count)
+        for s in suggs:
+            nm = s.get("name", "").strip()
+            loc = s.get("loc", [0.0, 0.0])
+            norm_k = re.sub(r'[^a-zA-Z0-9]', '', nm.lower())
+            if nm and norm_k not in seen_keys:
+                seen_keys.add(norm_k)
+                discovered.append({
+                    "name": nm,
+                    "loc": [float(loc[0]), float(loc[1])],
+                    "type": s.get("type", "neighbourhood"),
+                    "source": "INEGI_DENUE",
+                    "establishments": int(s.get("establishments", 0))
+                })
+
+    # Diagnóstico taxonómico
+    diagnosis = ToponymyAnalyzer.analyze_collection(discovered)
+
+    return {
+        "city": city_name,
+        "city_file": city_file,
+        "bbox": bbox,
+        "total": len(discovered),
+        "places": discovered,
+        "diagnosis": diagnosis
+    }
+
+
