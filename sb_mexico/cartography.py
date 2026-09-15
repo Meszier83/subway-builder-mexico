@@ -243,7 +243,9 @@ def build_city_map_wsl(
     include_pedestrian_paths: bool = False,
     lod_peripheral_labels: str = "none",
     lod_peripheral_buildings: str = "none",
-    denue_csv: Optional[str] = None
+    denue_csv: Optional[str] = None,
+    places: Optional[List[Dict]] = None,
+    curated_places_geojson: Optional[str] = None
 ) -> Dict[str, str]:
     """
     Ejecuta la compilación cartográfica dentro de WSL Ubuntu vía subprocess con streaming en vivo.
@@ -274,6 +276,40 @@ def build_city_map_wsl(
     if lod_peripheral_buildings:
         wsl_cmd.extend(["--lod-peripheral-buildings", lod_peripheral_buildings])
 
+    # Exportar toponimia curada desde el Wizard a GeoJSON para su inyección en WSL
+    curated_path = curated_places_geojson
+    if not curated_path and places:
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+            curated_path = os.path.join(output_dir, "curated_places.geojson")
+            c_features = []
+            for p in places:
+                p_name = str(p.get("name", "")).strip()
+                p_loc = p.get("loc", [0.0, 0.0])
+                if not p_name or len(p_loc) != 2:
+                    continue
+                c_features.append({
+                    "type": "Feature",
+                    "properties": {
+                        "name": p_name,
+                        "place": str(p.get("type", "suburb")).lower(),
+                        "curated": True
+                    },
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [float(p_loc[0]), float(p_loc[1])]
+                    }
+                })
+            with open(curated_path, "w", encoding="utf-8") as cf:
+                json.dump({"type": "FeatureCollection", "features": c_features}, cf, ensure_ascii=False, indent=2)
+            print(f"-> [Toponimia Curada] Exportadas {len(c_features)} etiquetas curadas para el compilador.")
+        except Exception as ce:
+            print(f"  [WARN] No se pudo exportar curated_places.geojson: {ce}")
+            curated_path = None
+
+    if curated_path and os.path.exists(curated_path):
+        wsl_cmd.extend(["--curated-places", to_wsl_path(curated_path)])
+
     if not denue_csv:
         candidates = glob.glob(os.path.join(output_dir, "denue_*.csv"))
         if not candidates:
@@ -284,9 +320,8 @@ def build_city_map_wsl(
         if candidates:
             denue_csv = candidates[0]
 
-    if denue_csv and os.path.exists(denue_csv):
+    if denue_csv and os.path.exists(denue_csv) and not places:
         wsl_cmd.extend(["--denue-csv", to_wsl_path(denue_csv)])
-
 
     # Exportar urban_core_polygon como GeoJSON para el runner de WSL si está definido
     if urban_core_polygon:
@@ -425,6 +460,7 @@ def build_city_map(
                 include_pedestrian_paths=include_pedestrian_paths,
                 lod_peripheral_labels=lod_peripheral_labels,
                 lod_peripheral_buildings=lod_peripheral_buildings,
+                places=places,
                 denue_csv=denue_csv
             )
 

@@ -14,6 +14,7 @@ Aplica los parches canonicos a depot.maps en el entorno WSL Ubuntu:
 
 import os
 import sys
+import re
 
 
 def patch_campus_wins(content: str) -> tuple[str, bool]:
@@ -559,11 +560,21 @@ def patch_resilient_buildings(content: str) -> tuple[str, bool]:
 def patch_depot_maps(file_path: str = None) -> bool:
     if file_path is None:
         try:
-            import depot.maps
-            file_path = depot.maps.__file__
-        except ImportError:
-            print("[WARN] depot.maps no esta instalado en este entorno.")
-            return False
+            import importlib.util
+            spec = importlib.util.find_spec("depot.maps")
+            if spec and spec.origin and os.path.exists(spec.origin):
+                file_path = spec.origin
+            else:
+                import depot.maps
+                file_path = depot.maps.__file__
+        except Exception:
+            import glob
+            candidates = glob.glob(os.path.expanduser("~/.local/lib/python3.*/site-packages/depot/maps.py"))
+            if candidates:
+                file_path = candidates[0]
+            else:
+                print("[WARN] depot.maps no esta instalado en este entorno.")
+                return False
 
     if not os.path.exists(file_path):
         print(f"[WARN] Archivo no encontrado: {file_path}")
@@ -609,6 +620,10 @@ def patch_depot_maps(file_path: str = None) -> bool:
     # 9. Parche Toponimia Universal: Extraccion nwr/place y Conversion a Centroides Point
     content, mod_top = patch_polygon_neighborhoods(content)
     any_modified = any_modified or mod_top
+
+    # 10. Parche Deduplicacion Estricta al Fusionar Etiquetas DENUE/YAML con OSM
+    content, mod_cmb = patch_combine_labels_dedup(content)
+    any_modified = any_modified or mod_cmb
 
     if not any_modified:
         print("[OK] Todos los parches de depot.maps ya estan aplicados.")
@@ -914,12 +929,167 @@ def patch_urban_core_labels(content: str) -> tuple[str, bool]:
 
 def patch_polygon_neighborhoods(content: str) -> tuple[str, bool]:
     """
-    Subway Builder Mexico: Extrae nodos, vias y relaciones (nwr/place) para capturar
-    supermanzanas y colonias poligonales en OSM, convirtiendolas a centroides Point.
+    Subway Builder Mexico:
+    1. Para ciudades ('cities'): extrae exclusivamente nodos puntuales (n/place) y aplica
+       deduplicacion metropolitana estricta (una ciudad solo puede existir una vez),
+       evitando de raiz el nodo fantasma de Cancún Sur (centroide de frontera municipal).
+    2. Para supermanzanas y colonias ('suburbs', 'neighborhoods'): extrae nwr/place
+       descartando relaciones de frontera administrativa (boundary=administrative).
+    3. Sincroniza toponimia curada desde SB_CURATED_PLACES_GEOJSON respetando eliminaciones,
+       renombramientos y coordenadas exactas definidas por el usuario en el Wizard.
     """
-    if "Subway Builder Mexico: extract nodes, ways and relations (nwr)" in content:
-        print("[OK] depot.maps ya cuenta con el parche de extraccion nwr y centroides de toponimia.")
-        return content, False
+    new_centroid_code = """            # Subway Builder Mexico: Toponymy Engine v2: Curated Places Sync & Admin Boundary Filter
+            if os.path.exists(geojson):
+                try:
+                    def _calc_haversine_m(lon1, lat1, lon2, lat2):
+                        dlat = math.radians(lat2 - lat1)
+                        dlon = math.radians(lon2 - lon1)
+                        a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
+                        return 6371000.0 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+                    with open(geojson, "r", encoding="utf-8") as gf:
+                        gdata = json.load(gf)
+                    feats = gdata.get("features", [])
+
+                    point_feats = []
+                    poly_feats = []
+
+                    for f in feats:
+                        props = f.get("properties", {})
+                        p_name = props.get("name", "").strip()
+                        if not p_name or props.get("highway"):
+                            continue
+                        # Descartar poligonos y lineas de division politica/administrativa
+                        if props.get("boundary") == "administrative" or props.get("admin_level"):
+                            continue
+                        geom = f.get("geometry")
+                        if not geom:
+                            continue
+                        if geom.get("type") == "Point":
+                            f["geometry"] = geom
+                            point_feats.append(f)
+                        elif name != "cities":
+                            try:
+                                s = shape(geom)
+                                if s.is_empty:
+                                    continue
+                                c = s.centroid
+                                f["geometry"] = {"type": "Point", "coordinates": [round(c.x, 6), round(c.y, 6)]}
+                                poly_feats.append(f)
+                            except Exception:
+                                continue
+
+                    # 1. Conservar nodos puntuales oficiales primero
+                    final_feats = []
+                    for pf in point_feats:
+                        p_name = pf["properties"]["name"].strip().lower()
+                        p_coords = pf["geometry"]["coordinates"]
+                        if name == "cities":
+                            # Deduplicacion metropolitana: una ciudad solo puede aparecer 1 vez en todo el mapa
+                            if any(p_name == ef["properties"]["name"].strip().lower() for ef in final_feats):
+                                continue
+                        else:
+                            if any(p_name == ef["properties"]["name"].strip().lower() and _calc_haversine_m(p_coords[0], p_coords[1], ef["geometry"]["coordinates"][0], ef["geometry"]["coordinates"][1]) <= 1200.0 for ef in final_feats):
+                                continue
+                        final_feats.append(pf)
+
+                    # 2. Agregar centroides de poligonos SOLO para asentamientos menores (nunca ciudades)
+                    if name != "cities":
+                        for poly_f in poly_feats:
+                            p_name = poly_f["properties"]["name"].strip().lower()
+                            p_coords = poly_f["geometry"]["coordinates"]
+                            if any(p_name == ef["properties"]["name"].strip().lower() and _calc_haversine_m(p_coords[0], p_coords[1], ef["geometry"]["coordinates"][0], ef["geometry"]["coordinates"][1]) <= 2500.0 for ef in final_feats):
+                                continue
+                            final_feats.append(poly_f)
+
+                    # 3. Sincronizacion de Toponimia Curada desde el Wizard (SB_CURATED_PLACES_GEOJSON)
+                    curated_geojson = os.environ.get("SB_CURATED_PLACES_GEOJSON")
+                    if not curated_geojson or not os.path.exists(curated_geojson):
+                        cand_c = os.path.join(self.city_dir, "curated_places.geojson")
+                        if os.path.exists(cand_c):
+                            curated_geojson = cand_c
+
+                    if curated_geojson and os.path.exists(curated_geojson):
+                        try:
+                            with open(curated_geojson, "r", encoding="utf-8") as cjf:
+                                cdata = json.load(cjf)
+                            c_feats = cdata.get("features", [])
+                            deleted_names = set(cdata.get("deleted_names", []))
+                            for d in list(deleted_names):
+                                deleted_names.add(str(d).strip().lower())
+
+                            layer_type_map = {
+                                "cities": ["city", "town", "borough"],
+                                "suburbs": ["suburb", "quarter", "village", "town", "city"],
+                                "neighborhoods": ["neighbourhood", "neighborhood", "subdivision", "hamlet", "locality", "suburb", "quarter"]
+                            }
+                            allowed_types = layer_type_map.get(name, [])
+
+                            # Modo WYSIWYG Estricto: Si el usuario suministro toponimia curada para esta capa,
+                            # la lista curada es la unica fuente de verdad (cero etiquetas no deseadas de OSM).
+                            curated_for_layer = []
+                            for cf_item in c_feats:
+                                cp = cf_item.get("properties", {})
+                                c_type = str(cp.get("type") or cp.get("place", "suburb")).lower()
+                                c_name = cp.get("name", "").strip()
+                                c_geom = cf_item.get("geometry", {})
+                                if not c_name or not c_geom or c_geom.get("type") != "Point":
+                                    continue
+                                if c_type not in allowed_types:
+                                    continue
+                                if c_name.lower() in deleted_names:
+                                    continue
+                                curated_for_layer.append({
+                                    "type": "Feature",
+                                    "properties": {"name": c_name, "place": c_type, "curated": True},
+                                    "geometry": {"type": "Point", "coordinates": c_geom.get("coordinates")}
+                                })
+
+                            if curated_for_layer:
+                                final_feats = curated_for_layer
+                            elif deleted_names:
+                                final_feats = [ef for ef in final_feats if ef["properties"].get("name", "").strip().lower() not in deleted_names]
+                        except Exception as ce_cur:
+                            if self.verb:
+                                print(f"  [WARN] Error inyectando toponimia curada en '{name}': {ce_cur}")
+
+                    gdata["features"] = final_feats
+                    with open(geojson, "w", encoding="utf-8") as gf:
+                        json.dump(gdata, gf)
+                    if self.verb:
+                        print(f"  [Toponymy Engine v2] Capa '{name}': {len(final_feats)} etiquetas procesadas y sincronizadas.")
+                except Exception as ce:
+                    if self.verb:
+                        print(f"  [WARN] Error normalizando centroides en '{name}': {ce}")"""
+
+    if "Subway Builder Mexico: convert polygon/line places to centroid Points" in content or "Subway Builder Mexico: Toponymy Engine" in content:
+        modified_in_branch = False
+        old_version_pattern = re.compile(r'            # Subway Builder Mexico: (convert polygon/line places to centroid Points|Toponymy Engine).*?print\(f"  \[WARN\] Error normalizando centroides en \'\{name\}\': \{ce\}"\)', re.DOTALL)
+        new_content, count = old_version_pattern.subn(new_centroid_code, content)
+        if count > 0:
+            content = new_content
+            modified_in_branch = True
+        
+        # Corregir cualquier indentacion espuria en 'if name == "cities":'
+        if 'if name == "cities":' in content:
+            fixed_content = re.sub(r'[ \t]*if name == "cities":', '            if name == "cities":', content, count=1)
+            if fixed_content != content:
+                content = fixed_content
+                modified_in_branch = True
+        elif 'filter_cmd.extend([f"nwr/place{self.places_suffix}={t}" for t in tags])' in content:
+            target_split = """            if name == "cities":
+                filter_cmd.extend([f"n/place{self.places_suffix}={t}" for t in tags])
+            else:
+                filter_cmd.extend([f"nwr/place{self.places_suffix}={t}" for t in tags])"""
+            content = re.sub(r'[ \t]*filter_cmd\.extend\(\[f"nwr/place\{self\.places_suffix\}=\{t\}" for t in tags\]\)', target_split, content, count=1)
+            modified_in_branch = True
+        
+        if modified_in_branch:
+            print("[OK] Parche de toponimia v2 actualizado exitosamente.")
+            return content, True
+        else:
+            print("[OK] depot.maps ya cuenta con el motor de toponimia v2 actualizado.")
+            return content, False
 
     old_filter = """            # Build the osmium filter string
             # e.g., "n/place=city n/place=borough"
@@ -931,65 +1101,106 @@ def patch_polygon_neighborhoods(content: str) -> tuple[str, bool]:
             self._rewrite_label_geojson_names(geojson)"""
 
     new_filter = """            # Build the osmium filter string
-            # Subway Builder Mexico: extract nodes, ways and relations (nwr) to capture polygon neighborhoods
-            filter_cmd.extend([f"nwr/place{self.places_suffix}={t}" for t in tags])
+            # Subway Builder Mexico: extract nodes only for cities, nwr for suburbs/neighborhoods
+            if name == "cities":
+                filter_cmd.extend([f"n/place{self.places_suffix}={t}" for t in tags])
+            else:
+                filter_cmd.extend([f"nwr/place{self.places_suffix}={t}" for t in tags])
             filter_cmd.extend(["-o", str(osm_pbf), "--overwrite"])
             self._run_command(filter_cmd)
             self._run_command(["osmium", "export", str(osm_pbf), "-o", 
                                str(geojson), "--overwrite"])
             self._rewrite_label_geojson_names(geojson)
-
-            # Subway Builder Mexico: convert polygon/line places to centroid Points
-            if os.path.exists(geojson):
-                try:
-                    import json
-                    from shapely.geometry import shape
-                    with open(geojson, "r", encoding="utf-8") as gf:
-                        gdata = json.load(gf)
-                    feats = gdata.get("features", [])
-                    norm_feats = []
-                    seen_places = set()
-                    for f in feats:
-                        props = f.get("properties", {})
-                        p_name = props.get("name", "").strip()
-                        if not p_name or props.get("highway"):
-                            continue
-                        geom = f.get("geometry")
-                        if not geom:
-                            continue
-                        if geom.get("type") == "Point":
-                            pt = geom
-                        else:
-                            try:
-                                s = shape(geom)
-                                if s.is_empty:
-                                    continue
-                                c = s.centroid
-                                pt = {"type": "Point", "coordinates": [round(c.x, 6), round(c.y, 6)]}
-                            except Exception:
-                                continue
-                        coords = pt.get("coordinates", [0, 0])
-                        norm_key = (p_name.lower(), round(coords[0], 3), round(coords[1], 3))
-                        if norm_key in seen_places:
-                            continue
-                        seen_places.add(norm_key)
-                        f["geometry"] = pt
-                        norm_feats.append(f)
-                    gdata["features"] = norm_feats
-                    with open(geojson, "w", encoding="utf-8") as gf:
-                        json.dump(gdata, gf)
-                    if self.verb:
-                        print(f"  [Toponymy Centroids] Capa '{name}': {len(norm_feats)} etiquetas normalizadas a puntos.")
-                except Exception as ce:
-                    if self.verb:
-                        print(f"  [WARN] Error normalizando centroides en '{name}': {ce}")"""
+\n""" + new_centroid_code
 
     if old_filter not in content:
         print("[WARN] No se encontro el bloque de tags-filter n/place en depot/maps.py.")
         return content, False
 
     content = content.replace(old_filter, new_filter, 1)
-    print("[OK] Parche de extraccion nwr y centroides de toponimia incorporado en depot.maps.")
+    print("[OK] Parche de toponimia v2 incorporado en depot.maps.")
+    return content, True
+
+
+def patch_combine_labels_dedup(content: str) -> tuple[str, bool]:
+    """
+    Subway Builder Mexico: Deduplica etiquetas adicionales (DENUE/YAML)
+    al fusionarlas con las etiquetas de OSM en _combine_geojson_labels.
+    """
+    if "Subway Builder Mexico: Deduplicate combined labels" in content:
+        print("[OK] depot.maps ya cuenta con el parche de deduplicacion en _combine_geojson_labels.")
+        return content, False
+
+    old_combine = """        # Load features from each file
+        for file in files:
+            with open(file, 'r') as f:
+                data = json.load(f)
+                # GeoJSON files are typically 'FeatureCollection' types
+                combined_features.extend(data['features'])
+
+        combined_geojson = {
+            "type": "FeatureCollection",
+            "features": combined_features
+        }"""
+
+    new_combine = """        # Subway Builder Mexico: Deduplicate combined labels
+        import math
+
+        def _calc_haversine_m(lon1, lat1, lon2, lat2):
+            dlat = math.radians(lat2 - lat1)
+            dlon = math.radians(lon2 - lon1)
+            a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
+            return 6371000.0 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+        main_file = files[0] if len(files) > 0 else None
+        addtl_files = files[1:] if len(files) > 1 else []
+
+        with open(main_file, 'r', encoding='utf-8') as mf:
+            m_data = json.load(mf)
+        combined_features = m_data.get('features', [])
+
+        for a_file in addtl_files:
+            if not os.path.exists(a_file):
+                continue
+            with open(a_file, 'r', encoding='utf-8') as af:
+                a_data = json.load(af)
+            a_feats = a_data.get('features', [])
+            for af_item in a_feats:
+                a_props = af_item.get('properties', {})
+                a_name = a_props.get('name', '').strip().lower()
+                a_geom = af_item.get('geometry')
+                if not a_name or not a_geom:
+                    continue
+                a_coords = a_geom.get('coordinates', [0, 0]) if a_geom.get('type') == 'Point' else [0, 0]
+
+                is_dup = False
+                for existing in combined_features:
+                    e_props = existing.get('properties', {})
+                    e_name = e_props.get('name', '').strip().lower()
+                    e_geom = existing.get('geometry')
+                    if not e_name or not e_geom:
+                        continue
+                    e_coords = e_geom.get('coordinates', [0, 0]) if e_geom.get('type') == 'Point' else [0, 0]
+                    if a_name == e_name or (len(a_name) >= 5 and (a_name in e_name or e_name in a_name)):
+                        dist = _calc_haversine_m(a_coords[0], a_coords[1], e_coords[0], e_coords[1])
+                        if dist <= 2000.0:
+                            is_dup = True
+                            break
+
+                if not is_dup:
+                    combined_features.append(af_item)
+
+        combined_geojson = {
+            "type": "FeatureCollection",
+            "features": combined_features
+        }"""
+
+    if old_combine not in content:
+        print("[WARN] No se encontro el bloque exacto de carga en _combine_geojson_labels.")
+        return content, False
+
+    content = content.replace(old_combine, new_combine, 1)
+    print("[OK] Parche de deduplicacion en _combine_geojson_labels incorporado en depot.maps.")
     return content, True
 
 

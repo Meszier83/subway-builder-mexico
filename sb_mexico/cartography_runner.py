@@ -207,7 +207,8 @@ def run_cartography(
     include_pedestrian_paths: bool = False,
     lod_peripheral_labels: str = "none",
     lod_peripheral_buildings: str = "none",
-    denue_csv: Optional[str] = None
+    denue_csv: Optional[str] = None,
+    curated_places: Optional[str] = None
 ) -> int:
     if urban_parks_only:
         os.environ["SB_URBAN_PARKS_ONLY"] = "1"
@@ -217,6 +218,12 @@ def run_cartography(
 
     os.environ["SB_LOD_PERIPHERAL_LABELS"] = str(lod_peripheral_labels).lower()
     os.environ["SB_LOD_PERIPHERAL_BUILDINGS"] = str(lod_peripheral_buildings).lower()
+
+    if curated_places and os.path.exists(curated_places):
+        os.environ["SB_CURATED_PLACES_GEOJSON"] = os.path.abspath(curated_places)
+        print(f"-> [Toponimia Curada] Sincronización activa con Wizard: {curated_places}")
+    else:
+        os.environ.pop("SB_CURATED_PLACES_GEOJSON", None)
 
     if urban_core_geojson and os.path.exists(urban_core_geojson):
         os.environ["SB_URBAN_CORE_GEOJSON"] = os.path.abspath(urban_core_geojson)
@@ -384,7 +391,7 @@ def run_cartography(
         if candidates:
             denue_csv = candidates[0]
 
-    if denue_csv and os.path.exists(denue_csv):
+    if denue_csv and os.path.exists(denue_csv) and not curated_places:
         try:
             from sb_mexico.toponymy import generate_denue_neighborhoods_geojson
             denue_out_geojson = os.path.join(native_build_dir, f"{city_code.lower()}_denue_neighborhoods.geojson")
@@ -400,6 +407,8 @@ def run_cartography(
                 print(f"-> [Toponimia DENUE] Inyectando colonias y fraccionamientos adicionales desde {denue_csv}")
         except Exception as te:
             print(f"  [WARN] No se pudo generar toponimia complementaria de DENUE: {te}")
+    elif curated_places:
+        print(f"-> [Toponimia Curada] Utilizando exclusivamente toponimia curada y sincronizada desde el Wizard.")
 
     print(f"-> Inicializando MapGen (Cores: {cores}, RAM asignada: {ram_gb} GB [{ram_mb} MB])...")
 
@@ -484,6 +493,7 @@ def main():
     parser.add_argument("--lod-peripheral-labels", default="none", choices=["none", "cities_only", "all"], help="Etiquetas toponímicas en periferia")
     parser.add_argument("--lod-peripheral-buildings", default="none", choices=["none", "large_only", "all"], help="Edificios 3D en periferia")
     parser.add_argument("--denue-csv", default=None, help="Ruta al archivo DENUE CSV para toponimia complementaria")
+    parser.add_argument("--curated-places", default=None, help="Ruta al archivo GeoJSON de toponimia curada desde el Wizard")
 
     args = parser.parse_args()
     ret = run_cartography(
@@ -500,7 +510,8 @@ def main():
         include_pedestrian_paths=args.include_pedestrian_paths,
         lod_peripheral_labels=args.lod_peripheral_labels,
         lod_peripheral_buildings=args.lod_peripheral_buildings,
-        denue_csv=args.denue_csv
+        denue_csv=args.denue_csv,
+        curated_places=args.curated_places
     )
     sys.exit(ret)
 

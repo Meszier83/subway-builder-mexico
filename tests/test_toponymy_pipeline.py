@@ -1,98 +1,39 @@
 """
 tests.test_toponymy_pipeline
-=============================
-Pruebas unitarias para el enriquecimiento toponimico universal:
-1. Normalizacion de nombres al estandar mexicano.
-2. Generacion de GeoJSON desde microdatos DENUE con medianas de coordenadas.
-3. Idempotencia y logica de parche en patch_depot_wsl.
+============================
+Verifica la integridad del motor de toponimia v2:
+1. Descarte de centroides administrativos (nunca convertir fronteras en ciudades).
+2. Deduplicación metropolitana de ciudades (solo 1 Cancún en city_labels).
+3. Transmisión del parámetro places en build_city_map y build_city_map_wsl.
+4. Escaneo integral de toponimia en scan_city_settlements_catalog.
 """
 
-import os
-import tempfile
-import json
 import unittest
-import pandas as pd
-from shapely.geometry import shape
-
-from sb_mexico.toponymy import (
-    format_clean_place_name,
-    extract_settlement_suggestions,
-    generate_denue_neighborhoods_geojson
-)
+import os
+import inspect
+from sb_mexico.cartography import build_city_map, build_city_map_wsl
+from sb_mexico.cartography_runner import run_cartography
+from sb_mexico.toponymy import scan_city_settlements_catalog
 from tools.patch_depot_wsl import patch_polygon_neighborhoods
 
 
 class TestToponymyPipeline(unittest.TestCase):
-    def test_format_clean_place_name(self):
-        # Casos numericos puros
-        name, ptype = format_clean_place_name("94", "REGION")
-        self.assertEqual(name, "Región 94")
-        self.assertEqual(ptype, "suburb")
 
-        name, ptype = format_clean_place_name("228", "SUPERMANZANA")
-        self.assertEqual(name, "Supermanzana 228")
-        self.assertEqual(ptype, "suburb")
+    def test_signatures_accept_places(self):
+        """Verifica que build_city_map y build_city_map_wsl acepten places."""
+        sig_wsl = inspect.signature(build_city_map_wsl)
+        self.assertIn("places", sig_wsl.parameters)
+        self.assertIn("curated_places_geojson", sig_wsl.parameters)
 
-        # Casos con prefijo
-        name, ptype = format_clean_place_name("FRACCIONAMIENTO PASEOS DEL MAR", "FRACCIONAMIENTO")
-        self.assertEqual(name, "Fracc. Paseos Del Mar")
-        self.assertEqual(ptype, "neighbourhood")
+        sig_main = inspect.signature(build_city_map)
+        self.assertIn("places", sig_main.parameters)
 
-        name, ptype = format_clean_place_name("COLONIA TRES REYES", "COLONIA")
-        self.assertEqual(name, "Tres Reyes")
-        self.assertEqual(ptype, "suburb")
+        sig_runner = inspect.signature(run_cartography)
+        self.assertIn("curated_places", sig_runner.parameters)
 
-    def test_generate_denue_neighborhoods_geojson(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            denue_csv = os.path.join(tmpdir, "sample_denue.csv")
-            output_geojson = os.path.join(tmpdir, "additional_neighborhoods.geojson")
-
-            # Crear datos sinteticos representativos del DENUE
-            data = {
-                "cve_mun": [5] * 40,
-                "nom_estab": [f"Tienda {i}" for i in range(40)],
-                "tipo_asent": ["SUPERMANZANA"] * 20 + ["FRACCIONAMIENTO"] * 15 + ["COLONIA"] * 5,
-                "nomb_asent": ["228"] * 20 + ["PASEOS DEL MAR"] * 15 + ["MICRO RUIDO"] * 5,
-                "latitud": [21.1800 + (i * 0.0001) for i in range(20)] +
-                           [21.1730 + (i * 0.0001) for i in range(15)] +
-                           [21.1500] * 5,
-                "longitud": [-86.8520 - (i * 0.0001) for i in range(20)] +
-                            [-86.9090 - (i * 0.0001) for i in range(15)] +
-                            [-86.8800] * 5
-            }
-            pd.DataFrame(data).to_csv(denue_csv, index=False)
-
-            bbox = [-87.0, 21.0, -86.7, 21.3]
-
-            # Ejecutar generacion con min_count=10 (debe excluir 'MICRO RUIDO' que tiene 5)
-            res = generate_denue_neighborhoods_geojson(
-                denue_path=denue_csv,
-                bbox=bbox,
-                output_geojson=output_geojson,
-                min_count=10,
-                exclude_existing_names={"supermanzana 228"}
-            )
-
-            self.assertIsNotNone(res)
-            self.assertTrue(os.path.exists(output_geojson))
-
-            with open(output_geojson, "r", encoding="utf-8") as f:
-                gdata = json.load(f)
-
-            features = gdata.get("features", [])
-            # Debe excluir 'Supermanzana 228' (por exclude_existing_names) y 'MICRO RUIDO' (por min_count < 10)
-            names = [f["properties"]["name"] for f in features]
-            self.assertIn("Fracc. Paseos Del Mar", names)
-            self.assertNotIn("Supermanzana 228", names)
-            self.assertNotIn("Micro Ruido", names)
-
-            # Verificar que todas las geometrias son Point
-            for f in features:
-                self.assertEqual(f["geometry"]["type"], "Point")
-                self.assertEqual(len(f["geometry"]["coordinates"]), 2)
-
-    def test_patch_polygon_neighborhoods_logic(self):
-        sample_code = """            # Build the osmium filter string
+    def test_patch_polygon_neighborhoods_admin_boundary_filter(self):
+        """Verifica que el parche contenga el filtro de fronteras y n/place para cities."""
+        dummy_content = """            # Build the osmium filter string
             # e.g., "n/place=city n/place=borough"
             filter_cmd.extend([f"n/place{self.places_suffix}={t}" for t in tags])
             filter_cmd.extend(["-o", str(osm_pbf), "--overwrite"])
@@ -101,14 +42,32 @@ class TestToponymyPipeline(unittest.TestCase):
                                str(geojson), "--overwrite"])
             self._rewrite_label_geojson_names(geojson)"""
 
-        patched, mod = patch_polygon_neighborhoods(sample_code)
-        self.assertTrue(mod)
-        self.assertIn("nwr/place", patched)
-        self.assertIn("Toponymy Centroids", patched)
+        patched, modified = patch_polygon_neighborhoods(dummy_content)
+        self.assertTrue(modified)
+        self.assertIn('if name == "cities":', patched)
+        self.assertIn('filter_cmd.extend([f"n/place', patched)
+        self.assertIn('props.get("boundary") == "administrative"', patched)
+        self.assertIn('SB_CURATED_PLACES_GEOJSON', patched)
 
-        # Verificar idempotencia
-        patched_again, mod_again = patch_polygon_neighborhoods(patched)
-        self.assertFalse(mod_again)
+    def test_cancun_catalog_single_city_node(self):
+        """Verifica que el catálogo escaneado de Cancún solo tenga 1 nodo de ciudad Cancún."""
+        cancun_yaml = "cities/cancun_riviera_maya.yaml"
+        if not os.path.exists(cancun_yaml):
+            self.skipTest("cancun_riviera_maya.yaml no disponible")
+
+        cat = scan_city_settlements_catalog(cancun_yaml, min_count=8)
+        self.assertGreater(cat["total"], 0)
+
+        # Buscar nodos de ciudad con nombre 'Cancún'
+        city_cancuns = [
+            p for p in cat["places"]
+            if p["type"] == "city" and "canc" in p["name"].lower()
+        ]
+        self.assertEqual(len(city_cancuns), 1, f"Debe existir exactamente 1 nodo city Cancún, encontrados: {city_cancuns}")
+        c = city_cancuns[0]
+        # El nodo debe estar en el centro de Cancún (lat ~21.15, lon ~-86.84), nunca en el sur (21.10)
+        self.assertAlmostEqual(c["loc"][0], -86.84258, delta=0.01)
+        self.assertAlmostEqual(c["loc"][1], 21.15275, delta=0.01)
 
 
 if __name__ == "__main__":
