@@ -321,6 +321,28 @@ class TestZoneClustering(unittest.TestCase):
         self.assertIn("B1", kept_names)
         self.assertIn("B2", kept_names)
 
+    def test_apply_thinning_multi_selection(self):
+        places = [
+            {"name": "Colonia Centro", "loc": [-86.8500, 21.1600], "denue_count": 200},
+            {"name": "Supermanzana 22", "loc": [-86.8510, 21.1610], "denue_count": 150},
+            {"name": "Cerrada Los Pinos", "loc": [-86.8515, 21.1615], "denue_count": 0}
+        ]
+        # User selects both Colonia Centro (0) AND Supermanzana 22 (1), pruning Cerrada Los Pinos (2)
+        zones = [{
+            "zone_id": "zone_1",
+            "is_conflict": True,
+            "is_exception": False,
+            "selected_indices": [0, 1],
+            "candidates": [{"original_index": 0}, {"original_index": 1}, {"original_index": 2}]
+        }]
+        out = apply_zone_thinning_selection(places, zones)
+        self.assertEqual(out["total_kept"], 2)
+        self.assertEqual(out["total_pruned"], 1)
+        kept_names = [p["name"] for p in out["places"]]
+        self.assertIn("Colonia Centro", kept_names)
+        self.assertIn("Supermanzana 22", kept_names)
+        self.assertNotIn("Cerrada Los Pinos", kept_names)
+
 
 class TestScanCatalog(unittest.TestCase):
     def test_scan_catalog_cancun(self):

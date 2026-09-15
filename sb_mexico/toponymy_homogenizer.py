@@ -121,7 +121,11 @@ class ToponymyAnalyzer:
         re.IGNORECASE
     )
     RESIDENCIAL_RE = re.compile(
-        r"^(?:RESIDENCIAL|PRIVADA|PRIV\.?)\s+(.+)",
+        r"^(?:RESIDENCIAL)\s+(.+)",
+        re.IGNORECASE
+    )
+    PRIVADA_CERRADA_RE = re.compile(
+        r"^(?:CERRADA|CDA\.?|PRIVADA|PRIV\.?|RETORNO|RET\.?|ANDADOR|AND\.?|CALLEJ[ÓO]N|CALLE|PASEO|CIRCUITO|CIRC\.?)\s+(.+)",
         re.IGNORECASE
     )
     UH_RE = re.compile(
@@ -212,13 +216,25 @@ class ToponymyAnalyzer:
                 "suffix": None
             }
 
-        # 6. Residenciales y Privadas
+        # 6. Residenciales
         m_res = cls.RESIDENCIAL_RE.match(raw)
         if m_res:
             core = m_res.group(1).strip()
             return {
                 "category": "RESIDENCIAL",
                 "raw_prefix": raw[:m_res.start(1)].strip(),
+                "core_name": core,
+                "number": None,
+                "suffix": None
+            }
+
+        # 6b. Privadas, Cerradas, Callejones y Retornos
+        m_priv = cls.PRIVADA_CERRADA_RE.match(raw)
+        if m_priv:
+            core = m_priv.group(1).strip()
+            return {
+                "category": "PRIVADA_CERRADA",
+                "raw_prefix": raw[:m_priv.start(1)].strip(),
                 "core_name": core,
                 "number": None,
                 "suffix": None
@@ -507,13 +523,28 @@ class ToponymyHomogenizer:
         removed: List[Dict] = []
         is_dropped = [False] * len(decorated)
 
+        # Optimizacion espacial O(N): Bucket grid hash
+        cell_deg = max(0.005, (distance_threshold_m * 1.5) / 111320.0)
+        grid: Dict[tuple, List[int]] = {}
+        for idx, item in enumerate(decorated):
+            cx = int(item["lon"] / cell_deg)
+            cy = int(item["lat"] / cell_deg)
+            grid.setdefault((cx, cy), []).append(idx)
+
         for i in range(len(decorated)):
             if is_dropped[i]:
                 continue
             curr = decorated[i]
+            cx = int(curr["lon"] / cell_deg)
+            cy = int(curr["lat"] / cell_deg)
 
-            for j in range(i + 1, len(decorated)):
-                if is_dropped[j]:
+            neighbor_indices = []
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    neighbor_indices.extend(grid.get((cx + dx, cy + dy), []))
+
+            for j in neighbor_indices:
+                if j <= i or is_dropped[j]:
                     continue
                 cand = decorated[j]
 
@@ -633,14 +664,14 @@ def calculate_place_prestige_score(place: Dict[str, Any], heuristic: str = "dens
     establishments = float(place.get("establishments", 0) or 0)
     score += establishments * 2.5
 
-    # 2. Procedencia cartografica
+    # 2. Procedencia cartografica (Nodos OSM tienen maxima prioridad sobre poligonos y DENUE)
     source = str(place.get("source", "")).upper()
     if "YAML_CURATED" in source or "CURATED" in source:
         score += 600.0
-    elif "OSM_POLYGON" in source:
-        score += 300.0
     elif "OSM_NODE" in source:
-        score += 150.0
+        score += 350.0
+    elif "OSM_POLYGON" in source:
+        score += 200.0
     elif "INEGI_DENUE" in source or "DENUE" in source:
         score += 50.0
 
@@ -663,14 +694,18 @@ def calculate_place_prestige_score(place: Dict[str, Any], heuristic: str = "dens
     elif category == "BARE_NUMERIC":
         score += 220.0
 
-    # 4. Tipo OSM
+    # 4. Tipo OSM y Escala
     ptype = str(place.get("type", "")).lower()
-    if ptype == "suburb":
-        score += 120.0
+    if ptype in ("city", "large"):
+        score += 500.0
+    elif ptype in ("town", "borough"):
+        score += 400.0
+    elif ptype in ("suburb", "medium"):
+        score += 200.0
     elif ptype == "quarter":
-        score += 70.0
-    elif ptype == "neighbourhood":
-        score += 30.0
+        score += 100.0
+    elif ptype in ("neighbourhood", "neighborhood", "village", "small"):
+        score += 40.0
 
     # 5. Longitud del nombre segun heuristica
     if heuristic == "shortest":
@@ -682,7 +717,8 @@ def calculate_place_prestige_score(place: Dict[str, Any], heuristic: str = "dens
 def cluster_places_by_proximity(
     places: List[Dict[str, Any]],
     radius_m: float = 1000.0,
-    rank_heuristic: str = "density"
+    rank_heuristic: str = "density",
+    exclude_micro: bool = True
 ) -> Dict[str, Any]:
     """
     Agrupa asentamientos urbanos en zonas de exclusividad espacial de radio `radius_m`.
@@ -690,7 +726,8 @@ def cluster_places_by_proximity(
     - Previene el encadenamiento arbitrario de colonias a lo largo de kilometros.
     - Garantiza que los centros de zona esten separados al menos por `radius_m`.
     - Agrupa competidores cercanos al Anchor mas proximo dentro del radio.
-    - Proporciona preseleccion heuristica del mejor candidato y deja la decision final al usuario.
+    - Proporciona preseleccion heuristica del mejor candidato y permite seleccion multiple.
+    - Opcionalmente excluye o penaliza micro-calles (cerradas, privadas, andadores).
     """
     if not places:
         return {
@@ -700,12 +737,17 @@ def cluster_places_by_proximity(
             "heuristic": rank_heuristic,
             "anchors_count": 0,
             "conflict_zones_count": 0,
+            "high_conflict_zones_count": 0,
+            "trivial_zones_count": 0,
             "isolated_zones_count": 0,
             "zones": [],
             "summary": {"projected_kept": 0, "projected_pruned": 0}
         }
 
-    # 1. Decorar con score y posicion valida
+    # Helper para detectar micro-asentamientos
+    micro_pat = re.compile(r'\b(cerrada|cda\.?|privada|priv\.?|retorno|ret\.?|callej[oó]n|andador|and\.?|pasaje|pasillo)\b', re.IGNORECASE)
+
+    # 1. Decorar con score, posición válida y flag de micro-lugar
     valid_places: List[Dict[str, Any]] = []
     for idx, p in enumerate(places):
         loc = p.get("loc")
@@ -717,16 +759,28 @@ def cluster_places_by_proximity(
         except (ValueError, TypeError):
             continue
 
+        p_name = str(p.get("name", "")).strip()
+        is_micro = bool(
+            p.get("is_micro")
+            or p.get("category") == "PRIVADA_CERRADA"
+            or micro_pat.search(p_name)
+        )
+
         score = calculate_place_prestige_score(p, heuristic=rank_heuristic)
+        # Si exclude_micro está activo, penalizar fuertemente micro-calles para que no ganen como anchors
+        if is_micro and exclude_micro:
+            score = min(score, 10.0)
+
         valid_places.append({
             "original_index": idx,
             "place": p,
-            "name": str(p.get("name", "")).strip(),
+            "name": p_name,
             "loc": [lon, lat],
             "type": p.get("type", "suburb"),
             "source": p.get("source", "UNKNOWN"),
-            "establishments": int(p.get("establishments", 0) or 0),
-            "score": score
+            "establishments": int(p.get("establishments", 0) or p.get("denue_count", 0) or 0),
+            "score": score,
+            "is_micro": is_micro
         })
 
     if not valid_places:
@@ -737,6 +791,8 @@ def cluster_places_by_proximity(
             "heuristic": rank_heuristic,
             "anchors_count": 0,
             "conflict_zones_count": 0,
+            "high_conflict_zones_count": 0,
+            "trivial_zones_count": 0,
             "isolated_zones_count": 0,
             "zones": [],
             "summary": {"projected_kept": 0, "projected_pruned": 0}
@@ -791,10 +847,12 @@ def cluster_places_by_proximity(
                 "distance_to_anchor_m": round(d_cl, 1)
             })
 
-    # 4. Formatear zonas
+    # 4. Formatear zonas y clasificar impacto de conflicto
     zones_list: List[Dict[str, Any]] = []
     conflict_count = 0
     isolated_count = 0
+    high_conflict_count = 0
+    trivial_count = 0
 
     zone_seq = 1
     for a_idx, zdata in anchor_dict.items():
@@ -802,12 +860,7 @@ def cluster_places_by_proximity(
         comps = zdata["competitors"]
         is_conflict = len(comps) > 0
 
-        if is_conflict:
-            conflict_count += 1
-        else:
-            isolated_count += 1
-
-        # Ordenar competidores por distancia o puntuacion
+        # Ordenar competidores por puntuacion descendente
         comps.sort(key=lambda c: c["candidate"]["score"], reverse=True)
 
         candidates_formatted = [{
@@ -818,6 +871,7 @@ def cluster_places_by_proximity(
             "source": anchor_cand["source"],
             "establishments": anchor_cand["establishments"],
             "score": anchor_cand["score"],
+            "is_micro": anchor_cand["is_micro"],
             "distance_m": 0.0,
             "recommended": True
         }]
@@ -832,9 +886,27 @@ def cluster_places_by_proximity(
                 "source": c["source"],
                 "establishments": c["establishments"],
                 "score": c["score"],
+                "is_micro": c["is_micro"],
                 "distance_m": comp["distance_to_anchor_m"],
                 "recommended": False
             })
+
+        micro_cands = [c for c in candidates_formatted if c.get("is_micro")]
+        non_micro_cands = [c for c in candidates_formatted if not c.get("is_micro")]
+
+        # Conflicto de Alto Impacto: Al menos 2 candidatos NO micro con comercios (>0) o prestigio significativo (score >= 20)
+        viable_cands = [c for c in non_micro_cands if c.get("establishments", 0) > 0 or c.get("score", 0) >= 20.0]
+        is_high_conflict = is_conflict and (len(viable_cands) >= 2)
+        is_trivial = is_conflict and not is_high_conflict
+
+        if is_conflict:
+            conflict_count += 1
+            if is_high_conflict:
+                high_conflict_count += 1
+            else:
+                trivial_count += 1
+        else:
+            isolated_count += 1
 
         zones_list.append({
             "zone_id": f"zone_{zone_seq}",
@@ -843,16 +915,23 @@ def cluster_places_by_proximity(
             "center": anchor_cand["loc"],
             "radius_m": radius_m,
             "is_conflict": is_conflict,
+            "is_high_conflict": is_high_conflict,
+            "is_trivial": is_trivial,
             "candidates_count": len(candidates_formatted),
+            "micro_candidates_count": len(micro_cands),
             "candidates": candidates_formatted,
             "recommended_index": anchor_cand["original_index"],
             "selected_index": anchor_cand["original_index"],
+            "selected_indices": [anchor_cand["original_index"]],
             "is_exception": False
         })
         zone_seq += 1
 
-    # Ordenar zonas: primero las que tienen mayor cantidad de competidores en conflicto
-    zones_list.sort(key=lambda z: (1 if z["is_conflict"] else 0, z["candidates_count"]), reverse=True)
+    # Ordenar zonas: primero conflictos de alto impacto, luego otros conflictos, luego aisladas
+    zones_list.sort(key=lambda z: (
+        2 if z["is_high_conflict"] else (1 if z["is_conflict"] else 0),
+        z["candidates_count"]
+    ), reverse=True)
 
     return {
         "status": "ok",
@@ -861,6 +940,8 @@ def cluster_places_by_proximity(
         "heuristic": rank_heuristic,
         "anchors_count": len(anchors),
         "conflict_zones_count": conflict_count,
+        "high_conflict_zones_count": high_conflict_count,
+        "trivial_zones_count": trivial_count,
         "isolated_zones_count": isolated_count,
         "zones": zones_list,
         "summary": {
@@ -877,7 +958,8 @@ def apply_zone_thinning_selection(
     """
     Aplica las selecciones de zonificacion resueltas por el usuario:
     - Para zonas con `is_exception == True`: conserva todos los candidatos.
-    - Para zonas normales: conserva unicamente el candidato con `selected_index`.
+    - Para zonas con `selected_indices` (lista): conserva todas las colonias indicadas.
+    - Para zonas con `selected_index`: conserva el candidato unico.
     Retorna la lista depurada de `places`.
     """
     kept_indices: Set[int] = set()
@@ -888,11 +970,17 @@ def apply_zone_thinning_selection(
                 if idx is not None:
                     kept_indices.add(int(idx))
         else:
-            sel_idx = z.get("selected_index")
-            if sel_idx is not None:
-                kept_indices.add(int(sel_idx))
-            elif z.get("recommended_index") is not None:
-                kept_indices.add(int(z["recommended_index"]))
+            sel_indices = z.get("selected_indices")
+            if isinstance(sel_indices, (list, tuple, set)) and len(sel_indices) > 0:
+                for s_idx in sel_indices:
+                    if s_idx is not None:
+                        kept_indices.add(int(s_idx))
+            else:
+                sel_idx = z.get("selected_index")
+                if sel_idx is not None:
+                    kept_indices.add(int(sel_idx))
+                elif z.get("recommended_index") is not None:
+                    kept_indices.add(int(z["recommended_index"]))
 
     kept_places = [places[i] for i in sorted(kept_indices) if 0 <= i < len(places)]
     return {
@@ -902,5 +990,204 @@ def apply_zone_thinning_selection(
         "total_pruned": len(places) - len(kept_places),
         "places": kept_places
     }
+
+
+def normalize_place_scale(place_type: str) -> str:
+    """
+    Normaliza el tipo de lugar a las 3 escalas cartograficas tipograficas de Subway Builder:
+    - 'large': city, town, borough (Fuente Grande 18-20px)
+    - 'medium': suburb, quarter (Fuente Mediana 13-14px)
+    - 'small': neighbourhood, village, hamlet, residential (Fuente Chica 10-11px)
+    """
+    pt = str(place_type or "").strip().lower()
+    if pt in ("city", "town", "borough", "large"):
+        return "large"
+    elif pt in ("neighbourhood", "neighborhood", "village", "hamlet", "isolated_dwelling", "residential", "colonia", "small"):
+        return "small"
+    else:
+        return "medium"
+
+
+def find_exact_and_fuzzy_duplicates(
+    places: List[Dict[str, Any]],
+    distance_threshold_m: float = 3500.0
+) -> Dict[str, Any]:
+    """
+    Escanea la coleccion de lugares en busca de duplicados homonimos (mismo nombre)
+    y duplicados espaciales cercanos.
+    """
+    groups: List[Dict[str, Any]] = []
+    seen_indices: Set[int] = set()
+    group_seq = 1
+
+    # Normalizar representacion de cada lugar
+    decorated = []
+    for idx, p in enumerate(places):
+        name = str(p.get("name", "")).strip()
+        loc = p.get("loc") or [0, 0]
+        c_info = ToponymyAnalyzer.classify_name(name)
+        core = c_info.get("core_name", name).strip().lower()
+        score = calculate_place_prestige_score(p, heuristic="density")
+        decorated.append({
+            "original_index": idx,
+            "place": p,
+            "name": name,
+            "norm_name": name.lower(),
+            "core": core,
+            "lon": float(loc[0]) if len(loc) >= 2 else 0.0,
+            "lat": float(loc[1]) if len(loc) >= 2 else 0.0,
+            "score": score
+        })
+
+    # Optimizacion O(N): Indice por nombre exacto + Indice de cuadricula espacial
+    cell_deg = max(0.01, (distance_threshold_m * 1.2) / 111320.0)
+    grid: Dict[tuple, List[int]] = {}
+    exact_name_map: Dict[str, List[int]] = {}
+
+    for idx, item in enumerate(decorated):
+        exact_name_map.setdefault(item["norm_name"], []).append(idx)
+        cx = int(item["lon"] / cell_deg)
+        cy = int(item["lat"] / cell_deg)
+        grid.setdefault((cx, cy), []).append(idx)
+
+    for i in range(len(decorated)):
+        if i in seen_indices:
+            continue
+        curr = decorated[i]
+        curr_name = curr["norm_name"]
+        if not curr_name:
+            continue
+
+        matches = [curr]
+        cand_indices = set()
+
+        # 1. Candidatos con nombre exacto (cualquier distancia)
+        for j in exact_name_map.get(curr_name, []):
+            if j > i and j not in seen_indices:
+                cand_indices.add(j)
+
+        # 2. Candidatos espaciales en celdas contiguas
+        cx = int(curr["lon"] / cell_deg)
+        cy = int(curr["lat"] / cell_deg)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for j in grid.get((cx + dx, cy + dy), []):
+                    if j > i and j not in seen_indices:
+                        cand_indices.add(j)
+
+        for j in sorted(cand_indices):
+            cand = decorated[j]
+            cand_name = cand["norm_name"]
+            if not cand_name:
+                continue
+
+            dist = haversine_distance_m(curr["lon"], curr["lat"], cand["lon"], cand["lat"])
+
+            is_duplicate = False
+            match_type = "EXACT"
+
+            # Coincidencia 1: Mismo nombre exacto en cualquier parte de la metropoli
+            if curr_name == cand_name:
+                is_duplicate = True
+                match_type = "EXACT"
+            # Coincidencia 2: Mismo nucleo toponimico a menos del umbral de distancia
+            elif curr["core"] == cand["core"] and dist <= distance_threshold_m:
+                is_duplicate = True
+                match_type = "FUZZY"
+            # Coincidencia 3: Uno contenido en el otro a menos de 1500m
+            elif len(curr_name) >= 5 and (curr_name in cand_name or cand_name in curr_name) and dist <= 1500.0:
+                is_duplicate = True
+                match_type = "FUZZY"
+
+            if is_duplicate:
+                matches.append(cand)
+
+        if len(matches) > 1:
+            for m in matches:
+                seen_indices.add(m["original_index"])
+
+            # Ordenar candidatos por prestigio decreciente
+            matches.sort(key=lambda m: m["score"], reverse=True)
+            winner = matches[0]
+
+            candidates_data = []
+            for m in matches:
+                dist_to_winner = haversine_distance_m(winner["lon"], winner["lat"], m["lon"], m["lat"])
+                p_item = m["place"]
+                candidates_data.append({
+                    "original_index": m["original_index"],
+                    "name": m["name"],
+                    "loc": [m["lon"], m["lat"]],
+                    "type": p_item.get("type", "suburb"),
+                    "scale": normalize_place_scale(p_item.get("type", "suburb")),
+                    "source": p_item.get("source", "YAML_CURATED"),
+                    "establishments": p_item.get("establishments", 0) or p_item.get("denue_count", 0),
+                    "score": round(m["score"], 1),
+                    "distance_m": round(dist_to_winner, 0),
+                    "is_recommended": (m["original_index"] == winner["original_index"])
+                })
+
+            groups.append({
+                "group_id": f"dup_{group_seq}",
+                "group_number": group_seq,
+                "title": winner["name"],
+                "match_type": "EXACT" if all(m["norm_name"] == curr_name for m in matches) else "FUZZY",
+                "center": [winner["lon"], winner["lat"]],
+                "candidates_count": len(candidates_data),
+                "candidates": candidates_data,
+                "recommended_index": winner["original_index"],
+                "selected_index": winner["original_index"]
+            })
+            group_seq += 1
+
+    total_duplicated_places = sum(g["candidates_count"] for g in groups)
+    total_redundant = sum(g["candidates_count"] - 1 for g in groups)
+
+    return {
+        "status": "ok",
+        "total_places": len(places),
+        "total_duplicate_groups": len(groups),
+        "total_duplicated_places": total_duplicated_places,
+        "total_redundant": total_redundant,
+        "groups": groups
+    }
+
+
+def resolve_duplicate_groups(
+    places: List[Dict[str, Any]],
+    duplicate_resolutions: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    Aplica la resolucion de duplicados eliminando los elementos redundantes.
+    duplicate_resolutions es una lista de objetos:
+    [{ "group_id": "dup_1", "selected_index": 42 }, ...]
+    """
+    indices_to_drop: Set[int] = set()
+
+    for res in duplicate_resolutions:
+        sel_idx = res.get("selected_index")
+        candidates = res.get("candidates", [])
+        cand_indices = [c.get("original_index") for c in candidates if c.get("original_index") is not None]
+
+        # Si vienen directamente los candidatos en la resolucion
+        if cand_indices and sel_idx is not None:
+            for idx in cand_indices:
+                if idx != sel_idx:
+                    indices_to_drop.add(idx)
+        elif res.get("discard_indices"):
+            for idx in res["discard_indices"]:
+                indices_to_drop.add(int(idx))
+
+    kept_places = [p for i, p in enumerate(places) if i not in indices_to_drop]
+
+    return {
+        "status": "ok",
+        "total_initial": len(places),
+        "total_kept": len(kept_places),
+        "total_pruned": len(indices_to_drop),
+        "pruned_indices": sorted(list(indices_to_drop)),
+        "places": kept_places
+    }
+
 
 
