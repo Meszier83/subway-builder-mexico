@@ -1741,6 +1741,15 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 self.serve_json({"status": "ok", "catalog": catalog})
             except Exception as e:
                 self.serve_json({"status": "error", "message": str(e), "catalog": {"total": 0, "places": []}})
+        elif path == "/api/toponymy/osm-preview":
+            try:
+                city_file = query.get("file", [""])[0]
+                resolved_f = _resolve_city_path(city_file) if city_file else ""
+                from sb_mexico.toponymy import extract_native_osm_places_preview
+                places_osm = extract_native_osm_places_preview(resolved_f)
+                self.serve_json({"status": "ok", "places": places_osm, "total": len(places_osm)})
+            except Exception as e:
+                self.serve_json({"status": "error", "message": str(e), "places": [], "total": 0})
         elif path == "/api/demand-preview":
             city_file = query.get("file", [""])[0]
             city_base = os.path.splitext(os.path.basename(city_file))[0].lower() if city_file else ""
@@ -1875,10 +1884,11 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
 
                 places = req_data.get("places", [])
                 radius_m = float(req_data.get("radius_m", 1000.0))
-                heuristic = str(req_data.get("heuristic", "density"))
+                heuristic = str(req_data.get("rank_heuristic") or req_data.get("heuristic", "density"))
+                exclude_micro = bool(req_data.get("exclude_micro", True))
 
                 from sb_mexico.toponymy_homogenizer import cluster_places_by_proximity
-                result = cluster_places_by_proximity(places, radius_m=radius_m, rank_heuristic=heuristic)
+                result = cluster_places_by_proximity(places, radius_m=radius_m, rank_heuristic=heuristic, exclude_micro=exclude_micro)
                 self.serve_json(result)
             except Exception as e:
                 self.serve_error(str(e), 500)
@@ -1894,6 +1904,36 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
 
                 from sb_mexico.toponymy_homogenizer import apply_zone_thinning_selection
                 result = apply_zone_thinning_selection(places, zones)
+                self.serve_json(result)
+            except Exception as e:
+                self.serve_error(str(e), 500)
+
+        elif path == "/api/toponymy/find-duplicates":
+            try:
+                content_len = int(self.headers.get('Content-Length', 0))
+                post_body = self.rfile.read(content_len)
+                req_data = json.loads(post_body.decode('utf-8'))
+
+                places = req_data.get("places", [])
+                dist_m = float(req_data.get("distance_m", 3500.0))
+
+                from sb_mexico.toponymy_homogenizer import find_exact_and_fuzzy_duplicates
+                result = find_exact_and_fuzzy_duplicates(places, distance_threshold_m=dist_m)
+                self.serve_json(result)
+            except Exception as e:
+                self.serve_error(str(e), 500)
+
+        elif path == "/api/toponymy/resolve-duplicates":
+            try:
+                content_len = int(self.headers.get('Content-Length', 0))
+                post_body = self.rfile.read(content_len)
+                req_data = json.loads(post_body.decode('utf-8'))
+
+                places = req_data.get("places", [])
+                resolutions = req_data.get("resolutions", [])
+
+                from sb_mexico.toponymy_homogenizer import resolve_duplicate_groups
+                result = resolve_duplicate_groups(places, resolutions)
                 self.serve_json(result)
             except Exception as e:
                 self.serve_error(str(e), 500)

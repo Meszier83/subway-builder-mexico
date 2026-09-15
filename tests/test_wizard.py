@@ -441,6 +441,25 @@ class TestWizard(unittest.TestCase):
         self.assertEqual(p_dummy["tasa_pea"], 0.62)
         self.assertEqual(p_dummy["til_1_state"], 0.45)
 
+    def test_wizard_html_javascript_syntax(self):
+        """Verifica que los scripts de wizard.html compilan sin errores de sintaxis o variables duplicadas."""
+        import subprocess
+        import shutil
+        node_bin = shutil.which("node")
+        if not node_bin:
+            self.skipTest("Node.js no está disponible para validar sintaxis de JS")
+
+        script = """
+        const fs = require('fs');
+        const html = fs.readFileSync('tools/templates/wizard.html', 'utf8');
+        const scriptMatches = [...html.matchAll(/<script[\\s\\S]*?>([\\s\\S]*?)<\\/script>/gi)];
+        scriptMatches.forEach((m, idx) => {
+            new Function(m[1]);
+        });
+        """
+        proc = subprocess.run([node_bin, "-e", script], capture_output=True, text=True, cwd=os.path.dirname(os.path.dirname(__file__)))
+        self.assertEqual(proc.returncode, 0, f"Error de sintaxis JS en wizard.html: {proc.stderr}")
+
 if __name__ == '__main__':
     unittest.main()
 
