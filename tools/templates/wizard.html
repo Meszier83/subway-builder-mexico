@@ -13169,6 +13169,24 @@
             lucide.createIcons();
           }
 
+          // Resultado intencionalmente incompleto: demanda sin paquete.
+          if (msg.step_name === "Demanda solamente") {
+            if (btn) {
+              btn.disabled = false;
+              btn.classList.remove('opacity-50', 'cursor-not-allowed', 'bg-rose-600');
+              btn.classList.add('bg-metro-orange', 'hover:bg-orange-600');
+            }
+            if (btnText) btnText.innerText = "Recompilar";
+            if (btnResults) btnResults.classList.remove('hidden');
+            const btnDl = document.getElementById('btnDownloadZipStep5');
+            if (btnDl) btnDl.classList.add('hidden');
+            document.getElementById('buildProgressBar').className = "h-full bg-amber-500 w-full transition-all duration-300";
+            document.getElementById('buildStepLabel').innerHTML = `<span class="text-amber-400 font-bold">⚠️ Demanda generada; paquete no creado.</span>`;
+            if (statusText) statusText.innerText = "Demanda solamente";
+            showToast("Se generó la demanda, pero no existe un paquete .zip validado para descargar.", "warning");
+            lucide.createIcons();
+          }
+
           // 2. Detección de Éxito / Finalizado
           if (msg.step_name === "Finalizado" || (msg.progress === 100 && msg.line && msg.line.includes('✨'))) {
             if (btn) {
@@ -13182,10 +13200,7 @@
 
             const btnDl = document.getElementById('btnDownloadZipStep5');
             if (btnDl) {
-              const zipName = (cityData && cityData.city && cityData.city.code) 
-                ? `${cityData.city.code}.zip` 
-                : `${currentCityFile.replace(/.*\//, '').replace('.yaml', '')}.zip`;
-              btnDl.href = `/api/download?file=${encodeURIComponent(zipName)}`;
+              btnDl.href = `/api/download?file=${encodeURIComponent(currentCityFile)}`;
               btnDl.classList.remove('hidden');
             }
 

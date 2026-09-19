@@ -105,7 +105,11 @@ class TestWizard(unittest.TestCase):
 
     def test_calculate_conapo_factors(self):
         res = calculate_conapo_factors("cities/cancun.yaml")
-        self.assertIn(res["status"], ["ok", "missing_conapo"])
+        self.assertIn(res["status"], ["ok", "missing_conapo", "error"])
+        if res["status"] == "error":
+            self.assertTrue(
+                "model_year" in res.get("message", "") or "Múltiples archivos CONAPO" in res.get("message", "")
+            )
         if res["status"] == "ok":
             self.assertIn("factors", res)
             self.assertIn("projection_year", res)
@@ -462,4 +466,3 @@ class TestWizard(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-

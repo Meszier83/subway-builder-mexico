@@ -198,11 +198,11 @@ A continuacion se detallan todas las propiedades reconocidas por el motor en `ci
 | `default_growth_factor` | float | Factor de proyeccion demografica base si no hay CONAPO (default: `1.05`; `1.00` = Censo 2020 puro). |
 | `gravity_beta` | float | Coeficiente de decaimiento por distancia regular (default: `0.12`). |
 | `max_distance_km` | float | Distancia maxima para considerar viajes urbanos cotidianos (default: `50.0` a `55.0` km). |
-| `min_pop_size` | int | Tamano minimo por cohorte de viaje (default: `25`; previene micro-pops ineficientes de 1-10 pax). |
+| `min_pop_size` | int | Meta de eficiencia por cohorte (default: `25`); un residual menor se conserva si la celda OD no admite particion exacta. |
 | `target_pop_size` | int | Tamano objetivo de empaquetado de cohortes para estabilizar la simulacion a 60 FPS (default: `150` a `180`). |
 | `max_pop_size` | int | Tamano maximo permitido para una cohorte individual `pop` (default nativo Subway Builder: `200`). |
-| `furness_iterations` | int | Numero maximo de ciclos de balanceo bidireccional IPFP (default: `15`). |
-| `furness_tol` | float | Criterio de convergencia en distribucion de marginales (default: `0.02` = 2%). |
+| `furness_iterations` | int | Numero maximo de ciclos de balanceo bidireccional IPFP (default: `1000`). |
+| `furness_tol` | float | Criterio simultaneo de convergencia marginal (default: `1e-10`). |
 | `growth_factors` | dict | Diccionario de factores oficiales de proyeccion CONAPO por clave municipal `EEMMM` (ej. `"23005": 1.07`). |
 
 ### Sub-seccion `modal_experiment` (Laboratorio Opcional de Congestion)
@@ -274,13 +274,11 @@ A continuacion se detallan todas las propiedades reconocidas por el motor en `ci
 
 ## 6. FORMULACION MATEMATICA DE REFERENCIA
 
-### 1. Modelo en Dos Capas y Deduccion de Presupuesto
-* **Capa 1 (Hubs Especiales):** Asignacion de alcance metropolitano ($\beta_{\text{esp}} = 0.04$):
-  $$W_{ik} = \text{PEA}_i \cdot e^{-\beta_{\text{esp}} \cdot d_{ik}}$$
-  $$\vec{T}_{\cdot \to k} \sim \operatorname{Multinomial}\left(K_k, \ \vec{P}_k\right)$$
-  Deduccion estricta para evitar doble viaje: $\text{PEA}_i^{\text{rem}} = \text{PEA}_i - \sum_k T_{i \to k}$.
-* **Capa 2 (Furness / IPFP Doblemente Acotado):**
-  Balanceo iterativo que resuelve la matriz $T_{ij}$ tal que $\sum_j T_{ij} = \text{PEA}_i^{\text{rem}}$ y $\sum_i T_{ij} \propto E_j$, con friccion modulada por zonas de afluencia $\beta_j = \beta (1 - \text{reach\_bonus}_j)$ y supresion estricta en zonas de exclusion ($E_j = 0$).
+### 1. Modelo OD con soporte y marginales duros
+* **Marginal autoritativo:** Empleo regular y POIs se convierten una sola vez en $D_j^*$, escalado globalmente a la PEA total. No se reescala por isla o componente.
+* **Factibilidad:** Un unico soporte incorpora distancia maxima, aislamiento y prohibiciones. Se validan componentes y flujo maximo antes de IPFP.
+* **Furness / IPFP:** Resuelve $T_{ij}$ tal que $\sum_j T_{ij}=\text{PEA}_i$ y $\sum_i T_{ij}=D_j^*$ con convergencia simultanea estrecha.
+* **Integerizacion:** Un flujo residual de costo minimo produce $T_{ij}^{\mathbb Z}$ con marginales enteros exactos, ceros prohibidos y cada celda en piso o techo. Las cohortes se empacan por celda OD sin sorteos posteriores.
 
 ### 2. Ruteo Vial OSRM, Huella Criptografica y Cortafuegos de Snapping
 * **OSRM en WSL 2:** Distancia real de calle, duracion en segundos a flujo libre (~40 km/h) con desacoplamiento seguro de `drivingPath` (V8 Safe).

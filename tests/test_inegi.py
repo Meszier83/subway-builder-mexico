@@ -12,6 +12,18 @@ from sb_mexico.inegi import (
 )
 
 class TestInegi(unittest.TestCase):
+    @staticmethod
+    def _denue_contract(cve, employment, vintage=2024):
+        return {
+            cve: {
+                "municipality": cve,
+                "employment": employment,
+                "source": "synthetic complete municipal DENUE",
+                "vintage": vintage,
+                "coverage_basis": "complete_municipality",
+            }
+        }
+
     def test_format_cve_mun(self):
         self.assertEqual(format_cve_mun("23005", "23"), "23005")
         self.assertEqual(format_cve_mun("23005", None), "23005")
@@ -38,7 +50,7 @@ class TestInegi(unittest.TestCase):
             f.write('"Tasa de informalidad laboral 1 (TIL1)","44,97","45,20"\n')
             tmp_name = f.name
         try:
-            data = parse_enoe_indicators(tmp_name)
+            data = parse_enoe_indicators(tmp_name, intended_period="2024-T1")
             self.assertAlmostEqual(data["tasa_pea"], 0.6644, places=4)
             self.assertAlmostEqual(data["til_1"], 0.4497, places=4)
         finally:
@@ -52,7 +64,10 @@ class TestInegi(unittest.TestCase):
         ce_benchmarks = {
             "23005": {"nombre": "Benito Juárez", "empleos_ce": 350.0}
         }
-        df_calib, report = calibrate_denue_employment(df_denue, ce_benchmarks, til_1=0.45, min_sample_threshold=50)
+        df_calib, report = calibrate_denue_employment(
+            df_denue, ce_benchmarks, til_1=0.45, min_sample_threshold=50,
+            denominator_contract=self._denue_contract("23005", 300.0), denue_vintage=2024,
+        )
         self.assertEqual(report["23005"]["status"], "CALIBRADO")
         self.assertAlmostEqual(report["23005"]["factor"], 1.5, places=3)
 
@@ -64,7 +79,10 @@ class TestInegi(unittest.TestCase):
         ce_benchmarks = {
             "23005": {"nombre": "Benito Juárez", "empleos_ce": 400.0}
         }
-        df_calib, report = calibrate_denue_employment(df_denue, ce_benchmarks, til_1=0.45, min_sample_threshold=50)
+        df_calib, report = calibrate_denue_employment(
+            df_denue, ce_benchmarks, til_1=0.45, min_sample_threshold=50,
+            denominator_contract=self._denue_contract("23005", 550.0), denue_vintage=2024,
+        )
         self.assertEqual(report["23005"]["status"], "EXCESO_FORMAL_BASE")
         self.assertEqual(report["23005"]["factor"], 1.0)
 
@@ -107,7 +125,9 @@ class TestInegi(unittest.TestCase):
         ce_benchmarks = {"23005": {"nombre": "Benito Juárez", "empleos_ce": 500.0}}
 
         df_calib, report = calibrate_denue_employment(
-            df_denue, ce_benchmarks, til_1=0.45, min_sample_threshold=50, mun_totals_global=mun_totals_global
+            df_denue, ce_benchmarks, til_1=0.45, min_sample_threshold=50,
+            mun_totals_global=mun_totals_global,
+            denominator_contract=self._denue_contract("23005", 600.0), denue_vintage=2024,
         )
         self.assertEqual(report["23005"]["share_bbox"], 0.5)
         self.assertEqual(report["23005"]["h001a"], 250.0)
@@ -181,4 +201,3 @@ class TestInegi(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

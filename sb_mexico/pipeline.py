@@ -10,6 +10,11 @@ import os
 import glob
 import json
 import zipfile
+import hashlib
+import shutil
+import uuid
+from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 import yaml
 import numpy as np
 import geopandas as gpd
@@ -35,12 +40,13 @@ from sb_mexico.gravity import (
     build_arterial_road_network,
     ArterialRoadIndex,
     merge_identical_commutes,
-    consolidate_small_pops,
-    cluster_demand_points,
     sync_demand_points_and_pops,
     apply_modal_competitiveness_experiment,
     calculate_commute_distance_distribution,
-    recommend_gravity_beta
+    recommend_gravity_beta,
+    is_point_in_exclusion_zone,
+    prepare_polygon_geom,
+    is_point_in_prepared_polygon,
 )
 from sb_mexico.osrm import (
     is_docker_available,
@@ -56,9 +62,326 @@ from sb_mexico.special_demand import (
     validate_special_demand_points,
     save_special_demand_points
 )
+from sb_mexico.sources import resolve_source_manifest, manifest_paths
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 console = Console()
+
+
+@dataclass(frozen=True)
+class BuildResult:
+    """Unambiguous outcome of one identified pipeline run."""
+    status: str
+    build_id: str
+    city_code: str
+    config_identity: str
+    package_path: Optional[str] = None
+    demand_path: Optional[str] = None
+    staging_dir: Optional[str] = None
+    package_sha256: Optional[str] = None
+
+    @property
+    def package_created(self) -> bool:
+        return self.status == "package_created" and bool(self.package_path)
+
+
+MAP_ARTIFACTS = (
+    "roads.geojson", "buildings_index.bin.gz", "runways_taxiways.geojson",
+    "ocean_depth_index.json.gz",
+)
+
+
+def _sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _config_identity(config_path: str) -> str:
+    return _sha256_file(os.path.abspath(config_path))
+
+
+def _verify_source_manifest_unchanged(manifest_path: str) -> None:
+    """Reject promotion if an input changed after it was resolved for this run."""
+    with open(manifest_path, encoding="utf-8") as stream:
+        manifest = json.load(stream)
+    changed = []
+    for entries in manifest.get("sources", {}).values():
+        for entry in entries:
+            path = entry.get("path")
+            try:
+                stat = os.stat(path)
+            except (OSError, TypeError):
+                changed.append(str(path))
+                continue
+            if stat.st_size != entry.get("size_bytes") or stat.st_mtime_ns != entry.get("modified_ns"):
+                changed.append(str(path))
+    if changed:
+        raise ValueError("Build inputs changed during execution; refusing package promotion: " + ", ".join(changed))
+
+
+def _cartography_identity(cfg: Dict[str, Any], source_manifest: Dict[str, Any]) -> Dict[str, Any]:
+    city = cfg["city"]
+    osm = []
+    for entry in source_manifest.get("sources", {}).get("osm", []):
+        path = entry["path"]
+        osm.append({"path": os.path.abspath(path), "sha256": _sha256_file(path)})
+    affecting_keys = (
+        "building_filter_size", "building_simplification", "include_ocean",
+        "urban_parks_only", "urban_core_polygon", "lod_peripheral_roads",
+        "include_pedestrian_paths", "lod_peripheral_labels", "lod_peripheral_buildings",
+    )
+    payload = {
+        "format_version": 1,
+        "city_code": city["code"],
+        "bbox": city["bbox"],
+        "osm_sources": osm,
+        "cartography_config": {key: city.get(key) for key in affecting_keys},
+        "pipeline_version": "7.1.0",
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    payload["fingerprint"] = hashlib.sha256(encoded).hexdigest()
+    return payload
+
+
+def validate_package_integrity(directory: str, city_code: str) -> None:
+    """Validate package structure and cross-file references before ZIP creation."""
+    required = ("config.json", "demand_data.json", f"{city_code}.pmtiles", "roads.geojson")
+    missing = [name for name in required if not os.path.isfile(os.path.join(directory, name))]
+    if missing:
+        raise ValueError(f"Package integrity: missing required artifacts: {', '.join(missing)}")
+    with open(os.path.join(directory, "config.json"), encoding="utf-8") as stream:
+        config = json.load(stream)
+    if config.get("code") != city_code:
+        raise ValueError(f"Package integrity: config code {config.get('code')!r} != {city_code!r}")
+    with open(os.path.join(directory, "demand_data.json"), encoding="utf-8") as stream:
+        demand = json.load(stream)
+    points, pops = demand.get("points"), demand.get("pops")
+    if not isinstance(points, list) or not isinstance(pops, list):
+        raise ValueError("Package integrity: demand_data must contain points and pops arrays")
+    point_ids = [point.get("id") for point in points]
+    pop_ids = [pop.get("id") for pop in pops]
+    if any(not value for value in point_ids) or len(point_ids) != len(set(point_ids)):
+        raise ValueError("Package integrity: demand points contain missing or duplicate entity IDs")
+    if any(not value for value in pop_ids) or len(pop_ids) != len(set(pop_ids)):
+        raise ValueError("Package integrity: pops contain missing or duplicate entity IDs")
+    point_set, pop_set = set(point_ids), set(pop_ids)
+    for pop in pops:
+        if pop.get("residenceId") not in point_set or pop.get("jobId") not in point_set:
+            raise ValueError(f"Package integrity: pop {pop.get('id')!r} has dangling origin/destination")
+    for point in points:
+        dangling = set(point.get("popIds", [])) - pop_set
+        if dangling:
+            raise ValueError(f"Package integrity: point {point.get('id')!r} has dangling popIds {sorted(dangling)}")
+    special_path = os.path.join(directory, "special_demand_points.json")
+    if os.path.isfile(special_path):
+        with open(special_path, encoding="utf-8") as stream:
+            special = json.load(stream)
+        valid, errors = validate_special_demand_points(special, demand_data=demand, expected_map_code=city_code)
+        if not valid:
+            raise ValueError("Package integrity: invalid special demand: " + "; ".join(errors))
+    map_manifest_path = os.path.join(directory, "cartography_manifest.json")
+    if not os.path.isfile(map_manifest_path):
+        raise ValueError("Package integrity: missing cartography_manifest.json")
+    with open(map_manifest_path, encoding="utf-8") as stream:
+        map_manifest = json.load(stream)
+    if map_manifest.get("city_code") != city_code:
+        raise ValueError("Package integrity: cartography city code does not match config")
+
+
+def _prepare_depot_demand(points: List[Dict[str, Any]], pops: List[Dict[str, Any]]):
+    """Use Depot when available; only import absence permits the local exporter."""
+    try:
+        from depot.demand import DemandData
+    except ImportError:
+        return None
+    demand = DemandData({"points": points, "pops": pops})
+    demand.sanitize()  # Deliberately not caught: rejected payloads are fatal.
+    return demand
+
+
+def _validate_created_zip(zip_path: str, city_code: str) -> None:
+    required = {"config.json", "demand_data.json", f"{city_code}.pmtiles", "roads.geojson"}
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        corrupt = archive.testzip()
+        if corrupt:
+            raise ValueError(f"Created package ZIP is corrupt at member {corrupt}")
+        missing = required - set(archive.namelist())
+        if missing:
+            raise ValueError(f"Created package ZIP is incomplete: {sorted(missing)}")
+
+
+def build_gravity_input_contract(
+    df_cpv,
+    df_denue,
+    demand_points: List[Dict[str, Any]],
+    exclusion_zones: List[Dict[str, Any]],
+    urban_core_polygon: Any = None,
+    restrict_demand_to_urban_core: bool = True,
+    employment_ledger: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Reconcile authoritative marginals immediately before gravity execution."""
+    core = prepare_polygon_geom(urban_core_polygon) if urban_core_polygon and restrict_demand_to_urban_core else None
+    removed_exclusion_pop = 0.0
+    removed_exclusion_pea = 0.0
+    removed_core_pop = 0.0
+    removed_core_pea = 0.0
+    for row in df_cpv[['lon', 'lat', 'pobtot_adj', 'pea_real']].to_dict('records'):
+        lon, lat = float(row['lon']), float(row['lat'])
+        if exclusion_zones and is_point_in_exclusion_zone(lon, lat, exclusion_zones):
+            removed_exclusion_pop += float(row['pobtot_adj'])
+            removed_exclusion_pea += float(row['pea_real'])
+        elif core and not is_point_in_prepared_polygon(lon, lat, core):
+            removed_core_pop += float(row['pobtot_adj'])
+            removed_core_pea += float(row['pea_real'])
+
+    entering_population = float(df_cpv['pobtot_adj'].sum())
+    entering_pea = float(df_cpv['pea_real'].sum())
+    expected_active_population = entering_population - removed_exclusion_pop - removed_core_pop
+    expected_active_pea = entering_pea - removed_exclusion_pea - removed_core_pea
+    final_population = int(sum(int(point.get('residents', 0)) for point in demand_points))
+    final_pea = int(sum(int(point.get('pea_15ymas', 0)) for point in demand_points))
+    final_jobs = int(sum(int(point.get('jobs', 0)) for point in demand_points))
+    final_special_jobs = int(sum(int(point.get('jobs', 0)) for point in demand_points if point.get('is_special')))
+    final_regular_jobs = final_jobs - final_special_jobs
+    calibrated_denue_input = float(df_denue['calibrated_jobs'].sum()) if 'calibrated_jobs' in df_denue else 0.0
+    rounding_tolerance = 0.500001 * max(1, len(demand_points)) + 1.0
+
+    for name, value in {
+        'population': final_population,
+        'workers': final_pea,
+        'employment': final_jobs,
+    }.items():
+        if not np.isfinite(value) or value <= 0:
+            raise ValueError(f"Invalid final gravity marginal {name}={value}")
+    if abs(final_population - expected_active_population) > rounding_tolerance:
+        raise ValueError(
+            f"Population grid reconciliation failed: expected {expected_active_population:.3f}, got {final_population}"
+        )
+    if abs(final_pea - expected_active_pea) > rounding_tolerance:
+        raise ValueError(f"PEA grid reconciliation failed: expected {expected_active_pea:.3f}, got {final_pea}")
+    validated_employment = validate_employment_ledger(employment_ledger, demand_points)
+    if abs(calibrated_denue_input - validated_employment['authoritative_calibrated_employment']) > 1e-6:
+        raise ValueError(
+            "Employment ledger authoritative input does not match calibrated DENUE employment"
+        )
+
+    population_ledger = dict(getattr(df_cpv, 'attrs', {}).get('population_ledger', {}))
+    population_ledger.update({
+        'population_removed_by_exclusion_zones': removed_exclusion_pop,
+        'pea_removed_by_exclusion_zones': removed_exclusion_pea,
+        'population_removed_by_urban_core': removed_core_pop,
+        'pea_removed_by_urban_core': removed_core_pea,
+        'population_expected_in_grid_before_rounding': expected_active_population,
+        'pea_expected_in_grid_before_rounding': expected_active_pea,
+        'final_grid_population': final_population,
+        'final_grid_pea': final_pea,
+        'grid_rounding_population_delta': final_population - expected_active_population,
+        'grid_rounding_pea_delta': final_pea - expected_active_pea,
+    })
+    return {
+        'population_ledger': population_ledger,
+        'denue_ingestion': dict(getattr(df_denue, 'attrs', {}).get('ingestion_diagnostics', {})),
+        'authoritative_marginals': {
+            'population': final_population,
+            'workers_origins_pea': final_pea,
+            'employment_destination_capacity': final_jobs,
+        },
+        'employment_ledger': validated_employment,
+        'checks': {
+            'nonnegative_finite_nonzero': True,
+            'population_reconciled_within_cell_rounding': True,
+            'pea_reconciled_within_cell_rounding': True,
+            'rounding_tolerance': rounding_tolerance,
+        },
+    }
+
+
+def validate_employment_ledger(
+    ledger: Optional[Dict[str, Any]],
+    demand_points: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Validate destination mass against independently accumulated grid stages."""
+    if not ledger:
+        raise ValueError("Missing independent employment conservation ledger")
+    required = {
+        'authoritative_calibrated_employment', 'geographic_bbox_selected_employment',
+        'removed_by_exclusion_zones', 'removed_by_urban_core', 'after_explicit_removals',
+        'absorbed_by_special_pois', 'regular_before_affluence', 'affluence_multiplier_delta',
+        'target_capacity_delta', 'regular_grid_before_rounding', 'grid_rounding_delta',
+        'regular_grid_employment_expected', 'poi_capacity_delta',
+        'special_poi_employment_expected', 'final_employment_expected',
+    }
+    missing = sorted(required - set(ledger))
+    if missing:
+        raise ValueError(f"Employment ledger missing stages: {missing}")
+    values = {key: float(ledger[key]) for key in required}
+    if any(not np.isfinite(value) for value in values.values()):
+        raise ValueError("Employment ledger contains non-finite values")
+    tolerance = float(ledger.get('tolerance', 1e-6))
+
+    def assert_close(label: str, actual: float, expected: float) -> None:
+        if abs(actual - expected) > tolerance:
+            raise ValueError(
+                f"Employment conservation failed at {label}: actual={actual}, expected={expected}"
+            )
+
+    assert_close(
+        'geographic/BBOX selection',
+        values['geographic_bbox_selected_employment'],
+        values['authoritative_calibrated_employment'],
+    )
+    assert_close(
+        'explicit removals',
+        values['after_explicit_removals'],
+        values['geographic_bbox_selected_employment']
+        - values['removed_by_exclusion_zones']
+        - values['removed_by_urban_core'],
+    )
+    assert_close(
+        'POI absorption split',
+        values['after_explicit_removals'],
+        values['absorbed_by_special_pois'] + values['regular_before_affluence'],
+    )
+    assert_close(
+        'affluence/target transformations',
+        values['regular_grid_before_rounding'],
+        values['regular_before_affluence']
+        + values['affluence_multiplier_delta']
+        + values['target_capacity_delta'],
+    )
+    assert_close(
+        'regular grid rounding',
+        values['regular_grid_employment_expected'],
+        values['regular_grid_before_rounding'] + values['grid_rounding_delta'],
+    )
+    assert_close(
+        'special POI capacity',
+        values['special_poi_employment_expected'],
+        values['absorbed_by_special_pois'] + values['poi_capacity_delta'],
+    )
+    assert_close(
+        'final expected destination mass',
+        values['final_employment_expected'],
+        values['regular_grid_employment_expected'] + values['special_poi_employment_expected'],
+    )
+
+    actual_regular = float(sum(int(point.get('jobs', 0)) for point in demand_points if not point.get('is_special')))
+    actual_special = float(sum(int(point.get('jobs', 0)) for point in demand_points if point.get('is_special')))
+    actual_final = actual_regular + actual_special
+    assert_close('regular demand points', actual_regular, values['regular_grid_employment_expected'])
+    assert_close('special demand points', actual_special, values['special_poi_employment_expected'])
+    assert_close('final demand points', actual_final, values['final_employment_expected'])
+    validated = dict(ledger)
+    validated.update({
+        'actual_regular_grid_employment': int(actual_regular),
+        'actual_special_poi_employment': int(actual_special),
+        'actual_final_employment': int(actual_final),
+        'validated': True,
+    })
+    return validated
 
 
 def _dedup_glob(patterns: List[str]) -> List[str]:
@@ -129,22 +452,51 @@ def validate_cohort_spatial_integrity(
     import math
     dp_locs = {p["id"]: p["location"] for p in demand_points if "id" in p and "location" in p}
     anomalies = []
+    min_speed_kmh = 1.0
+    max_speed_kmh = 180.0
 
     for p in pops:
         pid = p.get("id", "unknown")
         r_id = p.get("residenceId")
         j_id = p.get("jobId")
-        d_road = p.get("drivingDistance", 0)
-        d_sec = p.get("drivingSeconds", 0)
+        d_road = p.get("drivingDistance")
+        d_sec = p.get("drivingSeconds")
 
+        if r_id not in dp_locs:
+            anomalies.append(f"{pid}: unknown residenceId={r_id}")
+            continue
+        if j_id not in dp_locs:
+            anomalies.append(f"{pid}: unknown jobId={j_id}")
+            continue
+        try:
+            d_road = float(d_road)
+            d_sec = float(d_sec)
+        except (TypeError, ValueError):
+            anomalies.append(f"{pid}: non-numeric route fields distance={d_road}, seconds={d_sec}")
+            continue
+        if not math.isfinite(d_road) or not math.isfinite(d_sec):
+            anomalies.append(f"{pid}: non-finite route fields distance={d_road}, seconds={d_sec}")
+            continue
         if d_sec <= 0:
             anomalies.append(f"{pid}: drivingSeconds={d_sec} <= 0")
             continue
-
-        o_loc = dp_locs.get(r_id)
-        d_loc = dp_locs.get(j_id)
-        if not o_loc or not d_loc:
+        if d_road < 0:
+            anomalies.append(f"{pid}: drivingDistance={d_road} < 0")
             continue
+
+        # Speeds outside 1-180 km/h are treated as corrupt for non-trivial
+        # trips. Very short trips are exempt because duration floors dominate.
+        if d_road >= 500.0:
+            implied_speed_kmh = d_road / d_sec * 3.6
+            if not (min_speed_kmh <= implied_speed_kmh <= max_speed_kmh):
+                anomalies.append(
+                    f"{pid}: implied speed={implied_speed_kmh:.2f} km/h outside "
+                    f"{min_speed_kmh:.0f}-{max_speed_kmh:.0f} km/h"
+                )
+                continue
+
+        o_loc = dp_locs[r_id]
+        d_loc = dp_locs[j_id]
 
         if r_id == j_id:
             continue
@@ -177,13 +529,15 @@ def validate_cohort_spatial_integrity(
         raise ValueError(err_msg)
 
 
-def execute_pipeline(
+def _execute_pipeline_run(
     config_path: str,
     skip_map: bool = False,
     output_dir: str = ".",
     data_dir: Optional[str] = None,
-    include_driving_path: Optional[bool] = None
-) -> str:
+    include_driving_path: Optional[bool] = None,
+    build_id: Optional[str] = None,
+    config_identity: Optional[str] = None,
+) -> BuildResult:
     """
     Ejecuta el pipeline completo de principio a fin de manera determinista y autovalidada.
     """
@@ -214,6 +568,8 @@ def execute_pipeline(
         )
 
     city_code = city_info["code"]
+    build_id = build_id or uuid.uuid4().hex
+    config_identity = config_identity or _config_identity(config_path)
     city_base = os.path.splitext(os.path.basename(config_path))[0].lower()
     bbox_list = city_info["bbox"]  # [min_lon, min_lat, max_lon, max_lat]
     bbox_dict = {
@@ -230,47 +586,55 @@ def execute_pipeline(
         out_dir = os.path.abspath(output_dir)
     os.makedirs(out_dir, exist_ok=True)
 
-    # Resolución estrictamente aislada de fuentes de datos por proyecto
-    search_dirs = []
-
-    # 1. Carpeta específica del proyecto
-    project_dir = None
-    if data_dir:
-        project_dir = os.path.abspath(data_dir)
-    elif cfg.get("data_dir"):
-        c_dir = cfg.get("data_dir")
-        project_dir = c_dir if os.path.isabs(c_dir) else os.path.join(ROOT_DIR, c_dir)
-    else:
-        cand_base = os.path.join(ROOT_DIR, "data", city_base)
-        cand_code = os.path.join(ROOT_DIR, "data", city_code.lower())
-        if os.path.exists(cand_base):
-            project_dir = cand_base
-        elif os.path.exists(cand_code):
-            project_dir = cand_code
-
-    if project_dir and os.path.exists(project_dir):
-        search_dirs.append(project_dir)
-
-    # 2. Raíz de data/ reservada exclusivamente para datasets nacionales (OSM PBF y CONAPO)
-    national_data_dir = os.path.join(ROOT_DIR, "data")
-    if os.path.exists(national_data_dir) and national_data_dir not in search_dirs:
-        search_dirs.append(national_data_dir)
-
-    def find_sources(patterns: List[str]) -> List[str]:
-        candidates = []
-        for sdir in search_dirs:
-            for pat in patterns:
-                candidates.append(os.path.join(sdir, pat))
-        return _dedup_glob(candidates)
-
-    src_dir = search_dirs[0] if search_dirs else ROOT_DIR
+    temporal_cfg = cfg.get("temporal") or {}
+    if "model_year" not in temporal_cfg:
+        raise ValueError("Configuration must declare temporal.model_year explicitly")
+    model_year = int(temporal_cfg["model_year"])
+    cpv_base_year = int(temporal_cfg.get("cpv_base_year", 2020))
+    if cpv_base_year != 2020:
+        raise ValueError("CPV ingestion currently supports only the documented 2020 base year")
+    source_manifest = resolve_source_manifest(cfg, config_path, ROOT_DIR, data_dir=data_dir)
+    source_manifest["temporal_contract"] = {
+        "model_year": model_year,
+        "cpv_base_year": cpv_base_year,
+        "enoe_period": temporal_cfg.get("enoe_period"),
+        "declared_vintages": temporal_cfg.get("source_vintages", {}),
+    }
+    source_use = {
+        "cpv": True,
+        "denue": True,
+        "marco": True,
+        "ce": not bool(macro.get("ce_2024_benchmarks")),
+        "enoe": macro.get("tasa_pea") is None or macro.get("til_1_state") is None,
+        "conapo": True,
+        "osm": not skip_map,
+        "roads": True,
+    }
+    for dataset, entries in source_manifest["sources"].items():
+        for entry in entries:
+            entry["consumed"] = bool(source_use.get(dataset, False))
+    for entry in source_manifest["sources"].get("cpv", []):
+        if entry["year"] is None:
+            entry["year"] = cpv_base_year
+            entry["year_source"] = "cpv_base_year_contract"
+        elif entry["year"] != cpv_base_year:
+            raise ValueError(f"CPV source vintage {entry['year']} does not match base year {cpv_base_year}")
+    for dataset in ("denue", "ce"):
+        entries = source_manifest["sources"].get(dataset, [])
+        if source_use[dataset] and entries and any(entry["year"] is None for entry in entries):
+            raise ValueError(
+                f"Unable to establish {dataset} vintage; declare temporal.source_vintages.{dataset}"
+            )
+    with open(os.path.join(out_dir, "source_manifest.json"), "w", encoding="utf-8") as manifest_file:
+        json.dump(source_manifest, manifest_file, indent=2, ensure_ascii=False)
+    src_dir = source_manifest["project_dir"]
 
     # =========================================================================
     # 1. COMPILACIÓN CARTOGRÁFICA (SI NO SE OMITE)
     # =========================================================================
     if not skip_map:
         console.print(f"\n[bold yellow]1. Compilación Cartográfica ({city_code})[/bold yellow]")
-        pbf_candidates = find_sources(["*.osm.pbf"])
+        pbf_candidates = manifest_paths(source_manifest, "osm")
         osm_pbf = pbf_candidates[0] if pbf_candidates else None
         build_city_map(
             city_code=city_code,
@@ -288,6 +652,8 @@ def execute_pipeline(
             places=cfg.get("places", []),
             output_dir=out_dir
         )
+        with open(os.path.join(out_dir, "cartography_manifest.json"), "w", encoding="utf-8") as map_file:
+            json.dump(_cartography_identity(cfg, source_manifest), map_file, indent=2, ensure_ascii=False)
     else:
         console.print(f"\n[dim]1. Compilación Cartográfica omitida por parámetro.[/dim]")
 
@@ -296,44 +662,12 @@ def execute_pipeline(
     # =========================================================================
     console.print(f"\n[bold yellow]2. Ingesta y Calibración INEGI[/bold yellow]")
 
-    # Detección universal automática en todas las ubicaciones candidatas
-    denue_files = find_sources(["*denue*.csv", "*DENUE*.csv"])
-    cpv_files = find_sources([
-        "*RESAGEBURB*.csv",
-        "*resageburb*.csv",
-        "*censo*.csv",
-        "*censo*.xlsx",
-        "*cpv*.csv"
-    ])
-    ce_files = find_sources([
-        "*SAIC*.csv",
-        "*saic*.csv",
-        "*exporta*.csv",
-        "*cenu24*.csv",
-        "*tr_ce*.csv",
-        "*ce_*.csv",
-        "*ce2024*.csv"
-    ])
-    enoe_files = find_sources([
-        "*2026_trim*.csv",
-        "*2024_trim*.csv",
-        "*2025_trim*.csv",
-        "*trim*.csv",
-        "*enoe*.csv"
-    ])
-    conapo_files = find_sources([
-        "*pobproy*.csv",
-        "*quinq*.csv",
-        "*pob_proy*.csv",
-        "*conapo*.csv",
-        "data-*.csv",
-        "*proyeccion*.csv"
-    ])
-    marco_files = find_sources([
-        "*mza*.shp", "*mza*.geojson", "*mza*.gpkg",
-        "*ageb*.shp", "*ageb*.geojson", "*ageb*.gpkg",
-        "*manzana*.shp", "*manzana*.geojson"
-    ])
+    denue_files = manifest_paths(source_manifest, "denue")
+    cpv_files = manifest_paths(source_manifest, "cpv")
+    ce_files = manifest_paths(source_manifest, "ce")
+    enoe_files = manifest_paths(source_manifest, "enoe")
+    conapo_files = manifest_paths(source_manifest, "conapo")
+    marco_files = manifest_paths(source_manifest, "marco")
     if marco_files:
         console.print(f"-> Capas de Marco Geoestadístico detectadas: [green]{len(marco_files)}[/green] archivos.")
 
@@ -341,7 +675,11 @@ def execute_pipeline(
     tasa_pea = macro.get("tasa_pea")
     til_1 = macro.get("til_1_state")
     if (tasa_pea is None or til_1 is None) and enoe_files:
-        enoe_data = parse_enoe_indicators(enoe_files[0])
+        intended_enoe_period = temporal_cfg.get("enoe_period")
+        if not intended_enoe_period:
+            raise ValueError("temporal.enoe_period is required when deriving macro rates from ENOE")
+        enoe_data = parse_enoe_indicators(enoe_files[0], intended_period=intended_enoe_period)
+        source_manifest["sources"]["enoe"][0]["period"] = enoe_data["period"]
         tasa_pea = tasa_pea or enoe_data["tasa_pea"]
         til_1 = til_1 or enoe_data["til_1"]
 
@@ -369,7 +707,12 @@ def execute_pipeline(
         df_denue=df_denue_raw,
         ce_benchmarks=ce_benchmarks,
         til_1=til_1,
-        min_sample_threshold=macro.get("sample_threshold", 500)
+        min_sample_threshold=macro.get("sample_threshold", 500),
+        denominator_contract=(cfg.get("data_integrity") or {}).get("denue_municipal_denominators"),
+        denue_vintage=next(
+            (entry.get("year") for entry in source_manifest["sources"]["denue"] if entry.get("year") is not None),
+            None,
+        ),
     )
 
     # Imprimir tabla de calibración con desglose territorial BBOX
@@ -403,7 +746,25 @@ def execute_pipeline(
     growth_factors = macro.get("growth_factors", {}).copy()
     conapo_projs = None
     if conapo_files:
-        conapo_projs = parse_conapo_projections(conapo_files[0], as_growth_factors=True)
+        growth_denominator = temporal_cfg.get("conapo_growth_denominator")
+        if growth_denominator not in {"conapo_2020", "cpv_2020"}:
+            raise ValueError(
+                "temporal.conapo_growth_denominator must explicitly be 'conapo_2020' or 'cpv_2020'"
+            )
+        conapo_meta = parse_conapo_projections(
+            conapo_files[0], target_year=model_year, base_year=cpv_base_year,
+            as_growth_factors=growth_denominator == "conapo_2020", return_metadata=True,
+            population_column=temporal_cfg.get("conapo_population_column"),
+            source_year=(temporal_cfg.get("source_vintages") or {}).get("conapo"),
+        )
+        conapo_projs = conapo_meta["values"]
+        source_manifest["sources"]["conapo"][0].update({
+            "base_year": conapo_meta["base_year"],
+            "target_year": conapo_meta["target_year"],
+            "population_column": conapo_meta["population_column"],
+            "growth_denominator": growth_denominator,
+            "year_provenance": conapo_meta["year_provenance"],
+        })
         if conapo_projs:
             console.print(f"-> Proyecciones CONAPO cargadas automáticamente: [green]{len(conapo_projs)}[/green] municipios ({os.path.basename(conapo_files[0])}).")
 
@@ -415,7 +776,10 @@ def execute_pipeline(
         growth_factors=growth_factors,
         conapo_projections=conapo_projs,
         default_growth=macro.get("default_growth_factor", 1.0),
-        marco_paths=marco_files if marco_files else None
+        marco_paths=marco_files if marco_files else None,
+        max_unmatched_population_fraction=float(
+            (cfg.get("data_integrity") or {}).get("max_unmatched_population_fraction", 0.01)
+        ),
     )
     total_cpv_pop = float(df_cpv['pobtot_adj'].sum()) if len(df_cpv) > 0 else 0.0
     total_cpv_pea = float(df_cpv['pea_real'].sum()) if len(df_cpv) > 0 else 0.0
@@ -472,7 +836,7 @@ def execute_pipeline(
         enabled_excl = [z for z in exclusion_zones if z.get("enabled", True)]
         console.print(f"-> Zonas de Exclusión detectadas: [bold red]{len(enabled_excl)}[/bold red] activas ({len(exclusion_zones)} totales) - Sin simulación de demanda en sus perímetros.")
 
-    demand_points, poi_audit = build_demand_grid(
+    demand_points, poi_audit, employment_ledger = build_demand_grid(
         df_denue=df_denue,
         df_cpv=df_cpv,
         special_pois=pois_cfg,
@@ -484,7 +848,8 @@ def execute_pipeline(
         affluence_zones=affluence_zones,
         exclusion_zones=exclusion_zones,
         urban_core_polygon=city_info.get("urban_core_polygon"),
-        restrict_demand_to_urban_core=city_info.get("restrict_demand_to_urban_core", True)
+        restrict_demand_to_urban_core=city_info.get("restrict_demand_to_urban_core", True),
+        return_employment_ledger=True,
     )
 
     console.print(f"-> Nodos de demanda consolidados: [green]{len(demand_points):,}[/green]")
@@ -504,14 +869,40 @@ def execute_pipeline(
     # =========================================================================
     # 4. MODELO GRAVITATORIO Y GENERACIÓN DE COHORTES (MULTINOMIAL)
     # =========================================================================
-    console.print(f"\n[bold yellow]4. Modelo Gravitatorio y Generación de Cohortes (Multinomial)[/bold yellow]")
+    console.print(f"\n[bold yellow]4. Modelo Gravitatorio, OD Entera y Cohortes Deterministas[/bold yellow]")
+
+    gravity_input_contract = build_gravity_input_contract(
+        df_cpv=df_cpv,
+        df_denue=df_denue,
+        demand_points=demand_points,
+        exclusion_zones=exclusion_zones,
+        urban_core_polygon=city_info.get("urban_core_polygon"),
+        restrict_demand_to_urban_core=city_info.get("restrict_demand_to_urban_core", True),
+        employment_ledger=employment_ledger,
+    )
+    with open(os.path.join(out_dir, "source_manifest.json"), "w", encoding="utf-8") as manifest_file:
+        json.dump(source_manifest, manifest_file, indent=2, ensure_ascii=False)
+    integrity_audit = {
+        "source_manifest": source_manifest,
+        "temporal_contract": source_manifest["temporal_contract"],
+        "denue_calibration": audit_calib,
+        "gravity_input_contract": gravity_input_contract,
+    }
+    with open(os.path.join(out_dir, "data_integrity_audit.json"), "w", encoding="utf-8") as audit_file:
+        json.dump(
+            integrity_audit,
+            audit_file,
+            indent=2,
+            ensure_ascii=False,
+            default=lambda value: value.item() if hasattr(value, "item") else str(value),
+        )
 
     isolated_zones = cfg.get("isolated_zones", cfg.get("city", {}).get("isolated_zones", []))
     if isolated_zones:
         console.print(f"-> Zonas topológicas aisladas detectadas: [cyan]{len(isolated_zones)}[/cyan] zonas.")
     console.print("-> Motor Gravitatorio Doblemente Acotado (Furness / IPFP): [green]Habilitado[/green]")
 
-    total_pea = sum(p.get("pea_15ymas", 0) for p in demand_points)
+    total_pea = gravity_input_contract["authoritative_marginals"]["workers_origins_pea"]
 
     target_pop_size = macro.get("target_pop_size", 180)
     max_pop_size = macro.get("max_pop_size", 200)
@@ -519,7 +910,7 @@ def execute_pipeline(
 
     console.print(f"-> Escala canónica de cohortes: [cyan]min_pop_size = {min_pop_size} | target_pop_size = {target_pop_size} | max_pop_size = {max_pop_size} | seed = {seed}[/cyan] (PEA Total: {total_pea:,})")
 
-    raw_pops = simulate_gravity_demand(
+    raw_pops, od_diagnostics = simulate_gravity_demand(
         demand_points=demand_points,
         beta=macro.get("gravity_beta", 0.12),
         max_distance_km=macro.get("max_distance_km", 55.0),
@@ -529,24 +920,59 @@ def execute_pipeline(
         seed=seed,
         isolated_zones=isolated_zones,
         affluence_zones=affluence_zones,
-        furness_iterations=macro.get("furness_iterations", 15),
-        furness_tol=macro.get("furness_tol", 0.02),
-        road_index=None
+        furness_iterations=macro.get("furness_iterations", 1000),
+        furness_tol=macro.get("furness_tol", 1e-10),
+        road_index=None,
+        return_diagnostics=True,
+    )
+    feasibility_diagnostics = od_diagnostics["feasibility"]
+    integerization_diagnostics = od_diagnostics["integerization"]
+    integrity_audit["od_allocation"] = {
+        "origin_count": feasibility_diagnostics["origin_count"],
+        "destination_count": feasibility_diagnostics["destination_count"],
+        "support_vertex_count": feasibility_diagnostics["support_vertex_count"],
+        "support_edge_count": feasibility_diagnostics["support_edge_count"],
+        "components": feasibility_diagnostics["components"],
+        "max_flow_shortfall": feasibility_diagnostics["max_flow_shortfall"],
+        "validation_seconds": feasibility_diagnostics["validation_seconds"],
+        "max_flow_seconds": feasibility_diagnostics["max_flow_seconds"],
+        "ipfp": {
+            key: value for key, value in od_diagnostics["ipfp"].items()
+            if key != "feasibility"
+        },
+        "integerization": integerization_diagnostics,
+        "undersized_cohorts": od_diagnostics["undersized_cohorts"],
+    }
+    with open(os.path.join(out_dir, "data_integrity_audit.json"), "w", encoding="utf-8") as audit_file:
+        json.dump(
+            integrity_audit,
+            audit_file,
+            indent=2,
+            ensure_ascii=False,
+            default=lambda value: value.item() if hasattr(value, "item") else str(value),
+        )
+    console.print(
+        "-> OD factible e integerizada: "
+        f"[cyan]{feasibility_diagnostics['support_edge_count']:,}[/cyan] aristas, "
+        f"max-flow {feasibility_diagnostics['max_flow_seconds']:.3f}s, "
+        f"IPFP {od_diagnostics['ipfp']['ipfp_seconds']:.3f}s, "
+        f"integerización {integerization_diagnostics['integerization_seconds']:.3f}s."
     )
 
     console.print(f"-> Pipeline Canónico de Consolidación y Escala Subway Builder:")
     raw_pop_count = len(raw_pops)
 
-    # 1. Clustering espacial de puntos contiguos (Colin's method)
-    demand_points, pops = cluster_demand_points(demand_points, raw_pops)
+    # Tras fijar la matriz OD no se permite clustering ni relocalización entre pares.
+    # La única transformación válida es volver a empacar cohortes del mismo OD exacto.
+    pops = merge_identical_commutes(
+        raw_pops,
+        min_pop_size=min_pop_size,
+        max_pop_size=max_pop_size,
+        target_pop_size=target_pop_size,
+        include_driving_path=include_driving_path,
+    )
 
-    # 2. Consolidación de micro-flujos residuales hacia nodos principales
-    demand_points, pops = consolidate_small_pops(demand_points, pops, min_pop_size=min_pop_size, max_pop_size=max_pop_size)
-
-    # 3. Fusión de viajes idénticos
-    pops = merge_identical_commutes(pops, min_pop_size=min_pop_size, max_pop_size=max_pop_size, include_driving_path=include_driving_path)
-
-    # 4. Sincronización 1:1 entre display (residents, jobs) y simulación real
+    # La sincronización valida los marginales autoritativos; no reescribe empleo.
     demand_points, pops = sync_demand_points_and_pops(demand_points, pops, remove_orphans=True, include_driving_path=include_driving_path)
 
     total_viajeros = sum(p["size"] for p in pops)
@@ -606,7 +1032,7 @@ def execute_pipeline(
     # 5. ENRIQUECIMIENTO CANÓNICO DE RUTAS VIALES (OSRM)
     # =========================================================================
     console.print(f"\n[bold yellow]5. Enriquecimiento Canónico de Rutas Viales (OSRM)[/bold yellow]")
-    pbf_candidates = find_sources(["*.osm.pbf"])
+    pbf_candidates = manifest_paths(source_manifest, "osm")
     osm_pbf = pbf_candidates[0] if pbf_candidates else None
     docker_avail, docker_env = is_docker_available()
 
@@ -652,17 +1078,17 @@ def execute_pipeline(
         dp_locs = {p["id"]: p["location"] for p in demand_points}
         import math
         for p in pops:
-            if "drivingSeconds" not in p or not p.get("drivingSeconds"):
-                o_loc = dp_locs.get(p.get("residenceId"))
-                d_loc = dp_locs.get(p.get("jobId"))
-                if o_loc and d_loc:
-                    cos_lat = math.cos(math.radians((o_loc[1] + d_loc[1]) / 2.0))
-                    dx_m = (d_loc[0] - o_loc[0]) * 111_320.0 * cos_lat
-                    dy_m = (d_loc[1] - o_loc[1]) * 110_574.0
-                    euclid_m = math.hypot(dx_m, dy_m)
-                    fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
-                    p["drivingDistance"] = fb_dist
-                    p["drivingSeconds"] = fb_sec
+            o_loc = dp_locs.get(p.get("residenceId"))
+            d_loc = dp_locs.get(p.get("jobId"))
+            if o_loc and d_loc:
+                cos_lat = math.cos(math.radians((o_loc[1] + d_loc[1]) / 2.0))
+                dx_m = (d_loc[0] - o_loc[0]) * 111_320.0 * cos_lat
+                dy_m = (d_loc[1] - o_loc[1]) * 110_574.0
+                euclid_m = math.hypot(dx_m, dy_m)
+                fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
+                p["drivingDistance"] = fb_dist
+                p["drivingSeconds"] = fb_sec
+                p.pop("drivingPath", None)
 
     # =========================================================================
     # 5.1. LABORATORIO EXPERIMENTAL: COMPETITIVIDAD MODAL (AUTO VS. METRO)
@@ -759,10 +1185,8 @@ def execute_pipeline(
     cfg_out_path = os.path.join(out_dir, "config.json")
     demand_out_path = os.path.join(out_dir, "demand_data.json")
 
-    try:
-        from depot.demand import DemandData
-        dd = DemandData({"points": clean_demand_points, "pops": pops})
-        dd.sanitize()
+    dd = _prepare_depot_demand(clean_demand_points, pops)
+    if dd is not None:
         # Generar config.json con viewport calculado por depot
         dd.generate_config(
             name=city_info["name"],
@@ -786,9 +1210,8 @@ def execute_pipeline(
 
         dd.save(demand_out_path)
         console.print("[green][OK][/green] Sanitización y exportación mediante [bold]depot.demand.DemandData[/bold] exitosa.")
-    except Exception as e:
-        console.print(f"[yellow]Nota: depot.demand fallback nativo ({e}). Exportando directamente...[/yellow]")
-        # Exportación manual de respaldo
+    else:
+        console.print("[yellow]depot.demand no está instalado; usando exportador local validado.[/yellow]")
         with open(demand_out_path, "w", encoding="utf-8") as f:
             json.dump({"points": clean_demand_points, "pops": pops}, f, separators=(',', ':'))
 
@@ -817,11 +1240,13 @@ def execute_pipeline(
             special_pois_cfg=pois_cfg,
             demand_points=demand_points
         )
-        is_valid, validation_errors = validate_special_demand_points(sp_doc)
+        is_valid, validation_errors = validate_special_demand_points(
+            sp_doc,
+            demand_data={"points": clean_demand_points, "pops": pops},
+            expected_map_code=city_code,
+        )
         if not is_valid:
-            console.print(f"[bold red][WARN] Advertencia de validación en Special Demand Points ({len(validation_errors)} errores):[/bold red]")
-            for err in validation_errors:
-                console.print(f"  - [red]{err}[/red]")
+            raise ValueError("Special demand validation failed: " + "; ".join(validation_errors))
         else:
             console.print(f"[green][OK][/green] Validación Special Demand Schema: [bold green]OK ({len(sp_doc['points'])} POIs conformes con @subway-builder-modded/special-demand-schemas)[/bold green]")
 
@@ -854,7 +1279,10 @@ def execute_pipeline(
             f"Puedes compilar la cartografía en WSL/Linux o colocar los archivos generados en la carpeta del proyecto.",
             style="yellow"
         ))
-        return demand_out_path
+        return BuildResult(
+            status="demand_only", build_id=build_id, city_code=city_code,
+            config_identity=config_identity, demand_path=demand_out_path, staging_dir=out_dir,
+        )
 
     files_to_pack = [
         "config.json",
@@ -867,12 +1295,15 @@ def execute_pipeline(
         "ocean_depth_index.json.gz"
     ]
 
+    validate_package_integrity(out_dir, city_code)
+
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
         for fname in files_to_pack:
             fpath = os.path.join(out_dir, fname)
             if os.path.exists(fpath):
                 zipf.write(fpath, arcname=fname)
                 console.print(f"  + Empaquetado: [dim]{fname}[/dim]")
+    _validate_created_zip(zip_path, city_code)
 
     console.print(Panel.fit(
         f"[bold green]¡PAQUETE {zip_name} GENERADO CON ÉXITO![/bold green]\n"
@@ -880,7 +1311,103 @@ def execute_pipeline(
         style="green"
     ))
 
-    return zip_path
+    return BuildResult(
+        status="package_created", build_id=build_id, city_code=city_code,
+        config_identity=config_identity, package_path=zip_path, demand_path=demand_out_path,
+        staging_dir=out_dir, package_sha256=_sha256_file(zip_path),
+    )
+
+
+def execute_pipeline(
+    config_path: str,
+    skip_map: bool = False,
+    output_dir: str = ".",
+    data_dir: Optional[str] = None,
+    include_driving_path: Optional[bool] = None,
+) -> BuildResult:
+    """Run in unique staging and promote only a validated package from this run."""
+    config_path = os.path.abspath(config_path)
+    cfg = load_city_config(config_path)
+    city_code = cfg["city"]["code"]
+    city_base = os.path.splitext(os.path.basename(config_path))[0].lower()
+    final_dir = (
+        os.path.join(ROOT_DIR, "dist", city_base)
+        if output_dir in (".", ROOT_DIR, "") else os.path.abspath(output_dir)
+    )
+    build_id = uuid.uuid4().hex
+    identity = _config_identity(config_path)
+    stage_dir = os.path.join(os.path.dirname(final_dir), f".{os.path.basename(final_dir)}.staging-{build_id}")
+    os.makedirs(stage_dir, exist_ok=False)
+    audit_path = os.path.join(stage_dir, "build_status.json")
+
+    def write_status(status: str, **extra: Any) -> None:
+        record = {
+            "status": status, "build_id": build_id, "city_code": city_code,
+            "config_identity": identity, "updated_at": datetime.now(timezone.utc).isoformat(),
+            "package_validated": status in {"package_validated", "package_created"},
+            "package_created": status == "package_created",
+            **extra,
+        }
+        with open(audit_path, "w", encoding="utf-8") as stream:
+            json.dump(record, stream, indent=2, ensure_ascii=False)
+
+    write_status("started")
+    try:
+        if skip_map:
+            manifest = resolve_source_manifest(cfg, config_path, ROOT_DIR, data_dir=data_dir)
+            expected = _cartography_identity(cfg, manifest)
+            existing_manifest_path = os.path.join(final_dir, "cartography_manifest.json")
+            if not os.path.isfile(existing_manifest_path):
+                raise ValueError("--skip-map cannot reuse unverifiable maps: cartography_manifest.json is missing")
+            with open(existing_manifest_path, encoding="utf-8") as stream:
+                existing = json.load(stream)
+            if existing.get("fingerprint") != expected.get("fingerprint"):
+                raise ValueError("--skip-map rejected stale/incompatible cartography artifacts for current city, BBOX, OSM source, or map configuration")
+            reusable = (f"{city_code}.pmtiles", *MAP_ARTIFACTS, "cartography_manifest.json")
+            for name in reusable:
+                source = os.path.join(final_dir, name)
+                if os.path.isfile(source):
+                    shutil.copy2(source, os.path.join(stage_dir, name))
+            for required in (f"{city_code}.pmtiles", "roads.geojson"):
+                if not os.path.isfile(os.path.join(stage_dir, required)):
+                    raise ValueError(f"--skip-map compatible artifact set is incomplete: missing {required}")
+
+        result = _execute_pipeline_run(
+            config_path=config_path, skip_map=skip_map, output_dir=stage_dir,
+            data_dir=data_dir, include_driving_path=include_driving_path,
+            build_id=build_id, config_identity=identity,
+        )
+        if not result.package_created:
+            write_status("incomplete", result_status=result.status, demand_path=result.demand_path)
+            return result
+
+        if _config_identity(config_path) != identity:
+            raise ValueError("Configuration changed during execution; refusing package promotion")
+        _verify_source_manifest_unchanged(os.path.join(stage_dir, "source_manifest.json"))
+
+        write_status("package_validated", package_path=result.package_path, package_sha256=result.package_sha256)
+        backup_dir = f"{final_dir}.previous-{build_id}"
+        moved_previous = False
+        try:
+            if os.path.isdir(final_dir):
+                os.replace(final_dir, backup_dir)
+                moved_previous = True
+            os.replace(stage_dir, final_dir)
+        except Exception:
+            if moved_previous and not os.path.exists(final_dir) and os.path.isdir(backup_dir):
+                os.replace(backup_dir, final_dir)
+            raise
+        if moved_previous:
+            shutil.rmtree(backup_dir)
+        promoted_package = os.path.join(final_dir, os.path.basename(result.package_path))
+        promoted_demand = os.path.join(final_dir, os.path.basename(result.demand_path))
+        audit_path = os.path.join(final_dir, "build_status.json")
+        write_status("package_created", package_path=promoted_package, package_sha256=result.package_sha256)
+        return replace(result, package_path=promoted_package, demand_path=promoted_demand, staging_dir=None)
+    except Exception as exc:
+        if os.path.isdir(stage_dir):
+            write_status("failed", error=str(exc))
+        raise
 
 
 if __name__ == "__main__":

@@ -319,7 +319,7 @@ class TestFurnessIpfpReachBonusAndLocalRetention(unittest.TestCase):
 
     def test_reach_bonus_flattens_friction_and_conserves_rows(self):
         orig_pea = np.array([100.0, 100.0])
-        dest_jobs = np.array([200.0, 200.0]) # Dos destinos con igual masa de empleo
+        dest_jobs = np.array([100.0, 100.0]) # Marginal duro con la misma masa total
 
         # Matriz de distancia: origen 0 esta cerca de destino 0 (2 km) y lejos de destino 1 (30 km)
         # Origen 1 esta a 30 km de destino 0 y a 30 km de destino 1
@@ -331,8 +331,10 @@ class TestFurnessIpfpReachBonusAndLocalRetention(unittest.TestCase):
         # Destino 1 tiene un reach_bonus de 0.40 (expande su alcance metropolitano)
         reach_bonuses = np.array([0.0, 0.40])
 
-        P_base = furness_ipfp_balance(orig_pea, dest_jobs, dist_mat, reach_bonuses=None, beta=0.12)
-        P_boost = furness_ipfp_balance(orig_pea, dest_jobs, dist_mat, reach_bonuses=reach_bonuses, beta=0.12)
+        T_base = furness_ipfp_balance(orig_pea, dest_jobs, dist_mat, reach_bonuses=None, beta=0.12)
+        T_boost = furness_ipfp_balance(orig_pea, dest_jobs, dist_mat, reach_bonuses=reach_bonuses, beta=0.12)
+        P_base = T_base / orig_pea[:, None]
+        P_boost = T_boost / orig_pea[:, None]
 
         # Invariante 1: Cada fila debe sumar 1.0 (conservacion de probabilidades)
         np.testing.assert_allclose(P_boost.sum(axis=1), np.array([1.0, 1.0]), atol=1e-5)

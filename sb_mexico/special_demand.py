@@ -201,7 +201,9 @@ def generate_special_demand_points_doc(
 
 def validate_special_demand_points(
     content: Dict[str, Any],
-    types_doc: Optional[Dict[str, Any]] = None
+    types_doc: Optional[Dict[str, Any]] = None,
+    demand_data: Optional[Dict[str, Any]] = None,
+    expected_map_code: Optional[str] = None,
 ) -> Tuple[bool, List[str]]:
     """
     Valida rigurosamente el documento special_demand_points.json contra:
@@ -220,11 +222,28 @@ def validate_special_demand_points(
         errors.append("El campo 'points' debe ser una lista.")
         return False, errors
 
+    if expected_map_code is not None and content.get("map_code") != expected_map_code:
+        errors.append(
+            f"El map_code '{content.get('map_code')}' no coincide con el paquete '{expected_map_code}'."
+        )
+    demand_point_ids = None
+    demand_pop_ids = None
+    if demand_data is not None:
+        demand_point_ids = {point.get("id") for point in demand_data.get("points", [])}
+        demand_pop_ids = {pop.get("id") for pop in demand_data.get("pops", [])}
+
+    seen_point_ids = set()
+
     for idx, pt in enumerate(content["points"]):
         p_id = pt.get("point_id")
         if not p_id or not isinstance(p_id, str):
             errors.append(f"Punto #{idx}: 'point_id' obligatorio no válido.")
             continue
+        if p_id in seen_point_ids:
+            errors.append(f"Punto '{p_id}': point_id duplicado.")
+        seen_point_ids.add(p_id)
+        if demand_point_ids is not None and p_id not in demand_point_ids:
+            errors.append(f"Punto '{p_id}': point_id no existe en demand_data.json.")
 
         p_type = pt.get("type")
         if not p_type or p_type not in valid_types:
@@ -243,6 +262,16 @@ def validate_special_demand_points(
         pop_ids = pt.get("pop_ids")
         if not isinstance(pop_ids, list):
             errors.append(f"Punto '{p_id}': 'pop_ids' debe ser una lista de cadenas.")
+        elif demand_pop_ids is not None:
+            dangling = set(pop_ids) - demand_pop_ids
+            if dangling:
+                errors.append(f"Punto '{p_id}': pop_ids inexistentes en demand_data.json: {sorted(dangling)}")
+
+        sibling_ids = pt.get("sibling_point_ids", [])
+        if demand_point_ids is not None and isinstance(sibling_ids, list):
+            dangling_siblings = set(sibling_ids) - demand_point_ids
+            if dangling_siblings:
+                errors.append(f"Punto '{p_id}': sibling_point_ids inexistentes: {sorted(dangling_siblings)}")
 
     try:
         import jsonschema
