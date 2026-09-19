@@ -967,9 +967,9 @@ def simulate_gravity_demand(
         sp_id = sp_dest["id"]
         # Determinar tamaño de cohorte por tipo de infraestructura
         if sp_id.startswith("UNI_"):
-            cohort_limit = min(75, max_pop_size)   # Flujo escalonado universitario
+            cohort_limit = min(75, max_pop_size) if min_pop_size < max_pop_size else max_pop_size   # Flujo escalonado universitario
         elif sp_id.startswith("AIR_"):
-            cohort_limit = min(120, max_pop_size)  # Flujo continuo 24/7 de aeropuerto
+            cohort_limit = min(120, max_pop_size) if min_pop_size < max_pop_size else max_pop_size  # Flujo continuo 24/7 de aeropuerto
         else:
             cohort_limit = max_pop_size
 
@@ -1205,6 +1205,12 @@ def simulate_gravity_demand(
                 if pax_count > 0:
                     if pax_count <= max_pop_size:
                         chunks = [pax_count]
+                    elif min_pop_size >= max_pop_size:
+                        full_chunks = pax_count // max_pop_size
+                        rem = pax_count % max_pop_size
+                        chunks = [max_pop_size] * full_chunks
+                        if rem > 0:
+                            chunks.append(rem)
                     else:
                         num_chunks = int(math.ceil(pax_count / max_pop_size))
                         base = pax_count // num_chunks
@@ -1266,6 +1272,12 @@ def merge_identical_commutes(
 
         if total_size <= max_pop_size:
             chunks = [total_size]
+        elif min_pop_size >= max_pop_size:
+            full_chunks = total_size // max_pop_size
+            rem = total_size % max_pop_size
+            chunks = [max_pop_size] * full_chunks
+            if rem > 0:
+                chunks.append(rem)
         else:
             num_chunks = int(math.ceil(total_size / max_pop_size))
             base = total_size // num_chunks

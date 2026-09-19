@@ -103,6 +103,54 @@ class TestCohortBounds(unittest.TestCase):
         total_after = sum(p["size"] for p in consolidated)
         self.assertEqual(total_before, total_after, "La consolidacion debe conservar la masa")
 
+    def test_rigid_mode_partitioning(self):
+        """Verifica que en modo rigido (min_pop_size == max_pop_size == 200) se generen bloques enteros exactos."""
+        sample_pops = [
+            {"id": "pop_001", "residenceId": "orig_0", "jobId": "dest_0", "size": 300, "drivingSeconds": 600, "drivingDistance": 5000},
+            {"id": "pop_002", "residenceId": "orig_0", "jobId": "dest_0", "size": 350, "drivingSeconds": 600, "drivingDistance": 5000},
+        ]
+        # Total = 650. En modo rigido 200 debe particionar en [200, 200, 200, 50]
+        merged = merge_identical_commutes(sample_pops, min_pop_size=200, max_pop_size=200)
+        sizes = [p["size"] for p in merged]
+        self.assertEqual(sum(sizes), 650)
+        self.assertEqual(sizes, [200, 200, 200, 50])
+
+        # Exactamente 600 -> [200, 200, 200]
+        sample_pops_600 = [
+            {"id": "pop_001", "residenceId": "orig_0", "jobId": "dest_0", "size": 600, "drivingSeconds": 600, "drivingDistance": 5000},
+        ]
+        merged_600 = merge_identical_commutes(sample_pops_600, min_pop_size=200, max_pop_size=200)
+        sizes_600 = [p["size"] for p in merged_600]
+        self.assertEqual(sizes_600, [200, 200, 200])
+
+    def test_rigid_mode_gravity_simulation(self):
+        """Verifica que simulate_gravity_demand en modo rigido conserve PEA y respete el tope de 200."""
+        origins = [
+            {"id": "orig_0", "location": [-86.85, 21.15], "residents": 1000, "jobs": 0, "pea_15ymas": 600, "popIds": []},
+            {"id": "orig_1", "location": [-86.86, 21.16], "residents": 600, "jobs": 0, "pea_15ymas": 400, "popIds": []},
+        ]
+        dests = [
+            {"id": "dest_0", "location": [-86.84, 21.14], "residents": 0, "jobs": 500, "pea_15ymas": 0, "popIds": []},
+            {"id": "dest_1", "location": [-86.83, 21.13], "residents": 0, "jobs": 500, "pea_15ymas": 0, "popIds": []},
+        ]
+        demand_points = origins + dests
+        pops = simulate_gravity_demand(
+            demand_points=demand_points,
+            beta=0.12,
+            min_pop_size=200,
+            target_pop_size=200,
+            max_pop_size=200,
+            max_distance_km=25.0,
+            seed=42
+        )
+
+        total_pea_expected = 600 + 400  # 1000
+        total_pax_generated = sum(p["size"] for p in pops)
+        self.assertEqual(total_pax_generated, total_pea_expected, "Conservacion estricta de masa PEA en modo rigido")
+
+        for p in pops:
+            self.assertLessEqual(p["size"], 200)
+
 
 if __name__ == "__main__":
     unittest.main()

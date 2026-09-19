@@ -243,6 +243,37 @@ class TestWizardPersistence(unittest.TestCase):
             if os.path.exists(tmp_yaml):
                 os.remove(tmp_yaml)
 
+    def test_cohort_rigid_and_preset_persistence_roundtrip(self):
+        """Verifica que el modo rigido (200 pax) y los presets de cohortes persistan exactamente."""
+        tmp_yaml = os.path.join(os.path.dirname(__file__), "tmp_cohort_preset_test.yaml")
+        try:
+            # Caso: Modo rigido canonico 200
+            data_rigid = {
+                "city": {
+                    "code": "RGD",
+                    "name": "Rigid City",
+                    "bbox": [-87.0, 21.0, -86.8, 21.2]
+                },
+                "macroeconomics": {
+                    "min_pop_size": 200,
+                    "target_pop_size": 200,
+                    "max_pop_size": 200,
+                    "cohort_mode": "rigid",
+                    "cohort_preset": "canonical_200"
+                }
+            }
+            save_full_city_data(tmp_yaml, data_rigid)
+            reloaded = load_city_data(tmp_yaml)
+            m = reloaded.get("macroeconomics", {})
+            self.assertEqual(m.get("min_pop_size"), 200)
+            self.assertEqual(m.get("target_pop_size"), 200)
+            self.assertEqual(m.get("max_pop_size"), 200)
+            self.assertEqual(m.get("cohort_mode"), "rigid")
+            self.assertEqual(m.get("cohort_preset"), "canonical_200")
+
+        finally:
+            if os.path.exists(tmp_yaml):
+                os.remove(tmp_yaml)
 
 
 if __name__ == "__main__":

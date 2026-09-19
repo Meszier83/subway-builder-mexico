@@ -1169,33 +1169,114 @@
           </div>
 
           <!-- Control de Cohortes Demográficas (Pops) -->
-          <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border space-y-2">
+          <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border space-y-2.5">
             <div class="flex justify-between items-center">
               <div class="flex items-center space-x-2">
-                <span class="text-stone-900 font-bold text-xs">Rango de Cohortes de Pasajeros (Pops)</span>
+                <span class="text-stone-900 font-bold text-xs">Calibración de Cohortes de Pasajeros (Pops)</span>
                 <span class="text-[10px] px-1.5 py-0.5 bg-blue-100 border border-blue-200 text-blue-800 rounded font-semibold font-mono">Conserva PEA</span>
               </div>
-              <span class="text-[10px] text-stone-500 font-mono">Partición balanceada</span>
+              <span id="cohort_badge_mode" class="text-[10px] text-stone-600 font-mono bg-white px-2 py-0.5 rounded border border-stone-200">Adaptativo</span>
             </div>
+
             <p class="text-[11px] text-stone-600 leading-relaxed">
-              Define el tamaño mínimo y máximo de cada grupo de viajeros generado para Subway Builder. Evita micro-cohortes ineficientes (ej. 1–5 personas) sin perder masa demográfica total.
+              Define cómo se empaquetan los viajeros en agentes discretos para el motor WebGL. Permite alternar entre el tamaño canónico rígido (200 pax, estándar oficial de Colin Miller en Subway Builder) o un rango adaptativo para capturar demanda barrial sin comprometer los 60 FPS.
             </p>
-            <div class="grid grid-cols-3 gap-2 pt-1">
-              <div>
-                <label class="block text-stone-700 font-semibold text-[11px] mb-1">Mínimo (min_pop)</label>
-                <input type="number" id="cfg_min_pop_size" value="25" min="1" max="100" step="5" class="w-full bg-white border border-metro-border rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs font-bold text-center">
-                <span class="text-[9px] text-stone-500 block text-center mt-0.5">Mín: 1 (Estándar: 25)</span>
+
+            <!-- Arquetipos / Presets Rápidos (1-Clic) -->
+            <div class="pt-1">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-[10px] font-semibold text-stone-600 uppercase tracking-wider">Arquetipos Recomendados:</span>
+                <span class="text-[10px] text-stone-400 font-mono">1-clic</span>
               </div>
-              <div>
-                <label class="block text-stone-700 font-semibold text-[11px] mb-1">Objetivo (target_pop)</label>
-                <input type="number" id="cfg_target_pop_size" value="150" min="10" max="300" step="10" class="w-full bg-white border border-metro-border rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs font-bold text-center">
-                <span class="text-[9px] text-stone-500 block text-center mt-0.5">Referencia (150)</span>
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                <button type="button" id="btn_preset_canonical_200" onclick="setCohortPreset('canonical_200')" class="px-2 py-1.5 bg-white hover:bg-stone-50 border border-stone-200 hover:border-blue-500 text-stone-800 text-[10px] font-semibold rounded-lg text-center transition-all shadow-sm">
+                  🎯 Oficial Rígido
+                  <span class="text-blue-700 block font-mono font-bold text-[9px] mt-0.5">200 pax (Colin M.)</span>
+                </button>
+                <button type="button" id="btn_preset_metropoli_150" onclick="setCohortPreset('metropoli_150')" class="px-2 py-1.5 bg-white hover:bg-stone-50 border border-stone-200 hover:border-blue-500 text-stone-800 text-[10px] font-semibold rounded-lg text-center transition-all shadow-sm">
+                  🏙️ Metrópoli Grande
+                  <span class="text-stone-600 block font-mono font-bold text-[9px] mt-0.5">150 pax (CDMX/GDL)</span>
+                </button>
+                <button type="button" id="btn_preset_mediana_75" onclick="setCohortPreset('mediana_75')" class="px-2 py-1.5 bg-white hover:bg-stone-50 border border-stone-200 hover:border-blue-500 text-stone-800 text-[10px] font-semibold rounded-lg text-center transition-all shadow-sm">
+                  🌆 Intermedia
+                  <span class="text-stone-600 block font-mono font-bold text-[9px] mt-0.5">75 pax (QRO/MID)</span>
+                </button>
+                <button type="button" id="btn_preset_alta_fidelidad_35" onclick="setCohortPreset('alta_fidelidad_35')" class="px-2 py-1.5 bg-white hover:bg-stone-50 border border-stone-200 hover:border-blue-500 text-stone-800 text-[10px] font-semibold rounded-lg text-center transition-all shadow-sm">
+                  🔬 Alta Fidelidad
+                  <span class="text-stone-600 block font-mono font-bold text-[9px] mt-0.5">35 pax (CUN/PAC)</span>
+                </button>
               </div>
-              <div>
-                <label class="block text-stone-700 font-semibold text-[11px] mb-1">Máximo (max_pop)</label>
-                <input type="number" id="cfg_max_pop_size" value="200" min="20" max="500" step="10" class="w-full bg-white border border-metro-border rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs font-bold text-center">
-                <span class="text-[9px] text-stone-500 block text-center mt-0.5">Tope chunk (200)</span>
+            </div>
+
+            <!-- Selector de Modo: Adaptativo vs Rígido Canónico -->
+            <div class="bg-white/80 p-2.5 rounded-lg border border-stone-200 space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-[11px] font-bold text-stone-800">Modo de Empaquetado:</span>
+                <div class="inline-flex rounded-lg border border-stone-300 p-0.5 bg-stone-100 text-[11px]">
+                  <button type="button" id="btn_mode_adaptive" onclick="onCohortModeRadioChanged('adaptive')" class="px-2 py-0.5 rounded-md font-medium text-stone-800 bg-white shadow-xs transition-colors select-none">
+                    ⚖️ Adaptativo (Rango)
+                  </button>
+                  <button type="button" id="btn_mode_rigid" onclick="onCohortModeRadioChanged('rigid')" class="px-2 py-0.5 rounded-md font-medium text-stone-500 hover:text-stone-800 transition-colors select-none">
+                    🎯 Rígido Fijo
+                  </button>
+                </div>
               </div>
+
+              <!-- Controles Modo Rígido Fijo -->
+              <div id="cohort_rigid_controls" class="hidden pt-1">
+                <div class="flex items-center justify-between mb-1">
+                  <label class="block text-stone-700 font-semibold text-[11px]">Tamaño Fijo de Cohorte (pax exactos)</label>
+                  <span id="val_fixed_pop_size" class="text-blue-700 font-mono font-bold text-xs bg-blue-50 px-2 py-0.5 rounded border border-blue-200">200 pax</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <input type="range" id="cfg_fixed_pop_range" min="10" max="500" step="5" value="200" oninput="onFixedPopRangeChanged(this.value)" class="w-full accent-blue-600 cursor-pointer">
+                  <input type="number" id="cfg_fixed_pop_size" value="200" min="10" max="500" step="5" oninput="onFixedPopInputChanged(this.value)" class="w-20 bg-white border border-stone-300 rounded-lg px-2 py-1 text-stone-900 font-mono text-xs font-bold text-center">
+                </div>
+                <span class="text-[10px] text-stone-500 block mt-1">Todas las cohortes se generarán en múltiplos enteros de este tamaño (estándar Subway Builder: 200).</span>
+              </div>
+
+              <!-- Controles Modo Adaptativo (Rango min/target/max) -->
+              <div id="cohort_adaptive_controls" class="grid grid-cols-3 gap-2 pt-1">
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Mínimo (min_pop)</label>
+                  <input type="number" id="cfg_min_pop_size" value="25" min="1" max="500" step="5" oninput="onCohortParamChanged()" class="w-full bg-white border border-metro-border rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs font-bold text-center">
+                  <span class="text-[9px] text-stone-500 block text-center mt-0.5">Piso (Estándar: 25)</span>
+                </div>
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Objetivo (target_pop)</label>
+                  <input type="number" id="cfg_target_pop_size" value="150" min="10" max="500" step="5" oninput="onCohortParamChanged()" class="w-full bg-white border border-metro-border rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs font-bold text-center">
+                  <span class="text-[9px] text-stone-500 block text-center mt-0.5">Mediana (~150)</span>
+                </div>
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Máximo (max_pop)</label>
+                  <input type="number" id="cfg_max_pop_size" value="200" min="20" max="500" step="5" oninput="onCohortParamChanged()" class="w-full bg-white border border-metro-border rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs font-bold text-center">
+                  <span class="text-[9px] text-stone-500 block text-center mt-0.5">Tope chunk (200)</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Panel de Telemetría Dinámica de Cohortes y Medidor WebGL -->
+            <div id="cohort_telemetry_box" class="bg-stone-50 p-2.5 rounded-lg border border-stone-200 text-xs space-y-1.5">
+              <div class="flex justify-between items-center">
+                <span class="font-bold text-stone-800 flex items-center gap-1.5">
+                  <i data-lucide="gauge" class="w-3.5 h-3.5 text-stone-500"></i>
+                  <span>Estimación de Cohortes y Carga WebGL:</span>
+                </span>
+                <span id="cohort_fps_badge" class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-green-100 text-green-800 border border-green-200">🟢 60 FPS Sólido</span>
+              </div>
+              <div class="grid grid-cols-2 gap-2 text-[11px]">
+                <div class="bg-white p-1.5 rounded border border-stone-200/70">
+                  <span class="text-[10px] text-stone-500 block">Pops Estimados:</span>
+                  <span id="cohort_estimated_pops" class="font-mono font-bold text-stone-800">~15,000 pops</span>
+                </div>
+                <div class="bg-white p-1.5 rounded border border-stone-200/70">
+                  <span class="text-[10px] text-stone-500 block">Dinámica en Andenes:</span>
+                  <span id="cohort_dynamics_text" class="font-medium text-stone-700 truncate">Flujo escalonado continuo</span>
+                </div>
+              </div>
+              <span id="cohort_recommendation_text" class="text-[10px] text-stone-500 block">
+                Valores dentro del rango óptimo (< 20,000 pops). Máxima fluidez y estabilidad sin riesgo de sobrecarga.
+              </span>
             </div>
           </div>
 
@@ -7006,6 +7087,12 @@
       const popEl = document.getElementById('cfg_max_pop_size');
       if (popEl) cityData.macroeconomics.max_pop_size = parseInt(popEl.value, 10) || 200;
 
+      if (!cityData.macroeconomics.cohort_mode) {
+        const minP = cityData.macroeconomics.min_pop_size;
+        const maxP = cityData.macroeconomics.max_pop_size;
+        cityData.macroeconomics.cohort_mode = (minP === maxP) ? 'rigid' : 'adaptive';
+      }
+
       const sampleThreshEl = document.getElementById('cfg_sample_threshold');
       if (sampleThreshEl) cityData.macroeconomics.sample_threshold = parseInt(sampleThreshEl.value, 10) || 500;
 
@@ -7162,6 +7249,7 @@
       document.getElementById('cfg_min_pop_size').value = m.min_pop_size || 25;
       document.getElementById('cfg_target_pop_size').value = m.target_pop_size || 150;
       document.getElementById('cfg_max_pop_size').value = m.max_pop_size || 200;
+      updateCohortUIFromData();
 
       const stEl = document.getElementById('cfg_sample_threshold');
       if (stEl) stEl.value = m.sample_threshold !== undefined ? m.sample_threshold : 500;
@@ -7214,7 +7302,8 @@
         'cfg_building_filter_size', 'cfg_building_simplification',
         'cfg_bbox_0', 'cfg_bbox_1', 'cfg_bbox_2', 'cfg_bbox_3',
         'cfg_tasa_pea', 'cfg_til_1', 'cfg_gravity_beta',
-        'cfg_max_distance_km', 'cfg_min_pop_size', 'cfg_target_pop_size', 'cfg_max_pop_size', 'cfg_seed',
+        'cfg_max_distance_km', 'cfg_min_pop_size', 'cfg_target_pop_size', 'cfg_max_pop_size',
+        'cfg_fixed_pop_size', 'cfg_fixed_pop_range', 'cfg_seed',
         'cfg_sample_threshold', 'cfg_furness_iterations', 'cfg_furness_tol',
         'cfg_modal_experiment_enabled', 'cfg_modal_experiment_preset',
         'cfg_modal_traffic_speed', 'cfg_modal_motorization_rate',
@@ -7655,6 +7744,273 @@
       if (ratEl && rec.rationale) {
         ratEl.innerText = rec.rationale;
       }
+    }
+
+    // =========================================================================
+    // SUITE DE CALIBRACIÓN DE COHORTES (POPS) Y MODO RÍGIDO CANÓNICO
+    // =========================================================================
+    function setCohortPreset(presetName) {
+      if (!cityData.macroeconomics) cityData.macroeconomics = {};
+      cityData.macroeconomics.cohort_preset = presetName;
+
+      if (presetName === 'canonical_200') {
+        setCohortMode('rigid', false);
+        setCohortFixedValue(200, false);
+      } else if (presetName === 'metropoli_150') {
+        setCohortMode('adaptive', false);
+        setCohortValues(25, 150, 200, false);
+      } else if (presetName === 'mediana_75') {
+        setCohortMode('adaptive', false);
+        setCohortValues(20, 75, 120, false);
+      } else if (presetName === 'alta_fidelidad_35') {
+        setCohortMode('adaptive', false);
+        setCohortValues(10, 35, 60, false);
+      }
+
+      highlightActiveCohortPreset(presetName);
+      updateCohortTelemetry();
+      triggerAutoSave();
+    }
+
+    function highlightActiveCohortPreset(presetName) {
+      const presets = ['canonical_200', 'metropoli_150', 'mediana_75', 'alta_fidelidad_35'];
+      presets.forEach(p => {
+        const btn = document.getElementById(`btn_preset_${p}`);
+        if (!btn) return;
+        if (p === presetName) {
+          btn.classList.add('border-blue-500', 'ring-2', 'ring-blue-200', 'bg-blue-50/50');
+          btn.classList.remove('border-stone-200', 'bg-white');
+        } else {
+          btn.classList.remove('border-blue-500', 'ring-2', 'ring-blue-200', 'bg-blue-50/50');
+          btn.classList.add('border-stone-200', 'bg-white');
+        }
+      });
+    }
+
+    function onCohortModeRadioChanged(mode) {
+      setCohortMode(mode, true);
+    }
+
+    function setCohortMode(mode, triggerSave = true) {
+      if (!cityData.macroeconomics) cityData.macroeconomics = {};
+      cityData.macroeconomics.cohort_mode = mode;
+
+      const isRigid = (mode === 'rigid');
+      const rigidBox = document.getElementById('cohort_rigid_controls');
+      const adaptiveBox = document.getElementById('cohort_adaptive_controls');
+      const badgeMode = document.getElementById('cohort_badge_mode');
+      const btnAdapt = document.getElementById('btn_mode_adaptive');
+      const btnRigid = document.getElementById('btn_mode_rigid');
+
+      if (rigidBox && adaptiveBox) {
+        if (isRigid) {
+          rigidBox.classList.remove('hidden');
+          adaptiveBox.classList.add('hidden');
+        } else {
+          rigidBox.classList.add('hidden');
+          adaptiveBox.classList.remove('hidden');
+        }
+      }
+
+      if (badgeMode) {
+        badgeMode.innerText = isRigid ? '🎯 Rígido Canónico' : '⚖️ Adaptativo';
+        badgeMode.className = isRigid 
+          ? 'text-[10px] text-blue-800 font-mono bg-blue-50 px-2 py-0.5 rounded border border-blue-200 font-bold'
+          : 'text-[10px] text-stone-600 font-mono bg-white px-2 py-0.5 rounded border border-stone-200';
+      }
+
+      if (btnAdapt && btnRigid) {
+        if (isRigid) {
+          btnRigid.className = 'px-2 py-0.5 rounded-md font-bold text-blue-800 bg-white shadow-xs transition-colors select-none';
+          btnAdapt.className = 'px-2 py-0.5 rounded-md font-medium text-stone-500 hover:text-stone-800 transition-colors select-none';
+        } else {
+          btnAdapt.className = 'px-2 py-0.5 rounded-md font-bold text-stone-800 bg-white shadow-xs transition-colors select-none';
+          btnRigid.className = 'px-2 py-0.5 rounded-md font-medium text-stone-500 hover:text-stone-800 transition-colors select-none';
+        }
+      }
+
+      if (isRigid) {
+        const curFixed = parseInt(document.getElementById('cfg_fixed_pop_size')?.value, 10) || 200;
+        setCohortFixedValue(curFixed, false);
+      }
+
+      updateCohortTelemetry();
+      if (triggerSave) triggerAutoSave();
+    }
+
+    function setCohortFixedValue(val, triggerSave = true) {
+      val = parseInt(val, 10) || 200;
+      const rangeEl = document.getElementById('cfg_fixed_pop_range');
+      const inputEl = document.getElementById('cfg_fixed_pop_size');
+      const valEl = document.getElementById('val_fixed_pop_size');
+      if (rangeEl) rangeEl.value = val;
+      if (inputEl) inputEl.value = val;
+      if (valEl) valEl.innerText = `${val} pax`;
+
+      setCohortValues(val, val, val, triggerSave);
+    }
+
+    function onFixedPopRangeChanged(val) {
+      const numVal = parseInt(val, 10) || 200;
+      const inputEl = document.getElementById('cfg_fixed_pop_size');
+      const valEl = document.getElementById('val_fixed_pop_size');
+      if (inputEl) inputEl.value = numVal;
+      if (valEl) valEl.innerText = `${numVal} pax`;
+      setCohortValues(numVal, numVal, numVal, true);
+    }
+
+    function onFixedPopInputChanged(val) {
+      const numVal = parseInt(val, 10) || 200;
+      const rangeEl = document.getElementById('cfg_fixed_pop_range');
+      const valEl = document.getElementById('val_fixed_pop_size');
+      if (rangeEl) rangeEl.value = numVal;
+      if (valEl) valEl.innerText = `${numVal} pax`;
+      setCohortValues(numVal, numVal, numVal, true);
+    }
+
+    function setCohortValues(minVal, targetVal, maxVal, triggerSave = true) {
+      minVal = parseInt(minVal, 10) || 25;
+      targetVal = parseInt(targetVal, 10) || 150;
+      maxVal = parseInt(maxVal, 10) || 200;
+
+      const minEl = document.getElementById('cfg_min_pop_size');
+      const targetEl = document.getElementById('cfg_target_pop_size');
+      const maxEl = document.getElementById('cfg_max_pop_size');
+
+      if (minEl) minEl.value = minVal;
+      if (targetEl) targetEl.value = targetVal;
+      if (maxEl) maxEl.value = maxVal;
+
+      if (!cityData.macroeconomics) cityData.macroeconomics = {};
+      cityData.macroeconomics.min_pop_size = minVal;
+      cityData.macroeconomics.target_pop_size = targetVal;
+      cityData.macroeconomics.max_pop_size = maxVal;
+
+      updateCohortTelemetry();
+      if (triggerSave) triggerAutoSave();
+    }
+
+    function onCohortParamChanged() {
+      const minVal = parseInt(document.getElementById('cfg_min_pop_size')?.value, 10) || 25;
+      const targetVal = parseInt(document.getElementById('cfg_target_pop_size')?.value, 10) || 150;
+      const maxVal = parseInt(document.getElementById('cfg_max_pop_size')?.value, 10) || 200;
+
+      if (!cityData.macroeconomics) cityData.macroeconomics = {};
+      cityData.macroeconomics.min_pop_size = minVal;
+      cityData.macroeconomics.target_pop_size = targetVal;
+      cityData.macroeconomics.max_pop_size = maxVal;
+
+      // Detectar preset
+      if (minVal === 200 && targetVal === 200 && maxVal === 200) {
+        cityData.macroeconomics.cohort_preset = 'canonical_200';
+        highlightActiveCohortPreset('canonical_200');
+      } else if (minVal === 25 && targetVal === 150 && maxVal === 200) {
+        cityData.macroeconomics.cohort_preset = 'metropoli_150';
+        highlightActiveCohortPreset('metropoli_150');
+      } else if (minVal === 20 && targetVal === 75 && maxVal === 120) {
+        cityData.macroeconomics.cohort_preset = 'mediana_75';
+        highlightActiveCohortPreset('mediana_75');
+      } else if (minVal === 10 && targetVal === 35 && maxVal === 60) {
+        cityData.macroeconomics.cohort_preset = 'alta_fidelidad_35';
+        highlightActiveCohortPreset('alta_fidelidad_35');
+      } else {
+        cityData.macroeconomics.cohort_preset = 'custom';
+        highlightActiveCohortPreset('custom');
+      }
+
+      updateCohortTelemetry();
+      triggerAutoSave();
+    }
+
+    function updateCohortTelemetry() {
+      const m = cityData.macroeconomics || {};
+      const targetVal = parseInt(document.getElementById('cfg_target_pop_size')?.value || m.target_pop_size, 10) || 150;
+      const minVal = parseInt(document.getElementById('cfg_min_pop_size')?.value || m.min_pop_size, 10) || 25;
+      const maxVal = parseInt(document.getElementById('cfg_max_pop_size')?.value || m.max_pop_size, 10) || 200;
+      const isRigid = (minVal === maxVal && minVal === targetVal) || (m.cohort_mode === 'rigid');
+
+      // Calcular PEA de referencia
+      let estPEA = 600000;
+      if (window.conapoMetadata && Object.keys(window.conapoMetadata).length > 0) {
+        const totalPobConapo = Object.values(window.conapoMetadata).reduce((acc, cur) => acc + (cur.pob_mit_mun || 0), 0);
+        if (totalPobConapo > 0) {
+          const tasaPEA = parseFloat(document.getElementById('cfg_tasa_pea')?.value || m.tasa_pea || 0.62);
+          estPEA = Math.round(totalPobConapo * tasaPEA);
+        }
+      }
+
+      const estPops = Math.max(1, Math.round(estPEA / targetVal));
+      const estPopsEl = document.getElementById('cohort_estimated_pops');
+      if (estPopsEl) estPopsEl.innerText = `~${estPops.toLocaleString()} pops`;
+
+      const fpsBadge = document.getElementById('cohort_fps_badge');
+      const recText = document.getElementById('cohort_recommendation_text');
+      const dynText = document.getElementById('cohort_dynamics_text');
+
+      if (fpsBadge && recText) {
+        if (estPops < 20000) {
+          fpsBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-green-100 text-green-800 border border-green-200';
+          fpsBadge.innerText = '🟢 60 FPS Sólido';
+          recText.innerText = `Carga ligera (~${estPops.toLocaleString()} pops). Simulación ultra-fluida a 60 FPS en cualquier navegador o laptop.`;
+        } else if (estPops <= 32000) {
+          fpsBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-800 border border-amber-200';
+          fpsBadge.innerText = '🟡 Fluido (60-50 FPS)';
+          recText.innerText = `Carga moderada (~${estPops.toLocaleString()} pops). Fluido en PCs de escritorio. Mantén drivingPath desactivado.`;
+        } else {
+          fpsBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-red-100 text-red-800 border border-red-200';
+          fpsBadge.innerText = '🔴 Alta Carga (>32k pops)';
+          recText.innerText = `Alerta: ~${estPops.toLocaleString()} pops puede provocar caídas de frames en WebGL. Considera elevar target_pop_size a 150–200.`;
+        }
+      }
+
+      if (dynText) {
+        if (isRigid) {
+          dynText.innerText = `Pulsos canónicos (${targetVal} pax/vagón)`;
+          dynText.title = 'Abordaje en bloques exactos idéntico a mapas oficiales de Colin Miller.';
+        } else {
+          dynText.innerText = `Flujo continuo (${minVal}–${maxVal} pax)`;
+          dynText.title = 'Abordaje gradual orgánico; evita andenes desiertos en periferias.';
+        }
+      }
+    }
+
+    function updateCohortUIFromData() {
+      const m = (cityData && cityData.macroeconomics) || {};
+      const minVal = m.min_pop_size !== undefined ? m.min_pop_size : 25;
+      const targetVal = m.target_pop_size !== undefined ? m.target_pop_size : 150;
+      const maxVal = m.max_pop_size !== undefined ? m.max_pop_size : 200;
+
+      let mode = m.cohort_mode;
+      if (!mode) {
+        mode = (minVal === maxVal && minVal === targetVal) ? 'rigid' : 'adaptive';
+      }
+
+      const minEl = document.getElementById('cfg_min_pop_size');
+      const targetEl = document.getElementById('cfg_target_pop_size');
+      const maxEl = document.getElementById('cfg_max_pop_size');
+      const fixInput = document.getElementById('cfg_fixed_pop_size');
+      const fixRange = document.getElementById('cfg_fixed_pop_range');
+      const fixVal = document.getElementById('val_fixed_pop_size');
+
+      if (minEl) minEl.value = minVal;
+      if (targetEl) targetEl.value = targetVal;
+      if (maxEl) maxEl.value = maxVal;
+      if (fixInput) fixInput.value = maxVal;
+      if (fixRange) fixRange.value = maxVal;
+      if (fixVal) fixVal.innerText = `${maxVal} pax`;
+
+      setCohortMode(mode, false);
+
+      let preset = m.cohort_preset;
+      if (!preset) {
+        if (minVal === 200 && targetVal === 200 && maxVal === 200) preset = 'canonical_200';
+        else if (minVal === 25 && targetVal === 150 && maxVal === 200) preset = 'metropoli_150';
+        else if (minVal === 20 && targetVal === 75 && maxVal === 120) preset = 'mediana_75';
+        else if (minVal === 10 && targetVal === 35 && maxVal === 60) preset = 'alta_fidelidad_35';
+        else preset = 'custom';
+      }
+      highlightActiveCohortPreset(preset);
+      updateCohortTelemetry();
     }
 
     function randomizeSeed() {

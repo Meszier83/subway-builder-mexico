@@ -194,12 +194,15 @@ def load_city_data(rel_or_abs_path: str) -> Dict[str, Any]:
 
 
     if "min_pop_size" not in macro:
-
         macro["min_pop_size"] = 25
     if "target_pop_size" not in macro:
         macro["target_pop_size"] = 150
     if "max_pop_size" not in macro:
         macro["max_pop_size"] = 200
+    if "cohort_mode" not in macro:
+        macro["cohort_mode"] = "rigid" if macro.get("min_pop_size") == macro.get("max_pop_size") else "adaptive"
+    if "cohort_preset" not in macro:
+        macro["cohort_preset"] = "canonical_200" if (macro.get("min_pop_size") == 200 and macro.get("max_pop_size") == 200) else "custom"
     if "sample_threshold" not in macro:
         macro["sample_threshold"] = 500
     if "default_growth_factor" not in macro:
@@ -329,8 +332,13 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         f'  max_pop_size: {int(macro_cfg.get("max_pop_size", 200))}',
         f'  furness_iterations: {int(macro_cfg.get("furness_iterations", 15))}',
         f'  furness_tol: {float(macro_cfg.get("furness_tol", 0.02))}',
-        ""
     ])
+
+    if "cohort_mode" in macro_cfg:
+        lines.append(f'  cohort_mode: {_yaml_quote(macro_cfg.get("cohort_mode"))}')
+    if "cohort_preset" in macro_cfg:
+        lines.append(f'  cohort_preset: {_yaml_quote(macro_cfg.get("cohort_preset"))}')
+    lines.append("")
 
     modal_exp = macro_cfg.get("modal_experiment")
     if isinstance(modal_exp, dict):
@@ -1337,17 +1345,24 @@ def validate_city_configuration(city_file: str) -> Dict[str, Any]:
         min_p = int(min_pop)
         target_p = int(target_pop)
         max_p = int(max_pop)
+        is_rigid = (min_p == max_p)
         if min_p < 1:
             errors.append(f"min_pop_size ({min_p}) debe ser un entero >= 1.")
         if max_p < min_p:
             errors.append(f"max_pop_size ({max_p}) no puede ser menor que min_pop_size ({min_p}).")
-        if target_p < min_p or target_p > max_p:
+        if not is_rigid and (target_p < min_p or target_p > max_p):
             warnings.append(f"target_pop_size ({target_p}) debería estar entre min_pop_size ({min_p}) y max_pop_size ({max_p}).")
         if min_p < 10:
             warnings.append(f"min_pop_size bajo ({min_p}): cohortes muy pequeñas pueden generar miles de pops y degradar el rendimiento.")
         if max_p > 500:
             warnings.append(f"max_pop_size alto ({max_p}): cohortes masivas pueden provocar picos repentinos en estaciones individuales.")
-        summary["cohort_bounds"] = {"min": min_p, "target": target_p, "max": max_p}
+        summary["cohort_bounds"] = {
+            "min": min_p,
+            "target": target_p,
+            "max": max_p,
+            "mode": "rigid" if is_rigid else "adaptive",
+            "is_canonical_200": (min_p == 200 and max_p == 200)
+        }
     except Exception:
         errors.append("min_pop_size, target_pop_size y max_pop_size deben ser enteros válidos.")
 
