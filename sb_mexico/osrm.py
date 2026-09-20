@@ -28,57 +28,30 @@ CANONICAL_CIRCUITY = 1.3
 MAX_WAYPOINT_SNAPPING_METERS = 1500.0
 MIN_CIRCUITY_RATIO = 0.70
 MIN_INTER_NODE_ROAD_METERS = 150
-OSRM_IMAGE = "osrm/osrm-backend:v5.27.1"
-OSRM_PROFILE = "/opt/car.lua"
-OSRM_ALGORITHM = "mld"
-
-
-def _sha256_file(path: str) -> Optional[str]:
-    if not path or not os.path.isfile(path):
-        return None
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def compute_osrm_fingerprint(
     city_code: str,
     bbox: List[float],
-    osm_pbf_path: str,
-    routing_profile_path: Optional[str] = None,
-    routing_config: Optional[Dict[str, Any]] = None,
-    osrm_image_identity: str = OSRM_IMAGE,
+    osm_pbf_path: str
 ) -> str:
     """
     Calcula una firma criptográfica única (SHA-256) basada en:
     - Clave de ciudad normalizada
     - BBOX redondeado a 5 decimales
-    - Hash de contenido del archivo OSM PBF
-    - Hash de contenido del perfil efectivo, cuando está disponible localmente
-    - Identidad fijada de imagen OSRM y configuración que afecta el grafo
+    - Tamaño en bytes y mtime del archivo OSM PBF
+    - Versión del perfil car.lua
     Garantiza que cualquier expansión territorial o actualización de mapa invalide el caché.
     """
     norm_bbox = [round(float(x), 5) for x in bbox]
-    inputs = {
-        "schema": 2,
-        "city_code": city_code.upper(),
-        "bbox": norm_bbox,
-        "pbf_sha256": _sha256_file(osm_pbf_path),
-        "profile": {
-            "path": routing_profile_path or OSRM_PROFILE,
-            "sha256": _sha256_file(routing_profile_path) if routing_profile_path else None,
-        },
-        "osrm_image": osrm_image_identity,
-        "routing_config": {
-            "algorithm": OSRM_ALGORITHM,
-            "extract_profile": routing_profile_path or OSRM_PROFILE,
-            "bbox_margin_degrees": 0.05,
-            **(routing_config or {}),
-        },
-    }
-    raw = json.dumps(inputs, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    pbf_size = 0
+    pbf_mtime = 0
+    if os.path.exists(osm_pbf_path):
+        st = os.stat(osm_pbf_path)
+        pbf_size = st.st_size
+        pbf_mtime = int(st.st_mtime)
+
+    raw = f"{city_code.upper()}:{norm_bbox}:{pbf_size}:{pbf_mtime}:car.lua:v1"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -239,13 +212,13 @@ else
 fi
 
 echo "-> [OSRM] Ejecutando osrm-extract (perfil car.lua)..."
-docker run --rm -v "{wsl_build_dir}:/data" {OSRM_IMAGE} osrm-extract -p {OSRM_PROFILE} "/data/{city_slug}.osm.pbf"
+docker run --rm -v "{wsl_build_dir}:/data" osrm/osrm-backend osrm-extract -p /opt/car.lua "/data/{city_slug}.osm.pbf"
 
 echo "-> [OSRM] Ejecutando osrm-partition (MLD)..."
-docker run --rm -v "{wsl_build_dir}:/data" {OSRM_IMAGE} osrm-partition "/data/{city_slug}.osrm"
+docker run --rm -v "{wsl_build_dir}:/data" osrm/osrm-backend osrm-partition "/data/{city_slug}.osrm"
 
 echo "-> [OSRM] Ejecutando osrm-customize..."
-docker run --rm -v "{wsl_build_dir}:/data" {OSRM_IMAGE} osrm-customize "/data/{city_slug}.osrm"
+docker run --rm -v "{wsl_build_dir}:/data" osrm/osrm-backend osrm-customize "/data/{city_slug}.osrm"
 
 echo "$REQUIRED_FP" > "$FP_FILE"
 echo "OSRM_BUILD_SUCCESS"
@@ -297,8 +270,8 @@ def start_osrm_daemon_wsl(city_code: str, port: int = 5000) -> bool:
         "--name", container_name,
         "-p", f"{port}:5000",
         "-v", f"{wsl_build_dir}:/data",
-        OSRM_IMAGE,
-        "osrm-routed", "--algorithm", OSRM_ALGORITHM, f"/data/{city_slug}.osrm"
+        "osrm/osrm-backend",
+        "osrm-routed", "--algorithm", "mld", f"/data/{city_slug}.osrm"
     ]
 
     try:

@@ -19,7 +19,6 @@ import re
 import glob
 import json
 import yaml
-import copy
 import time
 import queue
 import shutil
@@ -53,8 +52,6 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 os.chdir(ROOT_DIR)
 
-from sb_mexico.sources import resolve_source_manifest
-
 # Estado global de compilación
 build_lock = threading.Lock()
 queue_lock = threading.Lock()
@@ -65,11 +62,6 @@ active_build = {
     "status": "idle",
     "error": None,
     "city_code": "",
-    "config_file": None,
-    "build_id": None,
-    "config_identity": None,
-    "package_path": None,
-    "package_sha256": None,
     "logs": [],
     "log_queues": []  # List[queue.Queue] para SSE
 }
@@ -234,41 +226,6 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
     """Guarda la configuración completa de la ciudad respetando el esquema oficial."""
     fpath = _resolve_city_path(rel_or_abs_path)
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
-
-    # The browser edits only a subset of the runtime document.  Merge that
-    # subset into the parsed original so temporal, routing, data-integrity,
-    # explicit source selections, vintages, and future supported keys survive.
-    original: Dict[str, Any] = {}
-    if os.path.isfile(fpath):
-        with open(fpath, "r", encoding="utf-8") as stream:
-            parsed = yaml.safe_load(stream) or {}
-            if isinstance(parsed, dict):
-                original = parsed
-
-    def merge(base: Any, edited: Any) -> Any:
-        if isinstance(base, dict) and isinstance(edited, dict):
-            result = copy.deepcopy(base)
-            for key, value in edited.items():
-                result[key] = merge(result.get(key), value)
-            return result
-        return copy.deepcopy(edited)
-
-    merged = merge(original, data)
-    city_for_save = merged.get("city") or {}
-    raw_bbox = city_for_save.get("bbox")
-    if isinstance(raw_bbox, (list, tuple)) and len(raw_bbox) == 4:
-        try:
-            b0, b1, b2, b3 = map(float, raw_bbox)
-            city_for_save["bbox"] = [
-                round(min(b0, b2), 4), round(min(b1, b3), 4),
-                round(max(b0, b2), 4), round(max(b1, b3), 4),
-            ]
-        except (TypeError, ValueError):
-            pass
-    merged["city"] = city_for_save
-    with open(fpath, "w", encoding="utf-8", newline="\n") as stream:
-        yaml.safe_dump(merged, stream, allow_unicode=True, sort_keys=False, default_flow_style=False)
-    return fpath
 
     city_cfg = data.get("city") or {}
     raw_bbox = city_cfg.get("bbox")
@@ -609,11 +566,6 @@ def create_new_project(name: str, code: str, creator: str = "Creador", data_dir:
 
         "data_dir": resolved_data_dir,
         "data_exclusions": [],
-        "temporal": {
-            "model_year": 2025,
-            "cpv_base_year": 2020,
-            "source_vintages": {}
-        },
         "macroeconomics": {
             "tasa_pea": 0.62,
             "til_1_state": 0.45,
@@ -757,7 +709,7 @@ def set_project_data_dir(city_file: str, new_dir: str) -> Dict[str, Any]:
     target_abs = os.path.abspath(cleaned if os.path.isabs(cleaned) else os.path.join(ROOT_DIR, cleaned))
     norm_data = os.path.normcase(os.path.realpath(DATA_DIR))
     norm_target = os.path.normcase(os.path.realpath(target_abs))
-    if norm_target == norm_data or not norm_target.startswith(norm_data + os.sep):
+    if not (norm_target == norm_data or norm_target.startswith(norm_data + os.sep)):
         raise PermissionError(f"Acceso denegado: carpeta de datos fuera de data/ ({new_dir})")
 
     cdata = load_city_data(city_file)
@@ -773,7 +725,6 @@ def inspect_data_files(city_name: str = "", city_code: str = "", city_file: str 
     """
     target_dir = None
     exclusions = set()
-    cdata = {"city": {"code": city_code, "name": city_name}}
 
     if city_file:
         try:
@@ -805,50 +756,74 @@ def inspect_data_files(city_name: str = "", city_code: str = "", city_file: str 
     except ValueError:
         rel_active_dir = target_dir.replace("\\", "/")
 
-    manifest = resolve_source_manifest(
-        cdata,
-        _resolve_city_path(city_file) if city_file else os.path.join(CITIES_DIR, f"{city_code.lower()}.yaml"),
-        ROOT_DIR,
-        data_dir=target_dir,
-        strict_singletons=False,
-    )
+    search_dirs = [target_dir] if os.path.exists(target_dir) else []
 
-    def as_file_info(dataset: str) -> List[Dict[str, Any]]:
-        result = []
-        for entry in manifest["sources"].get(dataset, []):
-            path = entry["path"]
-            result.append({
-                **entry,
-                "abs_path": path,
-                "path": os.path.relpath(path, ROOT_DIR).replace("\\", "/"),
-                "filename": os.path.basename(path),
-                "size_mb": round(os.path.getsize(path) / (1024 * 1024), 2),
-                "modified": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime(path))),
-            })
-        return result
+    def find_files(patterns: List[str]) -> List[Dict[str, Any]]:
+        found = []
+        seen = set()
+        for sdir in search_dirs:
+            for pat in patterns:
+                for fpath in glob.glob(os.path.join(sdir, pat)):
+                    abs_p = os.path.abspath(fpath)
+                    fname = os.path.basename(abs_p)
+                    if fname.lower() in exclusions:
+                        continue
+                    if abs_p not in seen and os.path.isfile(abs_p):
+                        seen.add(abs_p)
+                        size_mb = os.path.getsize(abs_p) / (1024 * 1024)
+                        try:
+                            rel_p = os.path.relpath(abs_p, ROOT_DIR).replace("\\", "/")
+                        except ValueError:
+                            rel_p = abs_p.replace("\\", "/")
+                        found.append({
+                            "path": rel_p,
+                        "abs_path": abs_p,
+                            "filename": fname,
+                            "size_mb": round(size_mb, 2),
+                            "modified": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime(abs_p)))
+                        })
+        return found
 
-    denue = as_file_info("denue")
-    cpv = as_file_info("cpv")
-    ce2024 = as_file_info("ce")
-    conapo = as_file_info("conapo")
-    enoe = as_file_info("enoe")
-    osm = as_file_info("osm") + as_file_info("roads")
-    marco = as_file_info("marco")
+    denue = find_files(["*denue*.csv", "*DENUE*.csv", "*denue*.zip"])
+    cpv = find_files(["*RESAGEBURB*.csv", "*resageburb*.csv", "*censo*.csv", "*cpv*.csv"])
+    ce2024 = find_files(["*SAIC*.csv", "*saic*.csv", "*exporta*.csv", "*tr_ce*.csv", "*ce2024*.csv", "*ce_2024*.csv", "*ce*.csv"])
+    conapo = find_files(["*pobproy*.csv", "*quinq*.csv", "*pob_proy*.csv", "*conapo*.csv", "data-*.csv", "*proyeccion*.csv"])
+    enoe = find_files([
+        "*enoe*.csv", "*ENOE*.csv", "*trim*.csv", "*2024_trim*.csv", "*2025_trim*.csv", "*2026_trim*.csv",
+        "*enoe*.xls", "*ENOE*.xls", "*trim*.xls", "*2024_trim*.xls", "*2025_trim*.xls", "*2026_trim*.xls",
+        "*enoe*.xlsx", "*ENOE*.xlsx", "*trim*.xlsx"
+    ])
+
+    # Para OSM: buscar en la carpeta del proyecto, y solo si falta, verificar extracto nacional en data/
+    osm = find_files(["*.osm.pbf", "*.osm", "roads.geojson"])
+    if not osm and os.path.exists(DATA_DIR):
+        for fpath in glob.glob(os.path.join(DATA_DIR, "*.osm.pbf")):
+            abs_p = os.path.abspath(fpath)
+            fname = os.path.basename(abs_p)
+            if fname.lower() not in exclusions and os.path.isfile(abs_p):
+                size_mb = os.path.getsize(abs_p) / (1024 * 1024)
+                osm.append({
+                    "path": os.path.relpath(abs_p, ROOT_DIR).replace("\\", "/"),
+                    "abs_path": abs_p,
+                    "filename": fname,
+                    "size_mb": round(size_mb, 2),
+                    "modified": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime(abs_p)))
+                })
+
     return {
         "active_dir": rel_active_dir,
         "abs_active_dir": os.path.abspath(target_dir),
         "dir_exists": os.path.exists(target_dir),
-        "exclusions": manifest["exclusions"],
+        "exclusions": list(exclusions),
         "denue": {"status": "ok" if denue else "missing", "files": denue},
         "cpv": {"status": "ok" if cpv else "missing", "files": cpv},
         "ce2024": {"status": "ok" if ce2024 else "missing", "files": ce2024},
         "conapo": {"status": "ok" if conapo else "missing", "files": conapo},
         "enoe": {"status": "ok" if enoe else "missing", "files": enoe},
-        "marco": {"status": "ok" if marco else "missing", "files": marco},
         "osm": {"status": "ok" if osm else "missing", "files": osm},
-        "all_ready": bool(denue and cpv),
-        "source_manifest": manifest,
+        "all_ready": bool(denue and cpv)
     }
+
 
 def exclude_data_file(city_file: str, filename: str) -> Dict[str, Any]:
     """
@@ -932,36 +907,11 @@ def calculate_conapo_factors(city_file: str) -> Dict[str, Any]:
             "factors": []
         }
 
-    if len(conapo_files) != 1:
-        return {
-            "status": "error",
-            "message": "Múltiples archivos CONAPO ambiguos; configure data_sources.conapo explícitamente.",
-            "factors": []
-        }
-
-    temporal_cfg = cdata.get("temporal") or {}
-    if "model_year" not in temporal_cfg:
-        return {
-            "status": "error",
-            "message": "El proyecto debe declarar temporal.model_year.",
-            "factors": []
-        }
-    denominator_mode = temporal_cfg.get("conapo_growth_denominator")
-    if denominator_mode != "cpv_2020":
-        return {
-            "status": "error",
-            "message": (
-                "El cálculo interactivo usa CPV 2020 como denominador; declare "
-                "temporal.conapo_growth_denominator: cpv_2020 o revise la metodología."
-            ),
-            "factors": []
-        }
-
     conapo_path = os.path.join(ROOT_DIR, conapo_files[0]["path"])
 
     # 1. Parsear CONAPO de forma vectorizada de alto rendimiento
     conapo_dict = {}
-    proj_year = int(temporal_cfg["model_year"])
+    proj_year = 2024
     for enc in ['utf-8-sig', 'latin1', 'utf-8', 'cp1252']:
         try:
             df_con = pd.read_csv(conapo_path, encoding=enc, low_memory=False)
@@ -969,21 +919,8 @@ def calculate_conapo_factors(city_file: str) -> Dict[str, Any]:
             df_con.columns = cols
 
             if 'CLAVE' in cols and any('POB' in c for c in cols):
-                configured_population_column = temporal_cfg.get("conapo_population_column")
-                if configured_population_column:
-                    col_pob = str(configured_population_column).strip().upper()
-                    if col_pob not in cols:
-                        return {"status": "error", "message": f"Columna CONAPO {col_pob} no disponible.", "factors": []}
-                else:
-                    preferred = [c for c in ['POB_MIT_MUN', 'POB_TOTAL', 'POBTOT'] if c in cols]
-                    pob_candidates = preferred or [c for c in cols if c.startswith('POB')]
-                    if len(pob_candidates) != 1:
-                        return {
-                            "status": "error",
-                            "message": f"Columnas de población CONAPO ambiguas: {pob_candidates}.",
-                            "factors": []
-                        }
-                    col_pob = pob_candidates[0]
+                pob_candidates = [c for c in cols if 'POB_TOTAL' in c or 'POB_MIT_MUN' in c or 'POBTOT' in c or c.startswith('POB')]
+                col_pob = pob_candidates[0]
                 has_nom = 'NOM_MUN' in cols
                 has_ano = 'ANO' in cols
 
@@ -991,29 +928,11 @@ def calculate_conapo_factors(city_file: str) -> Dict[str, Any]:
                     df_con['ANO_num'] = pd.to_numeric(df_con['ANO'], errors='coerce')
                     available_years = df_con['ANO_num'].dropna().unique()
                     if len(available_years) > 0:
-                        if proj_year not in available_years:
-                            return {
-                                "status": "error",
-                                "message": f"CONAPO no contiene el año objetivo {proj_year}.",
-                                "factors": []
-                            }
-                        chosen_year = proj_year
+                        chosen_year = 2024 if 2024 in available_years else (
+                            available_years[np.argmin(np.abs(available_years - 2024))]
+                        )
                         proj_year = int(chosen_year)
                         df_con = df_con[df_con['ANO_num'] == chosen_year]
-                else:
-                    declared_conapo_year = (temporal_cfg.get("source_vintages") or {}).get("conapo")
-                    if declared_conapo_year is None:
-                        return {
-                            "status": "error",
-                            "message": "CONAPO sin ANO requiere temporal.source_vintages.conapo explícito.",
-                            "factors": []
-                        }
-                    if int(declared_conapo_year) != proj_year:
-                        return {
-                            "status": "error",
-                            "message": f"Año CONAPO declarado {declared_conapo_year} no coincide con {proj_year}.",
-                            "factors": []
-                        }
 
                 df_con['cve_clean'] = pd.to_numeric(df_con['CLAVE'], errors='coerce').fillna(0).astype(int)
                 df_con = df_con[df_con['cve_clean'] > 0]
@@ -1618,11 +1537,6 @@ def run_pipeline_task(config_file: str, skip_map: bool = False):
             active_build["step_name"] = "Iniciando Pipeline"
             active_build["logs"].clear()
             active_build["error"] = None
-            active_build["config_file"] = None
-            active_build["build_id"] = None
-            active_build["config_identity"] = None
-            active_build["package_path"] = None
-            active_build["package_sha256"] = None
 
         broadcast_log(f"🚀 Iniciando compilación para '{config_file}'...", progress=10, step_name="Cargando Configuración")
 
@@ -1638,7 +1552,8 @@ def run_pipeline_task(config_file: str, skip_map: bool = False):
 
         if not effective_data_dir or not os.path.exists(effective_data_dir):
             city_base = os.path.splitext(os.path.basename(config_file))[0].lower()
-            effective_data_dir = os.path.join(DATA_DIR, city_base)
+            cand = os.path.join(DATA_DIR, city_base)
+            effective_data_dir = cand if os.path.exists(cand) else DATA_DIR
 
         old_stdout = sys.stdout
         sys.stdout = LogCaptureStream(old_stdout)
@@ -1652,34 +1567,18 @@ def run_pipeline_task(config_file: str, skip_map: bool = False):
             city_out_dir = os.path.join(DIST_DIR, city_base)
             os.makedirs(city_out_dir, exist_ok=True)
             resolved_config = _resolve_city_path(config_file)
-            result = execute_pipeline(
+            execute_pipeline(
                 config_path=resolved_config,
                 skip_map=skip_map,
                 output_dir=city_out_dir,
                 data_dir=effective_data_dir
             )
-            if not result.package_created:
-                broadcast_log("⚠️ Compilación incompleta: se generó demanda, pero no un paquete descargable.", progress=100, step_name="Demanda solamente")
-                with build_lock:
-                    active_build["running"] = False
-                    active_build["status"] = "demand_only"
-                    active_build["progress"] = 100
-                    active_build["step_name"] = "Demanda solamente"
-                    active_build["build_id"] = result.build_id
-                    active_build["config_identity"] = result.config_identity
-                return
             broadcast_log("✨ ¡Compilación y empaquetado final completados con éxito!", progress=100, step_name="Finalizado")
             with build_lock:
                 active_build["running"] = False
                 active_build["status"] = "success"
                 active_build["progress"] = 100
                 active_build["step_name"] = "Completado"
-                active_build["city_code"] = result.city_code
-                active_build["config_file"] = os.path.normcase(os.path.realpath(resolved_config))
-                active_build["build_id"] = result.build_id
-                active_build["config_identity"] = result.config_identity
-                active_build["package_path"] = result.package_path
-                active_build["package_sha256"] = result.package_sha256
         finally:
             sys.stdout = old_stdout
 
@@ -1696,74 +1595,6 @@ def run_pipeline_task(config_file: str, skip_map: bool = False):
             active_build["status"] = "error"
             active_build["error"] = str(e)
             active_build["step_name"] = "Error"
-
-
-def resolve_current_build_package(config_file: str) -> Optional[str]:
-    """Return only the package bound to the current successful config/build."""
-    try:
-        requested_config = os.path.normcase(os.path.realpath(_resolve_city_path(config_file)))
-        with open(requested_config, "r", encoding="utf-8") as stream:
-            current_config = yaml.safe_load(stream) or {}
-        current_city_code = (current_config.get("city") or {}).get("code")
-        from sb_mexico.pipeline import _config_identity, _sha256_file
-        current_config_identity = _config_identity(requested_config)
-    except Exception:
-        return None
-
-    identity_keys = (
-        "status", "config_file", "city_code", "build_id", "config_identity",
-        "package_path", "package_sha256",
-    )
-
-    def clear_if_unchanged(snapshot: Dict[str, Any]) -> None:
-        with build_lock:
-            if all(active_build.get(key) == snapshot.get(key) for key in identity_keys):
-                active_build["city_code"] = ""
-                active_build["config_file"] = None
-                active_build["build_id"] = None
-                active_build["config_identity"] = None
-                active_build["package_path"] = None
-                active_build["package_sha256"] = None
-
-    with build_lock:
-        snapshot = {key: active_build.get(key) for key in identity_keys}
-        target_zip = snapshot["package_path"]
-        expected_hash = snapshot["package_sha256"]
-        same_config_path = snapshot["config_file"] == requested_config
-        downloadable = (
-            snapshot["status"] == "success"
-            and same_config_path
-            and snapshot["city_code"] == current_city_code
-            and snapshot["config_identity"] == current_config_identity
-            and bool(snapshot["build_id"])
-            and bool(target_zip)
-            and bool(expected_hash)
-            and os.path.basename(target_zip) == f"{current_city_code}.zip"
-        )
-
-    if not downloadable:
-        if same_config_path:
-            clear_if_unchanged(snapshot)
-        return None
-    try:
-        package_matches = os.path.isfile(target_zip) and _sha256_file(target_zip) == expected_hash
-    except OSError:
-        package_matches = False
-    if not package_matches:
-        clear_if_unchanged(snapshot)
-        return None
-
-    try:
-        config_still_matches = _config_identity(requested_config) == current_config_identity
-    except OSError:
-        config_still_matches = False
-    if not config_still_matches:
-        clear_if_unchanged(snapshot)
-        return None
-    with build_lock:
-        if any(active_build.get(key) != snapshot.get(key) for key in identity_keys):
-            return None
-    return target_zip
 
 
 # =============================================================================
@@ -1964,15 +1795,33 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                     "status": active_build["status"],
                     "error": active_build["error"],
                     "city_code": active_build["city_code"],
-                    "build_id": active_build["build_id"],
-                    "package_created": active_build["status"] == "success" and bool(active_build["package_path"]),
                     "logs": list(active_build["logs"][-100:])
                 }
             self.serve_json(status_copy)
         elif path == "/api/download":
             city_file = query.get("file", [""])[0]
-            target_zip = resolve_current_build_package(city_file)
-            if target_zip:
+            city_base = os.path.splitext(os.path.basename(city_file))[0].lower() if city_file else ""
+            city_code = ""
+            if city_file:
+                try:
+                    cdata = load_city_data(city_file)
+                    city_code = cdata.get("city", {}).get("code", "").upper()
+                except Exception:
+                    pass
+
+            zip_candidates = []
+            if city_base:
+                zip_candidates.extend(glob.glob(os.path.join(DIST_DIR, city_base, "*.zip")))
+                zip_candidates.extend(glob.glob(os.path.join(DIST_DIR, f"*{city_base}*.zip")))
+            if city_code:
+                zip_candidates.extend(glob.glob(os.path.join(DIST_DIR, f"{city_code}.zip")))
+                zip_candidates.extend(glob.glob(os.path.join(DIST_DIR, city_base, f"{city_code}.zip")))
+
+            # Deduplicar preservando orden
+            valid_zips = [z for z in dict.fromkeys(zip_candidates) if os.path.isfile(z)]
+
+            if valid_zips:
+                target_zip = valid_zips[0]
                 with open(target_zip, "rb") as zf:
                     data = zf.read()
                 self.send_response(200)
@@ -1982,7 +1831,7 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(data)
             else:
-                self.serve_error("No existe un paquete validado perteneciente al build exitoso actual de este proyecto.", 404)
+                self.serve_error(f"No se encontró ningún paquete .zip compilado para '{city_base or 'este proyecto'}'. Debes compilarlo primero.", 404)
         else:
             self.serve_error("Ruta no encontrada", 404)
 
@@ -2418,11 +2267,6 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                     active_build["step_name"] = "Iniciando Pipeline"
                     active_build["logs"].clear()
                     active_build["error"] = None
-                    active_build["config_file"] = None
-                    active_build["build_id"] = None
-                    active_build["config_identity"] = None
-                    active_build["package_path"] = None
-                    active_build["package_sha256"] = None
 
                 thread = threading.Thread(
                     target=run_pipeline_task,

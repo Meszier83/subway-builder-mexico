@@ -196,35 +196,77 @@ En diversas conurbaciones existen areas naturales protegidas, lagunas interiores
 
 Para conciliar ambos objetivos sin distorsionar la cartografia, `sb_mexico` introduce **Zonas de Exclusion (`exclusion_zones`)**:
 1. Se delimitan poligonos vectoriales o cuadros delimitadores en el archivo YAML o en la pestana *Exclusiones* de POI Studio.
-2. Durante la agregacion espacial censal y economica, toda celda cuyo baricentro quede dentro de una zona de exclusion activa, incluida su frontera, es purgada de la simulacion. Las coordenadas resultantes se vuelven a validar tras snapping vial y clustering; un snapping hacia el interior se rechaza y una fusion cuyo centro caeria en la exclusion no se realiza:
+2. Durante la agregacion espacial censal y economica, toda celda cuyo baricentro quede cubierto por una zona de exclusion activa es purgada de la simulacion:
    $$\text{residents}_k = 0, \qquad \text{PEA}_k = 0, \qquad \text{jobs}_k = 0$$
 3. Como resultado, ningun objeto `pop` puede originarse ni tener como destino la zona excluida ($T_{ik} = 0$, $T_{kj} = 0$).
 4. **Preservacion Cartografica Total:** El mapa base vectorial (`.pmtiles`) y la red vial (`roads.geojson`) se compilan a partir de la totalidad del extracto OSM metropolitano, asegurando que avenidas, puentes maritimos y estructuras continúen mostrandose con fidelidad al 100% en el motor del juego.
 
 ---
 
-## 5. Modelo Gravitatorio con Marginales Duros e Integerizacion Controlada
+## 5. El Modelo Gravitatorio en Dos Capas (Two-Tier Doubly-Constrained Model)
 
-El empleo regular y los generadores especiales forman un solo vector de atraccion. Sus pesos se convierten una sola vez, a escala metropolitana, en el marginal autoritativo $D_j^*$ cuya suma coincide con la PEA. Ese vector no se renormaliza por isla, zona ni componente.
+La distribucion de viajes entre origenes residenciales y destinos laborales no es un fenomeno homogeneo. Mientras que el empleo de barrio o comercial responde a fricciones espaciales estrictas, los polos de transporte y educacion superior operan a escala metropolitana universal. Por ello, el motor divide la asignacion en dos capas secuenciales:
 
-Antes de balancear se construye un unico soporte $S_{ij}$ con todas las restricciones duras: zona topologica, distancia maxima, auto-viajes prohibidos y relaciones expresamente vetadas. La misma matriz booleana se usa en factibilidad, IPFP e integerizacion.
+```
+[Poblacion Economicamente Activa Total (PEA_i por celda)]
+                       |
+                       v
+[CAPA 1: Generadores Especiales con Cuota Exacta (Hubs Metropolitanos)]
+   - Aeropuertos (AIR_), Universidades (UNI_), Estadios (SPO_)
+   - Atraccion metropolitana de largo alcance (beta = 0.04)
+   - Asignacion Multinomial Acotada
+                       |
+                       v
+[Deduccion Estricta de Presupuesto]
+   PEA_rem_i = PEA_i - Sum_k T_{i -> k}
+                       |
+                       v
+[CAPA 2: Empleo Regular DENUE (Furness / IPFP Doblemente Acotado)]
+   - Friccion espacial estandard (beta = 0.12, d <= 55 km)
+   - Balanceo iterativo de filas (PEA_rem_i) y columnas (Empleos DENUE_j)
+   - Sorteo estocastico de cohortes multinomiales discretas
+                       |
+                       v
+[Matriz Final de Cohortes 'pops' y Validacion de Conservacion Sum(T) == PEA]
+```
 
-### 5.1. Factibilidad del soporte
+### 5.1. Capa 1: Generadores Especiales con Cuota Exacta (Hubs Metropolitanos)
+Los generadores especiales concentran viajes de indole no exclusivamente asalariada que abarcan cuencas metropolitanas enteras.
 
-La validacion comprueba dimensiones, finitud, no negatividad, igualdad de masa, grado positivo de cada vertice activo, igualdad de masa por componente conexa y finalmente un flujo maximo bipartito:
+#### Estimacion Empirica de Cuotas Objetivas ($Q_k$)
+* **Aeropuertos Internacionales (`AIR_`):** Calculado a partir de la estadistica de la Agencia Federal de Aviacion Civil (AFAC):
+  $$Q_{\text{AIR}} = \operatorname{round}\left(\frac{\text{Pasajeros Anuales AFAC} \times 0.05}{365}\right)$$
+  (Representa la fraccion diaria de pasajeros y tripulaciones propensas a transporte masivo mas el personal aeroportuario de tierra).
+* **Universidades y Campus Centrales (`UNI_`):** Calculado a partir de matriculas oficiales SEP / ANUIES:
+  $$Q_{\text{UNI}} = \operatorname{round}(\text{Matricula Activa Presencial} \times 0.70)$$
+* **Estadios y Polos Deportivos (`SPO_`):** Prorrateo de afluencia promedio por dia equivalente de partido o evento.
 
-$$s \rightarrow O_i \rightarrow D_j \rightarrow t \qquad \text{solo si } S_{ij}=1$$
+#### Friccion Espacial de Cuenca Metropolitana
+Para reflejar que un estudiante o viajero aereo esta dispuesto a cruzar toda la metropoli, se aplica un coeficiente de friccion espacial reducido:
+$$\beta_{\text{esp}} = 0.04 \qquad (\text{en contraste con } \beta = 0.12 \text{ para empleo ordinario})$$
 
-Las capacidades de $s\rightarrow O_i$ son los marginales de origen y las de $D_j\rightarrow t$ son los marginales de destino. Una incompatibilidad produce `ODFeasibilityError` antes de IPFP, con componentes, deficit, faltante de flujo maximo, testigo de corte minimo, IDs afectados y conteos del soporte. No se habilitan aristas prohibidas ni se reparan marginales mediante renormalizacion local.
+La atractividad gravitatoria de largo alcance desde el origen $i$ hacia el polo especial $k$ es:
+$$W_{ik} = \text{PEA}_i \cdot e^{-\beta_{\text{esp}} \cdot d_{ik}}$$
 
-### 5.2. Balance continuo Furness / IPFP
+#### Asignacion Multinomial Acotada (*Bounded Cohort Draw*)
+La cuota $Q_k$ se fragmenta en cohortes discretas cuyo tamano depende del tipo de nodo (ej. tamano maximo de cohorte de 75 para universidades y 120 para aeropuertos):
+$$\vec{T}_{\cdot \to k} \sim \operatorname{Multinomial}\left(K_k, \ \left[\frac{W_{1k}}{\sum_m W_{mk}}, \dots, \frac{W_{Nk}}{\sum_m W_{mk}}\right]\right)$$
 
-Sobre un soporte factible, IPFP equilibra directamente la matriz continua $T_{ij}$:
+Si el sorteo asigna a un origen $i$ un numero de viajeros mayor a su $\text{PEA}_i$ disponible, la asignacion se trunca al saldo real y el exceso se redistribuye estocasticamente entre los origenes restantes con capacidad remanente.
+
+#### Deduccion de Presupuesto Residencial
+Para evitar que un individuo viaje dos veces, la PEA asignada a la Capa 1 se resta del saldo de la celda:
+$$\text{PEA}_i^{\text{rem}} = \text{PEA}_i - \sum_k T_{i \to k}$$
+
+### 5.2. Capa 2: Modelo Gravitatorio Doblemente Acotado con Algoritmo de Furness (IPFP)
+Para el empleo comercial, corporativo e industrial restante, los modelos de gravitacion simples (uniconstrenidos) presentan una falla grave: asignan trabajadores a los destinos segun su cercania, pero **sin respetar la capacidad real de absorcion de los puestos de trabajo de destino**, sobrecargando comercios pequenos y subestimando grandes parques industriales.
+
+Para superar esto, `sb_mexico` implementa el algoritmo clasico de **Furness / IPFP** (*Iterative Proportional Fitting Procedure*), que equilibra bidireccionalmente la matriz de flujos $T_{ij}$:
 
 1. **Restriccion de Fila (Capacidad de Emision Residencial):**
-   $$\sum_{j} T_{ij} = \text{PEA}_i$$
+   $$\sum_{j} T_{ij} = \text{PEA}_i^{\text{rem}}$$
 2. **Restriccion de Columna (Capacidad de Absorcion Laboral):**
-   $$\sum_{i} T_{ij} = D_j^*$$
+   $$\sum_{i} T_{ij} \propto D_j \qquad (D_j = \text{calibrated\_jobs}_j)$$
 3. **Friccion Espacial Exponencial y Calibracion Empirica por Ciudad:**
    $$f(d_{ij}) = e^{-\beta \cdot d_{ij}} \quad \text{para } d_{ij} \le 55\text{ km} \quad (\beta = 0.12)$$
 
@@ -232,22 +274,25 @@ Sobre un soporte factible, IPFP equilibra directamente la matriz continua $T_{ij
    * En ciudades mexicanas compactas (ej. Cancun urbano, Campeche), los desplazamientos laborales diarios se concentran en medianas de 6 a 10 km ($\beta \approx 0.14 - 0.18$), mientras que en metropolis intermedias (Merida, Queretaro, Saltillo) rondan los 12 a 16 km ($\beta \approx 0.10 - 0.12$), y en megaciudades extensas (ZMVM, Monterrey, Guadalajara) superan los 20 a 30 km ($\beta \approx 0.07 - 0.09$).
 
 #### Algoritmo de Convergencia Bidireccional
-Se inicializa la matriz de flujos como $T_{ij}^{(0)} = \text{PEA}_i \cdot D_j^* \cdot f(d_{ij})$ y se itera secuencialmente:
+Se inicializa la matriz de flujos como $T_{ij}^{(0)} = \text{PEA}_i^{\text{rem}} \cdot D_j^* \cdot f(d_{ij})$ y se itera secuencialmente:
 
-$$\text{Paso A (Ajuste a Filas):} \quad T_{ij}^{(t+1/2)} = T_{ij}^{(t)} \cdot \frac{\text{PEA}_i}{\sum_k T_{ik}^{(t)} + \epsilon}$$
+$$\text{Paso A (Ajuste a Filas):} \quad T_{ij}^{(t+1/2)} = T_{ij}^{(t)} \cdot \frac{\text{PEA}_i^{\text{rem}}}{\sum_k T_{ik}^{(t)} + \epsilon}$$
 
 $$\text{Paso B (Ajuste a Columnas):} \quad T_{ij}^{(t+1)} = T_{ij}^{(t+1/2)} \cdot \frac{D_j^*}{\sum_k T_{kj}^{(t+1/2)} + \epsilon}$$
 
-El proceso exige convergencia simultanea y estrecha de filas y columnas. La tolerancia del modelo se mantiene separada de la tolerancia numerica de integerizacion; una salida materialmente no convergida se rechaza.
+El proceso itera hasta que el error relativo maximo en destinos cae por debajo de la tolerancia ($\text{tol} = 0.02$) o se alcanza el numero maximo de iteraciones ($\max_{\text{iter}} = 15$).
 
-### 5.3. Integerizacion determinista
+#### Matriz Estocastica de Probabilidades y Muestreo de Cohortes
+Una vez balanceada la matriz continua, se normaliza para obtener las probabilidades condicionales de eleccion discreta:
+$$P_{ij} = \frac{T_{ij}}{\sum_k T_{ik}}$$
 
-Para cada celda permitida se fija $L_{ij}=\lfloor T_{ij}\rfloor$. Los residuos enteros se asignan mediante flujo bipartito de costo minimo, con capacidad uno exclusivamente en celdas con parte fraccionaria positiva. El costo incremental $1-2\{T_{ij}\}$ minimiza el error absoluto total de redondeo y un orden estable resuelve empates de forma reproducible. El resultado conserva filas y columnas enteras exactas, mantiene ceros prohibidos y cada celda queda en piso o techo. Si $D_j^*$ es fraccional, su piso/techo se decide dentro del mismo flujo, no mediante redondeo independiente.
+Para cada origen residencial $i$, el saldo $\text{PEA}_i^{\text{rem}}$ se particiona en $K_i$ cohortes discretas equilibradas (con tamano adaptativo $\approx \text{target\_pop\_size}$) y se extrae una muestra multinomial:
+$$\vec{C}_{i} \sim \operatorname{Multinomial}(K_i, \ \vec{P}_{i \cdot})$$
 
-### 5.4. Teorema de Conservacion Estricta de Masa
+### 5.3. Teorema de Conservacion Estricta de Masa
 El modelo satisface de forma formal la invariante de conservacion de masa en cada corrida:
 
-$$\sum_{i, j} T_{ij}^{\mathbb Z} \equiv \sum_i \text{PEA}_i \equiv \sum_j D_j^{\mathbb Z} \qquad (\Delta = 0\text{ personas})$$
+$$\sum_{i, j} T_{ij} + \sum_{i, k} T_{ik} \equiv \sum_i \text{PEA}_i \qquad (\Delta = 0\text{ personas})$$
 
 No se genera ningun pasajero fantasma ni se pierde ningun trabajador censado.
 
@@ -302,7 +347,7 @@ Uno de los errores mas graves en el diseno de escenarios metropolitanos es conce
 | :--- | :--- | :--- |
 | **Prefijos Nativos (`AIR_`, `UNI_`)** | **DO (Obligatorio)** | Activa los algoritmos de dampening y horarios 24/7 o estudiantiles en el motor. |
 | **Absorcion DENUE (`mode: MAX`)** | **DO (Obligatorio)** | Previene inflar artificialmente el empleo ya censado en el area. |
-| **Marginal unico de destinos** | **DO (Obligatorio)** | Integra empleo regular y POIs antes de factibilidad; evita doble conteo y renormalizaciones locales. |
+| **Deduccion de Presupuesto ($\text{PEA}^{\text{rem}}$)** | **DO (Obligatorio)** | Garantiza que nadie viaje dos veces y preserva la masa total ($\Delta = 0$). |
 | **Nombres limpios sin guiones bajos** | **DO** | Mejora la legibilidad estetica del juego (`UNI_UNAM Campus Central`). |
 | **Mega-POIs en avenidas continuas** | **DON'T** | Destruye la red lineal y colapsa una sola estacion, vaciando el resto de la linea. |
 | **Micro-POIs para escuelas basicas o plazas** | **DON'T** | Sobrecarga innecesaria de puntos; el DENUE ya los captura de forma natural. |
@@ -552,8 +597,10 @@ isolated_zones:
     bbox: [-86.76, 21.20, -86.68, 21.28]
 ```
 
-### 10.2. Aislamiento como soporte duro
-El motor clasifica cada coordenada en su zona topologica ($z = 0$ para tierra continental, $z \ge 1$ para cada isla independiente). Las parejas entre zonas distintas se eliminan del soporte antes de la factibilidad. Si las masas duras de una componente aislada no coinciden, la corrida falla explicitamente; nunca se reescala el empleo de esa isla. Las componentes factibles pueden resolverse por separado sin cambiar sus marginales.
+### 10.2. Ejecucion Estanca del Modelo Gravitatorio por Zona
+El motor clasifica cada coordenada en su zona topologica ($z = 0$ para tierra continental, $z \ge 1$ para cada isla independiente):
+1. **Balanceo de Furness / IPFP Estanco:** El equilibrio bidireccional de la Capa 2 se corre de forma aislada e independiente dentro de cada sub-espacio zonal. Los residentes de Isla Mujeres compiten exclusivamente por los puestos de trabajo existentes dentro de su propia isla.
+2. **Eliminacion de Viajes Trans-Maritimos en Auto:** Se garantiza formalmente que ningun objeto `pop` tenga un `residenceId` en una isla y un `jobId` en el continente (o viceversa), a menos que exista un generador especial de transporte multimodal interurbano (`TRA_Terminal Maritima`).
 
 ---
 
@@ -576,11 +623,10 @@ $$\text{target\_pop\_size} = \max\left(35, \ \operatorname{round}\left(\frac{\te
 | **1,500,000 – 3,000,000** | Guadalajara, Monterrey, Puebla | $85 – 150$ | 18,000 – 22,000 | 60 FPS Fluido |
 | **> 3,000,000** | Zona Metropolitana Valle de Mexico | $150 – 250$ | 20,000 – 25,000 | 60 FPS Estable |
 
-### 11.3. Contrato de empaquetado por celda OD
-Cada celda entera $T_{ij}^{\mathbb Z}=n$ se particiona sin cambiar $i$ ni $j$:
-1. **Techo duro (`max_pop_size`):** Ninguna cohorte lo supera.
-2. **Objetivo blando (`target_pop_size`):** Entre las particiones validas se elige deterministicamente la mas cercana al objetivo.
-3. **Piso de eficiencia (`min_pop_size`):** Se cumple cuando existe una particion exacta compatible con el techo. Si no existe (por ejemplo, $n < \text{min\_pop\_size}$), el flujo OD se conserva y se emite un residual sub-minimo diagnosticado. Nunca se trasladan pasajeros a otro origen o destino para ocultarlo.
+### 11.3. Limites Estrictos de Cohorte y Fusion de Viajes Idénticos
+Para erradicar micro-cohortes ineficientes generadas por la discretizacion estocastica de marginales residuales, el pipeline implementa la funcion `merge_identical_commutes`:
+1. **Piso Minimo (`min_pop_size = 25`):** Agrupa o fusiona viajes redundantes entre el mismo par `(residenceId, jobId)`. Si una cohorte residual no alcanza el umbral minimo de 25 personas, se redistribuye hacia la cohorte mas afin del mismo origen para no sobrecargar el hilo WebGL con paquetes minusculos de 1 a 5 personas.
+2. **Techo Canonico (`max_pop_size = 200`):** En estricto respeto a la arquitectura de Colin Miller, ninguna cohorte puede superar 200 personas. Si un par masivo acumula 650 personas, se divide limpiamente en cohortes discretas (`[200, 200, 200, 50]`).
 
 ---
 
@@ -652,8 +698,8 @@ En la cartografia de *Subway Builder*, los poligonos de zonificacion urbana (res
 
 | Componente | Estandar Tecnico | Metodologia Implementada | Garantia de Calidad |
 | :--- | :--- | :--- | :--- |
-| **Conservacion de Masa** | $\sum \text{Pops} \equiv \sum \text{PEA}$ | IPFP con marginales duros e integerizacion OD controlada | $\Delta = 0$ personas (cero perdidas, cero inflacion) |
-| **Limites de Cohorte** | 60 FPS WebGL Continuos | `target_pop_size` blando, `min_pop_size` de eficiencia y `max_pop_size` duro | Conservacion exacta aun cuando exista un residual sub-minimo |
+| **Conservacion de Masa** | $\sum \text{Pops} \equiv \sum \text{PEA}$ | Asignacion Multinomial Acotada a Priori y Deduccion de Presupuesto | $\Delta = 0$ personas (cero perdidas, cero inflacion) |
+| **Limites de Cohorte** | 60 FPS WebGL Continuos | Tamano adaptativo `target_pop_size`, piso `min_pop_size=25` y techo `max_pop_size=200` | Archivo liviano y eliminacion de micro-pops ineficientes |
 | **Generadores Especiales** | Cuotas Exactas de Demanda | Modelo en Dos Capas con Deduccion de Presupuesto ($\beta_{\text{esp}}=0.04$) | 100% de la cuota oficial en tooltips y flujos |
 | **Calibracion de Empleo** | Control Censal CE 2024 / SAIC | Ponderacion Territorial BBOX y Clamping Asimetrico acotado a $TIL_1$ | Grandes empresas intactas (1.0x), micro acotado a informalidad |
 | **Proyecciones Temporales** | Base 2024–2026 Homogenea | Factores oficiales CONAPO intercensales auditados por municipio en Wizard | Refleja dinamismo demografico sin desfase temporal |

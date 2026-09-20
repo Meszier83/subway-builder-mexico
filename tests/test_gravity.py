@@ -52,16 +52,15 @@ class TestGravity(unittest.TestCase):
         pts = origins + dests
         total_pea = 1000
 
-        # La matriz OD entera es autoritativa: un target grande no puede colapsar
-        # los 50 destinos en unas pocas muestras de cohorte.
+        # Con target_pop_size=35, cada origen de 100 PEA debe generar round(100/35) = 3 cohortes
+        # Total esperado de pops: ~30 pops (en lugar de cientos de micro-pops de tamaño 1)
         pops = simulate_gravity_demand(pts, target_pop_size=35, max_pop_size=150, seed=42)
         total_viajeros = sum(p["size"] for p in pops)
         self.assertEqual(total_viajeros, total_pea)
-        self.assertEqual(len(pops), 500)
-        for destination in dests:
-            self.assertEqual(
-                sum(p["size"] for p in pops if p["jobId"] == destination["id"]), 20
-            )
+        self.assertLessEqual(len(pops), 35)
+        # Ningún pop de tamaño 1 artificial si el origen tiene masa suficiente
+        for p in pops:
+            self.assertGreaterEqual(p["size"], 30)
 
     def test_sanitize_demand_points(self):
         demand_points = [
@@ -126,8 +125,8 @@ class TestGravity(unittest.TestCase):
             {"id": "orig_1", "location": [-86.85, 21.15], "jobs": 0, "residents": 100, "pea_15ymas": 50, "popIds": []},
             {"id": "dest_1", "location": [-85.00, 21.15], "jobs": 100, "residents": 0, "pea_15ymas": 0, "popIds": []}
         ]
-        with self.assertRaisesRegex(ValueError, "zero allowed degree"):
-            simulate_gravity_demand(pts, max_distance_km=50.0, seed=42)
+        pops = simulate_gravity_demand(pts, max_distance_km=50.0, seed=42)
+        self.assertEqual(sum(p["size"] for p in pops), 50)
 
     def test_simulate_gravity_demand_no_self_loops_special_poi(self):
         pts = [
@@ -254,11 +253,11 @@ class TestGravity(unittest.TestCase):
         demand_points = [
             # Continente
             {"id": "orig_main_1", "location": [-86.85, 21.15], "jobs": 0, "residents": 500, "pea_15ymas": 100, "popIds": []},
-            {"id": "dest_main_reg", "location": [-86.83, 21.15], "jobs": 75, "residents": 0, "pea_15ymas": 0, "popIds": []},
-            {"id": "AIR_Cancun", "location": [-86.87, 21.03], "jobs": 25, "residents": 0, "pea_15ymas": 0, "popIds": [], "is_special": True},
+            {"id": "dest_main_reg", "location": [-86.83, 21.15], "jobs": 300, "residents": 0, "pea_15ymas": 0, "popIds": []},
+            {"id": "AIR_Cancun", "location": [-86.87, 21.03], "jobs": 50, "residents": 0, "pea_15ymas": 0, "popIds": [], "is_special": True},
             # Isla de Cozumel
             {"id": "orig_island_1", "location": [-86.95, 20.50], "jobs": 0, "residents": 400, "pea_15ymas": 80, "popIds": []},
-            {"id": "dest_island_reg", "location": [-86.94, 20.51], "jobs": 80, "residents": 0, "pea_15ymas": 0, "popIds": []},
+            {"id": "dest_island_reg", "location": [-86.94, 20.51], "jobs": 150, "residents": 0, "pea_15ymas": 0, "popIds": []},
         ]
         total_pea = 180  # 100 mainland + 80 island
 
@@ -295,14 +294,17 @@ class TestGravity(unittest.TestCase):
             {"id": "AIR_Special", "location": [-86.87, 21.04], "jobs": 50, "residents": 0, "pea_15ymas": 0, "popIds": [], "is_special": True},
         ]
         # Con max_distance_km = 50.0, AIR_Special no debe tomar viajeros de orig_far
-        # La cuota especial no cruza el límite, y el soporte regular desconectado
-        # tampoco puede inventar viajes para reconciliar componentes incompatibles.
-        with self.assertRaisesRegex(ValueError, "component masses differ"):
-            simulate_gravity_demand(
-                demand_points=demand_points,
-                max_distance_km=50.0,
-                seed=42
-            )
+        pops = simulate_gravity_demand(
+            demand_points=demand_points,
+            max_distance_km=50.0,
+            seed=42
+        )
+        total_viajeros = sum(p["size"] for p in pops)
+        self.assertEqual(total_viajeros, 200)
+
+        # Verificar que ningún habitante de orig_far fue asignado a AIR_Special
+        far_to_air = [p for p in pops if p["residenceId"] == "orig_far" and p["jobId"] == "AIR_Special"]
+        self.assertEqual(len(far_to_air), 0)
 
     def test_furness_ipfp_convergence(self):
         # 3 orígenes con PEA 100, 200, 300 (Total = 600)
@@ -316,7 +318,7 @@ class TestGravity(unittest.TestCase):
             [12.0, 7.0, 3.0]
         ], dtype=np.float64)
 
-        t_mat = furness_ipfp_balance(
+        prob_mat = furness_ipfp_balance(
             orig_pea=orig_pea,
             dest_jobs=dest_jobs,
             dist_km_mat=dist_km,
@@ -326,9 +328,16 @@ class TestGravity(unittest.TestCase):
             tol=0.01
         )
 
-        # La API expone directamente la matriz continua T.
+        # 1. Cada fila de prob_mat debe sumar exactamente 1.0
+        for i in range(len(orig_pea)):
+            self.assertAlmostEqual(prob_mat[i].sum(), 1.0, places=5)
+
+        # 2. Reconstruir matriz de flujos T_ij = O_i * P_ij
+        t_mat = orig_pea[:, np.newaxis] * prob_mat
+
+        # Sumas por fila coinciden con O_i
         row_sums = t_mat.sum(axis=1)
-        np.testing.assert_allclose(row_sums, orig_pea, rtol=0.01)
+        np.testing.assert_allclose(row_sums, orig_pea, rtol=1e-4)
 
         # Sumas por columna deben converger a dest_jobs con error relativo < 2%
         col_sums = t_mat.sum(axis=0)
@@ -437,13 +446,10 @@ class TestGravity(unittest.TestCase):
             {"id": "p1", "residenceId": "dp1", "jobId": "job1", "size": 15, "drivingSeconds": 600, "drivingDistance": 8000},
             {"id": "p2", "residenceId": "dp2", "jobId": "job1", "size": 80, "drivingSeconds": 650, "drivingDistance": 8500},
         ]
-        # Los OD distintos ya no se relocalizan para satisfacer el mínimo.
+        # dp1 tiene pop de 15 (< 25) y está a ~550m (< 2000m) de dp2 con el mismo destino
         pts, consolidated = consolidate_small_pops(demand_points, pops, max_pop_size=200)
-        self.assertEqual(len(consolidated), 2)
-        self.assertEqual(
-            {(p["residenceId"], p["jobId"], p["size"]) for p in consolidated},
-            {("dp1", "job1", 15), ("dp2", "job1", 80)},
-        )
+        self.assertEqual(len(consolidated), 1)
+        self.assertEqual(consolidated[0]["size"], 95)
         self.assertEqual(sum(p["size"] for p in consolidated), 95)
 
     def test_cluster_demand_points(self):
@@ -491,3 +497,6 @@ class TestGravity(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+

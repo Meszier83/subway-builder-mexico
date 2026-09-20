@@ -55,13 +55,13 @@ En Mexico no existe un repositorio publico universal de matrices origen-destino 
   CONAPO Proyecciones 2026 ------> [Sincronizacion Demografica Intercensal]-+           |
                                                                                         v
                                   +-----------------------------------------------------+
-                                  | MARGINAL UNICO: empleo regular + POIs especiales    |
-                                  | Totales duros, soporte topologico y factibilidad    |
+                                  | CAPA 1: Hubs Especiales (AIR_, UNI_, SPO_, MED_)   |
+                                  | Cuotas exactas AFAC/SEP + Deduccion estricta PEA    |
                                   +-----------------------------------------------------+
                                                             |
                                                             v
                                   +-----------------------------------------------------+
-                                  | IPFP continuo + integerizacion OD de costo minimo   |
+                                  | CAPA 2: Empleo Regular (Furness / IPFP Bidireccional)|
                                   | Zonas de Alta Afluencia (affluence_zones)           |
                                   | Zonas de Exclusion (exclusion_zones - cero demanda) |
                                   | Zonas Aisladas Estancas (isolated_zones)            |
@@ -90,9 +90,9 @@ En Mexico no existe un repositorio publico universal de matrices origen-destino 
                                   +-----------------------------------------------------+
 ```
 
-### 1. Modelo OD con Marginales Duros
-* **Soporte y factibilidad:** Empleo regular y POIs forman un marginal autoritativo global. Distancia maxima, aislamiento y relaciones prohibidas definen un unico soporte. Un flujo maximo certifica factibilidad antes de IPFP; no existe reescalado local silencioso.
-* **Balance e integerizacion:** Furness/IPFP produce la matriz continua $T$ con convergencia simultanea estrecha. Un flujo de costo minimo redondea cada celda a piso o techo conservando exactamente filas, columnas y ceros prohibidos. Las cohortes se empacan despues por celda OD, sin muestreo multinomial.
+### 1. Modelo en Dos Capas (Two-Tier Doubly-Constrained)
+* **Capa 1 (Generadores Metropolitanos):** Aeropuertos (`AIR_`), Universidades (`UNI_`), Estadios (`SPO_`) y Hospitales (`MED_`) reciben su cuota exacta mediante atraccion gravitatoria de largo alcance ($\beta_{\text{esp}} = 0.04$) y sorteo multinomial acotado. La masa asignada se deduce formalmente de la PEA del origen ($\text{PEA}_i^{\text{rem}} = \text{PEA}_i - \sum_k T_{i \to k}$), impidiendo la duplicacion de viajes.
+* **Capa 2 (Furness / IPFP Doblemente Acotado):** El remanente de trabajadores y puestos de trabajo comerciales, corporativos e industriales se equilibra iterativamente hasta converger simultaneamente a los totales marginales de origen y destino.
 
 ### 2. Ruteo Vial Canonico con OSRM, Huella Criptografica y Desacoplamiento V8
 * **OSRM Oficial con `car.lua`:** En estricto cumplimiento con el canon del autor Colin Miller, las cohortes `pops` incorporan tiempos de viaje a flujo libre (~40 km/h) y distancias de pavimento real.
@@ -121,7 +121,7 @@ Tratamiento matematicamente estanco para conurbaciones costeras con islas habita
 
 ### 8. Encuadre Inicial de Camara 16:9 y Calibracion de Cohortes
 * **Encuadre 16:9 (`initial_center` & `initial_zoom`):** Herramienta interactiva en el Wizard con marco de captura rapida para fijar la camara del Dia 1 en el juego, con fallback automatico al baricentro ponderado de masa activa.
-* **Calibracion de Cohortes (`min_pop_size`, `target_pop_size`, `max_pop_size`):** `max_pop_size` es un techo duro, `target_pop_size` un objetivo blando y `min_pop_size` una meta de eficiencia. Los residuos sub-minimos se conservan y diagnostican cuando la celda OD no admite otra particion exacta.
+* **Calibracion de Cohortes (`min_pop_size`, `target_pop_size`, `max_pop_size`):** Previene micro-cohortes ineficientes (1-10 pax) y estabiliza la simulacion WebGL a 60 FPS continuos.
 
 ### 9. Motor Cartografico Resiliente en WSL 2 y Regla "Campus Wins"
 * **Campus Wins:** Disyuntividad geometrica estricta que sustrae la mascara de campus universitarios (`college_mask`) sobre poligonos comerciales superpuestos y aplica etiquetado dual `type: 'college', kind: 'college'`.

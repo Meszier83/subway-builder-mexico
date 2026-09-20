@@ -529,9 +529,7 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
                     df_denue=df_denue_raw,
                     ce_benchmarks=ce_benchmarks,
                     til_1=float(til_1),
-                    min_sample_threshold=int(macro.get("sample_threshold", 500)),
-                    denominator_contract=((cdata or {}).get("data_integrity") or {}).get("denue_municipal_denominators"),
-                    denue_vintage=((cdata or {}).get("temporal") or {}).get("source_vintages", {}).get("denue"),
+                    min_sample_threshold=int(macro.get("sample_threshold", 500))
                 )
 
                 valid_mza = df_denue[df_denue['mza_clean'] != '-1']

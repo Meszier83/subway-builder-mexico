@@ -31,39 +31,6 @@ city:
   # lod_peripheral_labels: "none"     # "none" (periferia limpia), "cities_only", "all"
   # lod_peripheral_buildings: "none"  # "none" (apagados), "large_only" (>1000m²), "all"
 
-temporal:
-  model_year: 2026                    # Año autoritativo de la simulación
-  cpv_base_year: 2020                 # Año base del CPV y del cociente CONAPO
-  enoe_period: "2026-T1"              # Periodo exacto cuando las tasas no se fijan manualmente
-  # Selección metodológica obligatoria si se usa CONAPO: "conapo_2020" o "cpv_2020"
-  conapo_growth_denominator: "cpv_2020"
-  # conapo_population_column: "POB_MIT_MUN" # Obligatorio si el archivo contiene varias columnas POB*
-  source_vintages:                    # Metadatos declarados para auditoría
-    cpv: 2020
-    denue: 2025
-    ce: 2024
-    conapo: 2026                    # Requerido para archivos CONAPO de un solo año sin columna ANO
-
-data_integrity:
-  max_unmatched_population_fraction: 0.01
-  # Denominadores independientes obligatorios para municipios calibrados contra CE.
-  # denue_municipal_denominators:
-  #   "23005":
-  #     municipality: "23005"
-  #     employment: 125000.0
-  #     source: "DENUE municipal completo 2025, descarga oficial INEGI"
-  #     vintage: 2025
-  #     coverage_basis: "complete_municipality"
-
-# Selección explícita para resolver cualquier ambigüedad. CPV, DENUE y Marco aceptan listas.
-# data_sources:
-#   cpv: ["data/xxx/RESAGEBURB_01.csv"]
-#   denue: ["data/xxx/denue_01.csv"]
-#   marco: ["data/xxx/mza_01.gpkg"]
-#   ce: "data/xxx/ce2024.csv"
-#   enoe: "data/xxx/enoe_2026_t1.csv"
-#   conapo: "data/conapo_proyecciones.csv"
-
 
 macroeconomics:
   tasa_pea: 0.62                      # Tasa de participación laboral (ENOE)
@@ -72,11 +39,9 @@ macroeconomics:
   default_growth_factor: 1.05         # Factor de proyección demográfica base (1.00 = Censo 2020 puro)
   gravity_beta: 0.12                  # Coeficiente de fricción espacial (0.10 a 0.14 recomendado)
   max_distance_km: 55.0               # Límite máximo de distancia para viajes urbanos
-  min_pop_size: 25                    # Meta de eficiencia; residuos OD menores se conservan y diagnostican
+  min_pop_size: 25                    # Tamaño mínimo de cohorte (evita micro-pops ineficientes de 1-10 pax)
   target_pop_size: 150                # Tamaño objetivo de empaquetado de cohortes (150-180 pax)
   max_pop_size: 200                   # Tamaño máximo por cohorte de viaje (estándar nativo Subway Builder: 200)
-  furness_iterations: 1000            # Iteraciones máximas para convergencia simultánea estrecha
-  furness_tol: 1.0e-10                # Tolerancia del modelo; separada de la tolerancia de integerización
 
   # --- MÓDULO EXPERIMENTAL (Opcional): Competitividad Modal (Auto vs. Metro) ---
   # Simula congestión vial urbana y usuarios cautivos de transporte colectivo.
