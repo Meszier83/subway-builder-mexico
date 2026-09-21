@@ -819,6 +819,9 @@ class TestTripDistribution(unittest.TestCase):
         self.assertEqual(m["method"], "demand_points")
         # 2 orígenes x 4 celdas espaciales alcanzadas (A+G colapsados, B, C, D) = 8 pares espaciales
         self.assertEqual(m["admissible_pairs"], 8)
+        # La media esperada del histograma ponderado con 2/5 en la celda colocada (A+G) y 1/5 en B, C, D es 20.5 km
+        self.assertAlmostEqual(m["opportunity_mean_km"], 20.5, places=1)
+        self.assertAlmostEqual(rec["recommended_beta"], 0.104, places=3)
 
         # En simulate_gravity_demand(), los 5 destinos con probabilidad positiva son A, G, B, C, D
         pops = simulate_gravity_demand(
@@ -833,6 +836,23 @@ class TestTripDistribution(unittest.TestCase):
         job_ids_reached = set(p["jobId"] for p in pops)
         self.assertNotIn("F", job_ids_reached, "Destino F (6to más lejano) debe recibir 0 viajes")
         self.assertTrue(job_ids_reached.issubset({"A", "G", "B", "C", "D"}))
+
+        # Invarianza: El mismo comportamiento exacto debe cumplirse si los colocados comparten ID ("A", "A")
+        demand_points_same_id = [
+            {"id": "A", "location": [-87.00, 20.00], "pea_15ymas": 1000, "jobs": 0},
+            {"id": "B", "location": [-87.01, 20.00], "pea_15ymas": 1000, "jobs": 0},
+            {"id": "A", "location": [-87.00, 20.16], "pea_15ymas": 0, "jobs": 100},  # ~17.7 km (1er más cercano)
+            {"id": "A", "location": [-87.00, 20.16], "pea_15ymas": 0, "jobs": 100},  # ~17.7 km (colocado con mismo ID)
+            {"id": "B", "location": [-87.00, 20.18], "pea_15ymas": 0, "jobs": 100},  # ~19.9 km (3er)
+            {"id": "C", "location": [-87.00, 20.20], "pea_15ymas": 0, "jobs": 100},  # ~22.1 km (4to)
+            {"id": "D", "location": [-87.00, 20.22], "pea_15ymas": 0, "jobs": 100},  # ~24.3 km (5to)
+            {"id": "F", "location": [-87.00, 20.32], "pea_15ymas": 0, "jobs": 100},  # ~35.4 km (6to - excluido)
+        ]
+        rec_same = recommend_gravity_beta(demand_points=demand_points_same_id, isolated_zones=isolated_zones, max_distance_km=55.0)
+        self.assertIsNotNone(rec_same)
+        self.assertEqual(rec_same["metrics"]["admissible_pairs"], 8)
+        self.assertAlmostEqual(rec_same["metrics"]["opportunity_mean_km"], 20.5, places=1)
+        self.assertAlmostEqual(rec_same["recommended_beta"], 0.104, places=3)
 
 
 if __name__ == "__main__":
