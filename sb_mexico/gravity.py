@@ -2188,13 +2188,8 @@ def _calibrate_beta_from_demand_points(
                 a = sin_half_dlat**2 + math.cos(rlat_o[u_idx]) * np.cos(rlat_d) * sin_half_dlon**2
                 d_all = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
 
-                d_eval_global = d_all.copy()
-                if len(dest_lons) > 1 and u_idx in shared_deductions_map:
-                    for v_idx in shared_deductions_map[u_idx]:
-                        d_eval_global[v_idx] += 1e6
-
                 k_closest = min(5, len(dest_lons))
-                closest_dests = np.argsort(d_eval_global)[:k_closest]
+                closest_dests = np.argsort(d_all)[:k_closest]
                 uniform_w = orig_w[u_idx] / len(closest_dests)
                 for v_idx in closest_dests:
                     d_val = float(d_all[v_idx])

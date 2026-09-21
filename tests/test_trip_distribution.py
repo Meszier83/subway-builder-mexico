@@ -742,6 +742,57 @@ class TestTripDistribution(unittest.TestCase):
             self.assertIn(p["residenceId"], ["res_1", "res_2"])
             self.assertIn(p["jobId"], ["job_1", "job_2"])
 
+    def test_global_orphan_fallback_exact_support_and_probabilities(self):
+        # Contraejemplo Sol: Zona residencial sin empleo local frente a 6 destinos globales (A..F).
+        # Los orígenes tienen IDs 'A' y 'B'. Los 6 destinos están ordenados por distancia creciente:
+        # dist(A) < dist(B) < dist(C) < dist(D) < dist(E) < dist(F).
+        # simulate_gravity_demand() toma los 5 destinos más cercanos por distancia cruda (A..E)
+        # sin penalizar por ID en el fallback global.
+        # El calibrador debe admitir exactamente los mismos 5 destinos (A..E) y excluir F,
+        # garantizando identidad estricta de soporte y probabilidades de viaje.
+        isolated_zones = [
+            {"name": "Zone_Res", "bbox": [-87.10, 19.95, -86.90, 20.05]},
+            {"name": "Zone_Jobs", "bbox": [-87.10, 20.15, -86.90, 20.35]},
+        ]
+        demand_points = [
+            {"id": "A", "location": [-87.00, 20.00], "pea_15ymas": 100, "jobs": 0},
+            {"id": "B", "location": [-87.01, 20.00], "pea_15ymas": 100, "jobs": 0},
+            {"id": "A", "location": [-87.00, 20.16], "pea_15ymas": 0, "jobs": 100},  # ~17.7 km (1er más cercano a A)
+            {"id": "B", "location": [-87.00, 20.18], "pea_15ymas": 0, "jobs": 100},  # ~19.9 km (2do)
+            {"id": "C", "location": [-87.00, 20.20], "pea_15ymas": 0, "jobs": 100},  # ~22.1 km (3ro)
+            {"id": "D", "location": [-87.00, 20.22], "pea_15ymas": 0, "jobs": 100},  # ~24.3 km (4to)
+            {"id": "E", "location": [-87.00, 20.24], "pea_15ymas": 0, "jobs": 100},  # ~26.5 km (5to)
+            {"id": "F", "location": [-87.00, 20.32], "pea_15ymas": 0, "jobs": 100},  # ~35.4 km (6to - debe quedar EXCLUIDO)
+        ]
+
+        rec = recommend_gravity_beta(demand_points=demand_points, isolated_zones=isolated_zones, max_distance_km=55.0)
+        self.assertIsNotNone(rec)
+        m = rec["metrics"]
+        self.assertEqual(m["method"], "demand_points")
+        # 2 orígenes x 5 destinos más cercanos = exactamente 10 pares admisibles en el calibrador
+        self.assertEqual(m["admissible_pairs"], 10)
+
+        # En simulate_gravity_demand(), los 5 destinos con probabilidad positiva son A, B, C, D, E
+        # Destino F tiene probabilidad estrictamente cero y nunca recibe viajes.
+        pops = simulate_gravity_demand(
+            demand_points=demand_points,
+            isolated_zones=isolated_zones,
+            max_distance_km=55.0,
+            beta=rec["recommended_beta"],
+            target_pop_size=10,
+            seed=42
+        )
+        self.assertGreater(len(pops), 0)
+        job_ids_reached = set(p["jobId"] for p in pops)
+        self.assertNotIn("F", job_ids_reached, "Destino F (6to más lejano) no debe recibir viajes en el fallback global")
+        self.assertTrue(job_ids_reached.issubset({"A", "B", "C", "D", "E"}))
+
+        # Verificar que el origen 'A' viaja a su destino coincidente 'A' (no fue penalizado espuriamente)
+        trips_from_A = [p for p in pops if p["residenceId"] == "A"]
+        self.assertGreater(len(trips_from_A), 0)
+        dest_for_A = set(p["jobId"] for p in trips_from_A)
+        self.assertIn("A", dest_for_A, "Origen A debe poder viajar a Destino A en el fallback global")
+
 
 if __name__ == "__main__":
     unittest.main()
