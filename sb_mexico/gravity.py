@@ -2036,7 +2036,7 @@ def _calibrate_beta_from_demand_points(
     # Soporte Espacial y Grafo Bipartito de Interacción Admisible
     # Alineado estrictamente con Furness / IPFP (zonas aisladas, distancia máxima,
     # auto-viajes y conectividad de respaldo para huérfanos).
-    # Streaming adaptativo para mantener consumo de RAM < 20 MB sin materializar pares densos.
+    # Streaming adaptativo para mantener consumo de RAM incremental acotado (< 30 MB) sin materializar pares densos.
     # -------------------------------------------------------------------------
     effective_max_dist = sanitize_max_distance_km(max_distance_km, default=55.0)
     effective_max_dist = max(5.0, effective_max_dist)
@@ -2134,47 +2134,72 @@ def _calibrate_beta_from_demand_points(
                             parent[rc] = r0
                     dest_comp[v_idx] = r0
 
-    # Soporte de Respaldo para Filas/Columnas Huérfanas (Equivalencia exacta con Furness)
+    # Soporte de Respaldo para Filas/Columnas Huérfanas (Equivalencia exacta con simulate_gravity_demand)
     # Furness conecta cada fila o columna sin pares admisibles a sus <= 5 destinos/orígenes
-    # más cercanos en la misma zona para preservar la masa y conectividad de la red.
+    # más cercanos en la misma zona. Si una zona carece totalmente de empleo local (zona residencial huérfana),
+    # simulate_gravity_demand() conecta los residentes uniformemente a los <= 5 destinos globales más cercanos.
     orphan_pairs = {}
     if np.any(~orig_has_dest):
         orphan_origins = np.where(~orig_has_dest)[0]
         for u_idx in orphan_origins:
             z_u = int(orig_zones[u_idx])
             cand_dests = np.where(dest_zones == z_u)[0]
-            if len(cand_dests) == 0:
-                continue
+            if len(cand_dests) > 0:
+                # 1. Respaldo local de Furness dentro de la misma zona
+                dlat = rlat_d[cand_dests] - rlat_o[u_idx]
+                dlon = rlon_d[cand_dests] - rlon_o[u_idx]
+                sin_half_dlat = np.sin(0.5 * dlat)
+                sin_half_dlon = np.sin(0.5 * dlon)
+                a = sin_half_dlat**2 + math.cos(rlat_o[u_idx]) * np.cos(rlat_d[cand_dests]) * sin_half_dlon**2
+                d_cand = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
 
-            dlat = rlat_d[cand_dests] - rlat_o[u_idx]
-            dlon = rlon_d[cand_dests] - rlon_o[u_idx]
-            sin_half_dlat = np.sin(0.5 * dlat)
-            sin_half_dlon = np.sin(0.5 * dlon)
-            a = sin_half_dlat**2 + math.cos(rlat_o[u_idx]) * np.cos(rlat_d[cand_dests]) * sin_half_dlon**2
-            d_cand = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
-
-            d_eval = d_cand.copy()
-            if raw_dest_count_per_zone.get(z_u, 0) > 1 and u_idx in shared_deductions_map:
-                for k, v_idx in enumerate(cand_dests):
-                    if v_idx in shared_deductions_map[u_idx]:
-                        ded_w = shared_deductions_map[u_idx][v_idx] / total_denom
-                        raw_w = orig_w[u_idx] * dest_w[v_idx]
-                        if raw_w - ded_w <= 1e-12:
-                            d_eval[k] += 1e6
-
-            k_closest = min(5, len(cand_dests))
-            closest_idx = np.argsort(d_eval)[:k_closest]
-            for c_idx in closest_idx:
-                v_idx = cand_dests[c_idx]
-                d_val = float(d_cand[c_idx])
-                pw = orig_w[u_idx] * dest_w[v_idx]
+                d_eval = d_cand.copy()
                 if raw_dest_count_per_zone.get(z_u, 0) > 1 and u_idx in shared_deductions_map:
-                    if v_idx in shared_deductions_map[u_idx]:
-                        ded_w = shared_deductions_map[u_idx][v_idx] / total_denom
-                        pw = max(0.0, pw - ded_w)
-                if pw > 0.0:
+                    for k, v_idx in enumerate(cand_dests):
+                        if v_idx in shared_deductions_map[u_idx]:
+                            ded_w = shared_deductions_map[u_idx][v_idx] / total_denom
+                            raw_w = orig_w[u_idx] * dest_w[v_idx]
+                            if raw_w - ded_w <= 1e-12:
+                                d_eval[k] += 1e6
+
+                k_closest = min(5, len(cand_dests))
+                closest_idx = np.argsort(d_eval)[:k_closest]
+                for c_idx in closest_idx:
+                    v_idx = cand_dests[c_idx]
+                    d_val = float(d_cand[c_idx])
+                    pw = orig_w[u_idx] * dest_w[v_idx]
+                    if raw_dest_count_per_zone.get(z_u, 0) > 1 and u_idx in shared_deductions_map:
+                        if v_idx in shared_deductions_map[u_idx]:
+                            ded_w = shared_deductions_map[u_idx][v_idx] / total_denom
+                            pw = max(0.0, pw - ded_w)
+                    if pw > 0.0:
+                        pair_key = (u_idx, v_idx)
+                        orphan_pairs[pair_key] = (d_val, pw)
+                        orig_has_dest[u_idx] = True
+                        dest_has_orig[v_idx] = True
+
+            # 2. Respaldo global idéntico a simulate_gravity_demand() (líneas 1175-1178 y 1186-1188)
+            # Para zonas exclusivamente residenciales sin empleo local o filas residuales en cero
+            if not orig_has_dest[u_idx]:
+                dlat = rlat_d - rlat_o[u_idx]
+                dlon = rlon_d - rlon_o[u_idx]
+                sin_half_dlat = np.sin(0.5 * dlat)
+                sin_half_dlon = np.sin(0.5 * dlon)
+                a = sin_half_dlat**2 + math.cos(rlat_o[u_idx]) * np.cos(rlat_d) * sin_half_dlon**2
+                d_all = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
+
+                d_eval_global = d_all.copy()
+                if len(dest_lons) > 1 and u_idx in shared_deductions_map:
+                    for v_idx in shared_deductions_map[u_idx]:
+                        d_eval_global[v_idx] += 1e6
+
+                k_closest = min(5, len(dest_lons))
+                closest_dests = np.argsort(d_eval_global)[:k_closest]
+                uniform_w = orig_w[u_idx] / len(closest_dests)
+                for v_idx in closest_dests:
+                    d_val = float(d_all[v_idx])
                     pair_key = (u_idx, v_idx)
-                    orphan_pairs[pair_key] = (d_val, pw)
+                    orphan_pairs[pair_key] = (d_val, uniform_w)
                     orig_has_dest[u_idx] = True
                     dest_has_orig[v_idx] = True
 
