@@ -793,6 +793,47 @@ class TestTripDistribution(unittest.TestCase):
         dest_for_A = set(p["jobId"] for p in trips_from_A)
         self.assertIn("A", dest_for_A, "Origen A debe poder viajar a Destino A en el fallback global")
 
+    def test_global_orphan_fallback_colocated_destinations_multiplicity(self):
+        # Contraejemplo Sol: Dos destinos colocados (A y G) en un conjunto de 6 destinos (A, G, B, C, D, F).
+        # simulate_gravity_demand() selecciona los 5 destinos más cercanos por fila de regular_dests (A, G, B, C, D).
+        # El calibrador debe seleccionar los 5 destinos sobre las filas originales preservando su multiplicidad,
+        # agregando sus pesos en la celda colocada (2/5) y excluyendo estrictamente a F (0/5).
+        isolated_zones = [
+            {"name": "Zone_Res", "bbox": [-87.10, 19.95, -86.90, 20.05]},
+            {"name": "Zone_Jobs", "bbox": [-87.10, 20.15, -86.90, 20.35]},
+        ]
+        demand_points = [
+            {"id": "A", "location": [-87.00, 20.00], "pea_15ymas": 1000, "jobs": 0},
+            {"id": "B", "location": [-87.01, 20.00], "pea_15ymas": 1000, "jobs": 0},
+            {"id": "A", "location": [-87.00, 20.16], "pea_15ymas": 0, "jobs": 100},  # ~17.7 km (1er más cercano)
+            {"id": "G", "location": [-87.00, 20.16], "pea_15ymas": 0, "jobs": 100},  # ~17.7 km (colocado con A)
+            {"id": "B", "location": [-87.00, 20.18], "pea_15ymas": 0, "jobs": 100},  # ~19.9 km (3er)
+            {"id": "C", "location": [-87.00, 20.20], "pea_15ymas": 0, "jobs": 100},  # ~22.1 km (4to)
+            {"id": "D", "location": [-87.00, 20.22], "pea_15ymas": 0, "jobs": 100},  # ~24.3 km (5to)
+            {"id": "F", "location": [-87.00, 20.32], "pea_15ymas": 0, "jobs": 100},  # ~35.4 km (6to - excluido)
+        ]
+
+        rec = recommend_gravity_beta(demand_points=demand_points, isolated_zones=isolated_zones, max_distance_km=55.0)
+        self.assertIsNotNone(rec)
+        m = rec["metrics"]
+        self.assertEqual(m["method"], "demand_points")
+        # 2 orígenes x 4 celdas espaciales alcanzadas (A+G colapsados, B, C, D) = 8 pares espaciales
+        self.assertEqual(m["admissible_pairs"], 8)
+
+        # En simulate_gravity_demand(), los 5 destinos con probabilidad positiva son A, G, B, C, D
+        pops = simulate_gravity_demand(
+            demand_points=demand_points,
+            isolated_zones=isolated_zones,
+            max_distance_km=55.0,
+            beta=rec["recommended_beta"],
+            target_pop_size=50,
+            seed=42
+        )
+        self.assertGreater(len(pops), 0)
+        job_ids_reached = set(p["jobId"] for p in pops)
+        self.assertNotIn("F", job_ids_reached, "Destino F (6to más lejano) debe recibir 0 viajes")
+        self.assertTrue(job_ids_reached.issubset({"A", "G", "B", "C", "D"}))
+
 
 if __name__ == "__main__":
     unittest.main()

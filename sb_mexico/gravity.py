@@ -1978,6 +1978,16 @@ def _calibrate_beta_from_demand_points(
     origins = list(orig_spatial.values())
     destinations = list(dest_spatial.values())
 
+    coord_to_dest_idx = {(round(d["lon"], 5), round(d["lat"], 5)): v_idx for v_idx, d in enumerate(destinations)}
+    raw_dest_lons = np.array([d["lon"] for d in destinations_raw], dtype=np.float64)
+    raw_dest_lats = np.array([d["lat"] for d in destinations_raw], dtype=np.float64)
+    rlat_raw_d = np.radians(raw_dest_lats)
+    rlon_raw_d = np.radians(raw_dest_lons)
+    raw_to_spatial_dest = np.array([
+        coord_to_dest_idx[(round(d["lon"], 5), round(d["lat"], 5))]
+        for d in destinations_raw
+    ], dtype=np.int32)
+
     if len(origins) < 2 or len(destinations) < 2:
         return None
 
@@ -2180,21 +2190,27 @@ def _calibrate_beta_from_demand_points(
 
             # 2. Respaldo global idéntico a simulate_gravity_demand() (líneas 1175-1178 y 1186-1188)
             # Para zonas exclusivamente residenciales sin empleo local o filas residuales en cero
+            # Selecciona sobre las filas originales de regular_dests conservando multiplicidad de centroides colocados
             if not orig_has_dest[u_idx]:
-                dlat = rlat_d - rlat_o[u_idx]
-                dlon = rlon_d - rlon_o[u_idx]
+                dlat = rlat_raw_d - rlat_o[u_idx]
+                dlon = rlon_raw_d - rlon_o[u_idx]
                 sin_half_dlat = np.sin(0.5 * dlat)
                 sin_half_dlon = np.sin(0.5 * dlon)
-                a = sin_half_dlat**2 + math.cos(rlat_o[u_idx]) * np.cos(rlat_d) * sin_half_dlon**2
-                d_all = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
+                a = sin_half_dlat**2 + math.cos(rlat_o[u_idx]) * np.cos(rlat_raw_d) * sin_half_dlon**2
+                d_raw_all = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
 
-                k_closest = min(5, len(dest_lons))
-                closest_dests = np.argsort(d_all)[:k_closest]
-                uniform_w = orig_w[u_idx] / len(closest_dests)
-                for v_idx in closest_dests:
-                    d_val = float(d_all[v_idx])
+                k_closest = min(5, len(destinations_raw))
+                closest_raw_idx = np.argsort(d_raw_all)[:k_closest]
+                unit_w = orig_w[u_idx] / float(k_closest)
+                for r_idx in closest_raw_idx:
+                    v_idx = int(raw_to_spatial_dest[r_idx])
+                    d_val = float(d_raw_all[r_idx])
                     pair_key = (u_idx, v_idx)
-                    orphan_pairs[pair_key] = (d_val, uniform_w)
+                    if pair_key in orphan_pairs:
+                        old_d, old_w = orphan_pairs[pair_key]
+                        orphan_pairs[pair_key] = (old_d, old_w + unit_w)
+                    else:
+                        orphan_pairs[pair_key] = (d_val, unit_w)
                     orig_has_dest[u_idx] = True
                     dest_has_orig[v_idx] = True
 
