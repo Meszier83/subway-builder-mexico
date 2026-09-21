@@ -794,8 +794,10 @@ def assign_zones(coords: np.ndarray, isolated_zones: Optional[List[Dict]] = None
             mask = (lons >= b[0]) & (lons <= b[2]) & (lats >= b[1]) & (lats <= b[3])
             zones[mask] = idx
         elif "polygon" in z:
-            from shapely.geometry import Point
+            from shapely.geometry import Point, Polygon
             poly = z["polygon"]
+            if isinstance(poly, (list, tuple)):
+                poly = Polygon(poly)
             for i in range(n):
                 if poly.contains(Point(lons[i], lats[i])):
                     zones[i] = idx
@@ -1885,18 +1887,30 @@ def calculate_commute_distance_distribution(
 
 def _calibrate_beta_from_demand_points(
     demand_points: List[Dict],
-    bbox: Optional[List[float]] = None
+    bbox: Optional[List[float]] = None,
+    isolated_zones: Optional[List[Dict]] = None,
+    max_distance_km: float = 55.0
 ) -> Optional[Dict[str, Any]]:
     """
     Calibra analítica y empíricamente el coeficiente de fricción espacial (beta)
     analizando la dispersión morfológica de centroides de demanda (PEA residencial
-    y puestos de trabajo ordinarios).
+    y puestos de trabajo ordinarios), alineado estrictamente con las restricciones
+    de admisibilidad de Furness / IPFP (zonas aisladas, distancia máxima y auto-viajes).
     """
     if not demand_points or not isinstance(demand_points, list):
         return None
 
-    origins = []
-    destinations = []
+    def _safe_pos_float(val: Any) -> float:
+        if val is None:
+            return 0.0
+        try:
+            f = float(val)
+            return f if (math.isfinite(f) and f > 0.0) else 0.0
+        except (ValueError, TypeError):
+            return 0.0
+
+    origins_raw = []
+    destinations_raw = []
     for p in demand_points:
         if not isinstance(p, dict):
             continue
@@ -1910,21 +1924,47 @@ def _calibrate_beta_from_demand_points(
         except (ValueError, TypeError):
             continue
 
-        pea = float(p.get("pea_15ymas", 0) or 0)
-        jobs = float(p.get("jobs", 0) or 0)
+        pea = _safe_pos_float(p.get("pea_15ymas", 0))
+        jobs = _safe_pos_float(p.get("jobs", 0))
         is_special = bool(p.get("is_special", False))
+        pid = str(p.get("id") or "")
 
-        if pea > 0:
-            origins.append({"lon": lon, "lat": lat, "pea": pea, "id": p.get("id")})
-        if jobs > 0 and not is_special:
-            destinations.append({"lon": lon, "lat": lat, "jobs": jobs, "id": p.get("id")})
+        if pea > 0.0:
+            origins_raw.append({"lon": lon, "lat": lat, "pea": pea, "id": pid})
+        if jobs > 0.0 and not is_special:
+            destinations_raw.append({"lon": lon, "lat": lat, "jobs": jobs, "id": pid})
+
+    if len(origins_raw) < 2 or len(destinations_raw) < 2:
+        return None
+
+    # Agrupación espacial por coordenadas para garantizar invarianza ante fragmentación representacional (ESS)
+    orig_spatial = {}
+    for o in origins_raw:
+        k = (round(o["lon"], 5), round(o["lat"], 5))
+        if k not in orig_spatial:
+            orig_spatial[k] = {"lon": o["lon"], "lat": o["lat"], "pea": 0.0, "ids": []}
+        orig_spatial[k]["pea"] += o["pea"]
+        if o["id"]:
+            orig_spatial[k]["ids"].append(o["id"])
+
+    dest_spatial = {}
+    for d in destinations_raw:
+        k = (round(d["lon"], 5), round(d["lat"], 5))
+        if k not in dest_spatial:
+            dest_spatial[k] = {"lon": d["lon"], "lat": d["lat"], "jobs": 0.0, "ids": []}
+        dest_spatial[k]["jobs"] += d["jobs"]
+        if d["id"]:
+            dest_spatial[k]["ids"].append(d["id"])
+
+    origins = list(orig_spatial.values())
+    destinations = list(dest_spatial.values())
 
     if len(origins) < 2 or len(destinations) < 2:
         return None
 
     total_pea = sum(o["pea"] for o in origins)
     total_jobs = sum(d["jobs"] for d in destinations)
-    if total_pea <= 0 or total_jobs <= 0:
+    if total_pea <= 0.0 or total_jobs <= 0.0:
         return None
 
     orig_lons = np.array([o["lon"] for o in origins], dtype=np.float64)
@@ -1937,6 +1977,11 @@ def _calibrate_beta_from_demand_points(
 
     orig_w = orig_pea / total_pea
     dest_w = dest_jobs / total_jobs
+
+    # ESS invariante a nivel de nodo espacial único
+    ess_o = float(1.0 / max(1e-12, np.sum(orig_w**2)))
+    ess_d = float(1.0 / max(1e-12, np.sum(dest_w**2)))
+    conf_factor = float(min(1.0, ess_o / 20.0, ess_d / 20.0))
 
     # Centro de masa combinado (ponderación 50% PEA y 50% Empleo para evitar sesgo de escala)
     comb_lons = np.concatenate([orig_lons, dest_lons])
@@ -1990,26 +2035,26 @@ def _calibrate_beta_from_demand_points(
     orientation_rad = 0.5 * math.atan2(2.0 * cov_xy, diff)
     orientation_deg = float(math.degrees(orientation_rad) % 180.0)
 
-    # Tamaño de muestra efectivo (ESS)
-    ess_o = float(1.0 / max(1e-12, np.sum(orig_w**2)))
-    ess_d = float(1.0 / max(1e-12, np.sum(dest_w**2)))
-    conf_factor = float(min(1.0, ess_o / 20.0, ess_d / 20.0))
+    # Asignación de zonas aisladas idéntica a Furness
+    orig_coords_deg = np.column_stack([orig_lons, orig_lats])
+    dest_coords_deg = np.column_stack([dest_lons, dest_lats])
+    orig_zones = assign_zones(orig_coords_deg, isolated_zones) if isolated_zones else np.zeros(len(origins), dtype=int)
+    dest_zones = assign_zones(dest_coords_deg, isolated_zones) if isolated_zones else np.zeros(len(destinations), dtype=int)
 
-    # Matriz / Histograma de distancias de oportunidad (Haversine en bloques de 0.25 km)
+    # Techo dinámico del histograma acotado por max_distance_km sin censura espuria
     BIN_WIDTH = 0.25
-    MAX_HIST_KM = 160.0
-    num_bins = int(MAX_HIST_KM / BIN_WIDTH)
+    effective_max_dist = max(5.0, float(max_distance_km))
+    num_bins = max(10, int(math.ceil(effective_max_dist / BIN_WIDTH)))
     H = np.zeros(num_bins, dtype=np.float64)
     bin_centers = (np.arange(num_bins, dtype=np.float64) + 0.5) * BIN_WIDTH
 
     total_pairs = len(origins) * len(destinations)
     pair_mode = "exact_chunked"
 
-    # Si la cantidad de pares es gigantesca (> 4M), agregamos previamente en celdas de 1 km
     if total_pairs > 4_000_000:
         pair_mode = "grid_aggregated"
-        def _aggregate_cells(lons, lats, weights):
-            cell_coords = np.column_stack([np.round(lons * kx / 1.0), np.round(lats * ky / 1.0)])
+        def _aggregate_cells(lons, lats, weights, zones):
+            cell_coords = np.column_stack([np.round(lons * kx / 1.0), np.round(lats * ky / 1.0), zones])
             unique_cells, inv = np.unique(cell_coords, axis=0, return_inverse=True)
             w_sum = np.bincount(inv, weights=weights)
             lons_sum = np.bincount(inv, weights=weights * lons)
@@ -2017,13 +2062,14 @@ def _calibrate_beta_from_demand_points(
             agg_w = w_sum / max(1e-12, w_sum.sum())
             agg_lons = lons_sum / np.maximum(w_sum, 1e-12)
             agg_lats = lats_sum / np.maximum(w_sum, 1e-12)
-            return agg_lons, agg_lats, agg_w
+            agg_zones = unique_cells[:, 2].astype(int)
+            return agg_lons, agg_lats, agg_w, agg_zones
 
-        calc_orig_lons, calc_orig_lats, calc_orig_w = _aggregate_cells(orig_lons, orig_lats, orig_w)
-        calc_dest_lons, calc_dest_lats, calc_dest_w = _aggregate_cells(dest_lons, dest_lats, dest_w)
+        calc_orig_lons, calc_orig_lats, calc_orig_w, calc_orig_zones = _aggregate_cells(orig_lons, orig_lats, orig_w, orig_zones)
+        calc_dest_lons, calc_dest_lats, calc_dest_w, calc_dest_zones = _aggregate_cells(dest_lons, dest_lats, dest_w, dest_zones)
     else:
-        calc_orig_lons, calc_orig_lats, calc_orig_w = orig_lons, orig_lats, orig_w
-        calc_dest_lons, calc_dest_lats, calc_dest_w = dest_lons, dest_lats, dest_w
+        calc_orig_lons, calc_orig_lats, calc_orig_w, calc_orig_zones = orig_lons, orig_lats, orig_w, orig_zones
+        calc_dest_lons, calc_dest_lats, calc_dest_w, calc_dest_zones = dest_lons, dest_lats, dest_w, dest_zones
 
     rlat_o = np.radians(calc_orig_lats)
     rlon_o = np.radians(calc_orig_lons)
@@ -2031,30 +2077,48 @@ def _calibrate_beta_from_demand_points(
     rlon_d = np.radians(calc_dest_lons)
 
     chunk_size = 500
+    admissible_pairs_count = 0
+    has_alternative_destinations = len(calc_dest_lons) > 1
+
     for start_idx in range(0, len(calc_orig_lons), chunk_size):
         end_idx = min(start_idx + chunk_size, len(calc_orig_lons))
         chunk_lat_o = rlat_o[start_idx:end_idx, np.newaxis]
         chunk_lon_o = rlon_o[start_idx:end_idx, np.newaxis]
         chunk_w_o = calc_orig_w[start_idx:end_idx, np.newaxis]
+        chunk_z_o = calc_orig_zones[start_idx:end_idx, np.newaxis]
 
         dlat = rlat_d[np.newaxis, :] - chunk_lat_o
         dlon = rlon_d[np.newaxis, :] - chunk_lon_o
         a = np.sin(dlat / 2.0)**2 + np.cos(chunk_lat_o) * np.cos(rlat_d[np.newaxis, :]) * np.sin(dlon / 2.0)**2
         d_km = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
 
-        pair_w = chunk_w_o * calc_dest_w[np.newaxis, :]
+        # Admisibilidad idéntica a Furness:
+        # 1. Zonas aisladas: orígenes en zona z solo viajan a destinos en la misma zona z
+        zone_mask = (chunk_z_o == calc_dest_zones[np.newaxis, :])
+        # 2. Truncamiento por distancia máxima
+        dist_mask = (d_km <= effective_max_dist)
+        # 3. Exclusión de auto-viajes idénticos cuando existen alternativas
+        if has_alternative_destinations:
+            self_mask = (d_km >= 0.05)
+        else:
+            self_mask = np.ones_like(dist_mask, dtype=bool)
+
+        admissible = zone_mask & dist_mask & self_mask
+        admissible_pairs_count += int(np.sum(admissible))
+
+        pair_w = np.where(admissible, chunk_w_o * calc_dest_w[np.newaxis, :], 0.0)
         bin_idx = np.clip((d_km / BIN_WIDTH).astype(np.int64), 0, num_bins - 1)
         np.add.at(H, bin_idx, pair_w)
 
     h_sum = H.sum()
-    if h_sum <= 0:
+    if h_sum <= 0 or admissible_pairs_count < 2:
         return None
     H /= h_sum
 
     opportunity_mean_km = float(np.sum(H * bin_centers))
     cum_h = np.cumsum(H)
 
-    def _interp_pct(pct_val: float) -> float:
+    def _interp_quantile(pct_val: float) -> float:
         idx = int(np.searchsorted(cum_h, pct_val))
         if idx == 0:
             return float(bin_centers[0])
@@ -2062,11 +2126,11 @@ def _calibrate_beta_from_demand_points(
         prev_c = cum_h[idx - 1]
         curr_c = cum_h[idx]
         denom = max(1e-12, curr_c - prev_c)
-        alpha = (pct_val - prev_c) / denom
-        return float(bin_centers[idx - 1] + alpha * BIN_WIDTH)
+        alpha = min(1.0, max(0.0, (pct_val - prev_c) / denom))
+        return float(idx * BIN_WIDTH + alpha * BIN_WIDTH)
 
-    opportunity_median_km = _interp_pct(0.50)
-    opportunity_p75_km = _interp_pct(0.75)
+    opportunity_median_km = _interp_quantile(0.50)
+    opportunity_p75_km = _interp_quantile(0.75)
     opportunity_rms_km = float(math.sqrt(max(0.0, origin_rg_km**2 + dest_rg_km**2 + centroid_sep_km**2)))
 
     # Diagonal de BBOX (referencial)
@@ -2088,14 +2152,18 @@ def _calibrate_beta_from_demand_points(
         beta_prior = 0.095
         expected_median_km = "14 – 18 km"
         rationale = f"Corredor lineal detectado (elongación={elongation_ratio:.2f}x, eje mayor={major_axis_km:.1f} km, P75 OD={opportunity_p75_km:.1f} km)."
-    elif not is_linear and (combined_rg_km >= 15.0 or opportunity_mean_km >= 22.0 or opportunity_p75_km >= 30.0):
+    elif not is_linear and (
+        (combined_rg_km >= 20.0 and opportunity_mean_km >= 15.0)
+        or opportunity_mean_km >= 25.0
+        or opportunity_p75_km >= 32.0
+    ):
         archetype = "megaciudad"
         label = "Megaciudad / Conurbación Metropolitana Masiva"
         target_median_km = 16.0
         beta_prior = 0.085
         expected_median_km = "18 – 25 km"
         rationale = f"Conurbación metropolitana masiva (Rg={combined_rg_km:.1f} km, media OD={opportunity_mean_km:.1f} km)."
-    elif combined_rg_km <= 8.0 and opportunity_mean_km <= 12.0 and centroid_sep_km <= 6.0:
+    elif (combined_rg_km <= 8.0 or opportunity_mean_km <= 6.0) and opportunity_mean_km <= 12.0 and centroid_sep_km <= 6.0:
         archetype = "compacta"
         label = "Ciudad Monocéntrica Compacta"
         target_median_km = 5.5
@@ -2110,7 +2178,7 @@ def _calibrate_beta_from_demand_points(
         expected_median_km = "10 – 15 km"
         rationale = f"Escala metropolitana intermedia (Rg={combined_rg_km:.1f} km, media OD={opportunity_mean_km:.1f} km)."
 
-    # La mediana objetivo no puede superar la fracción física de oportunidad de la conurbación
+    # La mediana objetivo no puede superar la fracción física de oportunidad admisible
     target_median_eff = min(target_median_km, 0.70 * opportunity_median_km)
 
     # Calibración Numérica por Bisección sobre H_beta(d) = H(d) * exp(-beta * d)
@@ -2127,8 +2195,8 @@ def _calibrate_beta_from_demand_points(
         prev_c = c_b[idx - 1]
         curr_c = c_b[idx]
         denom = max(1e-12, curr_c - prev_c)
-        alpha = (0.50 - prev_c) / denom
-        return float(bin_centers[idx - 1] + alpha * BIN_WIDTH)
+        alpha = min(1.0, max(0.0, (0.50 - prev_c) / denom))
+        return float(idx * BIN_WIDTH + alpha * BIN_WIDTH)
 
     BETA_MIN = 0.065
     BETA_MAX = 0.180
@@ -2142,9 +2210,8 @@ def _calibrate_beta_from_demand_points(
         beta_emp = BETA_MAX
         calib_status = "bounded_max"
     else:
-        # Bisección (16 iteraciones dan precisión < 0.0001)
         low_b, high_b = BETA_MIN, BETA_MAX
-        for _ in range(16):
+        for _ in range(18):
             mid_b = (low_b + high_b) / 2.0
             mid_med = _eval_median_for_beta(mid_b)
             if mid_med > target_median_eff:
@@ -2154,11 +2221,12 @@ def _calibrate_beta_from_demand_points(
         beta_emp = (low_b + high_b) / 2.0
         calib_status = "solved"
 
-    calibrated_median_km = float(_eval_median_for_beta(beta_emp))
-
     # Regularización con prior según ESS
     beta_final = float(np.clip((1.0 - conf_factor) * beta_prior + conf_factor * beta_emp, BETA_MIN, BETA_MAX))
     rec_beta = round(beta_final, 3)
+
+    # Evaluación de mediana con el beta_final efectivamente retornado
+    calibrated_median_km = float(_eval_median_for_beta(rec_beta))
 
     return {
         "recommended_beta": rec_beta,
@@ -2168,6 +2236,8 @@ def _calibrate_beta_from_demand_points(
             "method": "demand_points",
             "origin_count": len(origins),
             "destination_count": len(destinations),
+            "raw_origin_records": len(origins_raw),
+            "raw_destination_records": len(destinations_raw),
             "total_pea": float(total_pea),
             "total_jobs": float(total_jobs),
             "effective_origins": round(ess_o, 1),
@@ -2191,6 +2261,8 @@ def _calibrate_beta_from_demand_points(
             "calibration_confidence": round(conf_factor, 2),
             "calibration_status": calib_status,
             "pair_mode": pair_mode,
+            "max_distance_km": round(effective_max_dist, 1),
+            "admissible_pairs": admissible_pairs_count,
             "beta_bounds": [BETA_MIN, BETA_MAX],
             "bbox_diagonal_km": round(diag_km, 1)
         },
@@ -2202,13 +2274,15 @@ def _calibrate_beta_from_demand_points(
 def recommend_gravity_beta(
     bbox: Optional[List[float]] = None,
     city_archetype: Optional[str] = None,
-    demand_points: Optional[List[Dict]] = None
+    demand_points: Optional[List[Dict]] = None,
+    isolated_zones: Optional[List[Dict]] = None,
+    max_distance_km: float = 55.0
 ) -> Dict[str, Any]:
     """
     Recomienda el coeficiente de fricción espacial óptimo (beta) según:
     1. Override manual de arquetipo urbano (city_archetype).
     2. Calibración analítica y empírica a partir de la malla espacial de centroides
-       de demanda (demand_points).
+       de demanda (demand_points) alineada a restricciones Furness (isolated_zones, max_distance_km).
     3. Fallback heurístico por diagonal del BBOX si no se dispone de centroides.
     Emula y expande la calibración empírica oficial de Colin Miller en Subway Builder.
     """
@@ -2253,7 +2327,12 @@ def recommend_gravity_beta(
 
     # Intentar calibración analítica de alta fidelidad con demand_points si están presentes
     if demand_points:
-        calib = _calibrate_beta_from_demand_points(demand_points, bbox=bbox)
+        calib = _calibrate_beta_from_demand_points(
+            demand_points=demand_points,
+            bbox=bbox,
+            isolated_zones=isolated_zones,
+            max_distance_km=max_distance_km
+        )
         if calib is not None:
             return calib
 

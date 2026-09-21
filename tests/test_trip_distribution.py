@@ -1,3 +1,4 @@
+import math
 import unittest
 import numpy as np
 from sb_mexico.gravity import (
@@ -257,6 +258,179 @@ class TestTripDistribution(unittest.TestCase):
         rec_h = recommend_gravity_beta(bbox=bbox_huge)
         self.assertEqual(rec_h["archetype"], "megaciudad")
         self.assertEqual(rec_h["recommended_beta"], 0.085)
+
+    def test_od_universe_isolated_zones(self):
+        # Dos localidades separadas por ~95 km (Town Sur a lat 20.00, Town Norte a lat 20.85).
+        # Ambas tienen orígenes y destinos a escala local (< 2 km).
+        demand_points = [
+            # Localidad Sur (~lat 20.00)
+            {"id": "s1", "location": [-87.00, 20.00], "pea_15ymas": 500, "jobs": 400},
+            {"id": "s2", "location": [-87.01, 20.01], "pea_15ymas": 600, "jobs": 500},
+            # Localidad Norte (~lat 20.85, a ~94 km de distancia)
+            {"id": "n1", "location": [-87.00, 20.85], "pea_15ymas": 700, "jobs": 600},
+            {"id": "n2", "location": [-87.01, 20.86], "pea_15ymas": 800, "jobs": 700},
+        ]
+        # Zonas aisladas que encierran a cada localidad por separado
+        isolated_zones = [
+            {
+                "name": "Zona_Sur",
+                "polygon": [[-87.1, 19.9], [-86.9, 19.9], [-86.9, 20.1], [-87.1, 20.1], [-87.1, 19.9]]
+            },
+            {
+                "name": "Zona_Norte",
+                "polygon": [[-87.1, 20.7], [-86.9, 20.7], [-86.9, 20.95], [-87.1, 20.95], [-87.1, 20.7]]
+            }
+        ]
+
+        # Sin zonas aisladas y con distancia grande (120 km): los pares inter-pueblos a 94 km son admitidos
+        rec_open = recommend_gravity_beta(
+            demand_points=demand_points,
+            isolated_zones=None,
+            max_distance_km=120.0
+        )
+        self.assertIsNotNone(rec_open)
+        self.assertGreater(rec_open["metrics"]["opportunity_mean_km"], 20.0)
+
+        # Con zonas aisladas y max_distance_km=55.0 (restricciones Furness):
+        # Los viajes entre Sur y Norte están estrictamente prohibidos (diferente zona Y d > 55 km).
+        # Sólo son admisibles pares intra-zona (distancia ~1.5 km).
+        rec_isolated = recommend_gravity_beta(
+            demand_points=demand_points,
+            isolated_zones=isolated_zones,
+            max_distance_km=55.0
+        )
+        self.assertIsNotNone(rec_isolated)
+        self.assertLess(rec_isolated["metrics"]["admissible_pairs"], rec_open["metrics"]["admissible_pairs"])
+        self.assertLess(rec_isolated["metrics"]["opportunity_mean_km"], 5.0)
+        self.assertLess(rec_isolated["metrics"]["opportunity_median_km"], 5.0)
+        self.assertNotEqual(rec_isolated["archetype"], "megaciudad")
+        self.assertGreaterEqual(rec_isolated["recommended_beta"], 0.130)
+
+    def test_representation_invariance_ess(self):
+        # Verificación de invarianza representacional:
+        # Dividir un mismo centroide físico en N registros idénticos (sub-manzanas o desagregación)
+        # no debe alterar el ESS espacial, la confianza de calibración ni el beta resultante.
+        dp_original = [
+            {"id": "p1", "location": [-99.15, 19.40], "pea_15ymas": 1000, "jobs": 800},
+            {"id": "p2", "location": [-99.20, 19.42], "pea_15ymas": 2000, "jobs": 1200},
+            {"id": "p3", "location": [-99.10, 19.38], "pea_15ymas": 1500, "jobs": 2200},
+            {"id": "p4", "location": [-99.18, 19.35], "pea_15ymas": 3000, "jobs": 1800},
+            {"id": "p5", "location": [-99.12, 19.45], "pea_15ymas": 2500, "jobs": 4000},
+        ]
+
+        # Cada punto se divide en 5 sub-registros con 1/5 de la masa en las mismas coordenadas
+        dp_split = []
+        for p in dp_original:
+            for sub_i in range(5):
+                dp_split.append({
+                    "id": f"{p['id']}_{sub_i}",
+                    "location": list(p["location"]),
+                    "pea_15ymas": p["pea_15ymas"] / 5.0,
+                    "jobs": p["jobs"] / 5.0,
+                })
+
+        rec_orig = recommend_gravity_beta(demand_points=dp_original)
+        rec_split = recommend_gravity_beta(demand_points=dp_split)
+
+        self.assertIsNotNone(rec_orig)
+        self.assertIsNotNone(rec_split)
+
+        # Invarianza estricta en ESS espacial
+        self.assertAlmostEqual(
+            rec_orig["metrics"]["effective_origins"],
+            rec_split["metrics"]["effective_origins"],
+            places=1
+        )
+        self.assertAlmostEqual(
+            rec_orig["metrics"]["effective_destinations"],
+            rec_split["metrics"]["effective_destinations"],
+            places=1
+        )
+        # Invarianza en factor de confianza
+        self.assertAlmostEqual(
+            rec_orig["metrics"]["calibration_confidence"],
+            rec_split["metrics"]["calibration_confidence"],
+            places=3
+        )
+        # Invarianza en recomendación de beta
+        self.assertEqual(rec_orig["recommended_beta"], rec_split["recommended_beta"])
+        self.assertEqual(rec_orig["archetype"], rec_split["archetype"])
+        # El número de nodos espaciales únicos debe coincidir (5), aunque los registros crudos sean 25
+        self.assertEqual(rec_split["metrics"]["origin_count"], 5)
+        self.assertEqual(rec_split["metrics"]["destination_count"], 5)
+        self.assertEqual(rec_split["metrics"]["raw_origin_records"], 25)
+        self.assertEqual(rec_split["metrics"]["raw_destination_records"], 25)
+
+    def test_histogram_dynamic_ceiling_no_clipping(self):
+        # Techo dinámico: si max_distance_km=80, la resolución y el rango cubren 80 km sin censura previa.
+        # Creamos dos polos separados por ~70 km:
+        demand_points = [
+            {"id": "a1", "location": [-99.00, 19.00], "pea_15ymas": 2000, "jobs": 1500},
+            {"id": "a2", "location": [-99.01, 19.01], "pea_15ymas": 1800, "jobs": 1400},
+            {"id": "b1", "location": [-99.00, 19.63], "pea_15ymas": 2500, "jobs": 2000},
+            {"id": "b2", "location": [-99.01, 19.64], "pea_15ymas": 2200, "jobs": 1900},
+        ]
+        rec_80 = recommend_gravity_beta(demand_points=demand_points, max_distance_km=80.0)
+        self.assertIsNotNone(rec_80)
+        self.assertEqual(rec_80["metrics"]["max_distance_km"], 80.0)
+        self.assertGreater(rec_80["metrics"]["admissible_pairs"], 4)
+
+        # Si se reduce a max_distance_km=40.0, los pares a ~70 km son excluidos
+        rec_40 = recommend_gravity_beta(demand_points=demand_points, max_distance_km=40.0)
+        self.assertIsNotNone(rec_40)
+        self.assertEqual(rec_40["metrics"]["max_distance_km"], 40.0)
+        self.assertLess(rec_40["metrics"]["admissible_pairs"], rec_80["metrics"]["admissible_pairs"])
+
+        # Para distancias mayores a 160 km (ej. 190 km): no hay truncamiento a 160 km
+        dp_distant = [
+            {"id": "c1", "location": [-99.00, 19.00], "pea_15ymas": 3000, "jobs": 2000},
+            {"id": "c2", "location": [-99.01, 19.01], "pea_15ymas": 2500, "jobs": 1800},
+            {"id": "d1", "location": [-99.00, 20.65], "pea_15ymas": 3500, "jobs": 2200},  # ~182 km
+            {"id": "d2", "location": [-99.01, 20.66], "pea_15ymas": 2800, "jobs": 2100},
+        ]
+        rec_200 = recommend_gravity_beta(demand_points=dp_distant, max_distance_km=200.0)
+        self.assertIsNotNone(rec_200)
+        self.assertEqual(rec_200["metrics"]["max_distance_km"], 200.0)
+        self.assertGreater(rec_200["metrics"]["opportunity_p75_km"], 50.0)
+
+    def test_calibrated_median_matches_final_beta(self):
+        # Coherencia interna: metrics.calibrated_median_km debe estar calculada con
+        # el beta final redondeado y regularizado.
+        demand_points = [
+            {"id": f"p_{i}", "location": [-100.30 + 0.05 * i, 20.50 + 0.04 * i], "pea_15ymas": 500 + 50 * i, "jobs": 400 + 60 * i}
+            for i in range(12)
+        ]
+        rec = recommend_gravity_beta(demand_points=demand_points)
+        self.assertIsNotNone(rec)
+        m = rec["metrics"]
+        calib_med = m.get("calibrated_median_km")
+        self.assertIsNotNone(calib_med)
+        self.assertTrue(math.isfinite(calib_med))
+        self.assertGreater(calib_med, 0.0)
+        self.assertLessEqual(calib_med, m["opportunity_median_km"] + 0.5)
+        self.assertGreater(rec["recommended_beta"], 0.0)
+
+    def test_malformed_and_infinite_masses(self):
+        # Robustez: entradas con strings, nan, inf, valores negativos
+        # deben ser saneadas sin excepción ni retornar nan.
+        demand_points = [
+            {"id": "p1", "location": [-99.15, 19.40], "pea_15ymas": 1000, "jobs": 800},
+            {"id": "p2", "location": [-99.20, 19.42], "pea_15ymas": float("inf"), "jobs": 1200},
+            {"id": "p3", "location": [-99.10, 19.38], "pea_15ymas": 1500, "jobs": float("-inf")},
+            {"id": "p4", "location": [-99.18, 19.35], "pea_15ymas": float("nan"), "jobs": 1800},
+            {"id": "p5", "location": [-99.12, 19.45], "pea_15ymas": 2500, "jobs": "invalido"},
+            {"id": "p6", "location": [-99.16, 19.39], "pea_15ymas": -500, "jobs": -200},
+            {"id": "p7", "location": [-99.14, 19.41], "pea_15ymas": 2000, "jobs": 2500},
+            {"id": "p8", "location": ["no_es_coord", 19.41], "pea_15ymas": 2000, "jobs": 2500},
+        ]
+
+        rec = recommend_gravity_beta(demand_points=demand_points)
+        self.assertIsNotNone(rec)
+        self.assertTrue(math.isfinite(rec["recommended_beta"]))
+        m = rec["metrics"]
+        for k, v in m.items():
+            if isinstance(v, float):
+                self.assertTrue(math.isfinite(v), f"Métrica {k} no es finita: {v}")
 
 
 if __name__ == "__main__":
