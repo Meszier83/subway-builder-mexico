@@ -368,6 +368,94 @@ class TestInegi(unittest.TestCase):
         finally:
             os.remove(tmp)
 
+    def test_load_cpv_demography_denue_atomic_coords_adversarial(self):
+        """Falsificación de centroide híbrido DENUE: no sintetizar punto a partir de filas con coordenadas parciales."""
+        bbox = {"min_lon": -87.0, "min_lat": 21.0, "max_lon": -86.7, "max_lat": 21.3}
+        # Fila 1: solo lon válida, lat NaN
+        # Fila 2: lon NaN, solo lat válida
+        # Ambas en la misma manzana 1.
+        df_denue = pd.DataFrame([
+            {"cve_mun_clean": "23005", "ageb_clean": "0001", "mza_clean": "1", "lon": -86.80, "lat": float('nan'), "calibrated_jobs": 10.0},
+            {"cve_mun_clean": "23005", "ageb_clean": "0001", "mza_clean": "1", "lon": float('nan'), "lat": 21.10, "calibrated_jobs": 10.0},
+        ])
+        content = "ENTIDAD,MUN,AGEB,MZA,POBTOT,P_15YMAS\n23,005,0001,1,100,70\n"
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as f:
+            f.write(content)
+            tmp = f.name
+        try:
+            # Al no existir ninguna fila con par (lon, lat) atómico completo, no se debe sintetizar (-86.80, 21.10)
+            df_geo = load_cpv_demography(tmp, df_denue, bbox, tasa_pea=0.65)
+            # La manzana no puede ser georreferenciada con coordenadas parciales y se descarta
+            self.assertEqual(len(df_geo), 0)
+        finally:
+            os.remove(tmp)
+
+    def test_load_cpv_demography_heterogeneous_files_tolerance(self):
+        """Un archivo censal con columnas faltantes no debe abortar la carga de archivos válidos posteriores."""
+        bbox = {"min_lon": -87.0, "min_lat": 21.0, "max_lon": -86.7, "max_lat": 21.3}
+        df_denue = pd.DataFrame([
+            {"cve_mun_clean": "23005", "ageb_clean": "0001", "mza_clean": "1", "lon": -86.85, "lat": 21.15, "calibrated_jobs": 50.0},
+        ])
+        # Archivo 1: Invalido (falta P_15YMAS)
+        content_inv = "ENTIDAD,MUN,AGEB,MZA,POBTOT\n23,005,0001,1,100\n"
+        # Archivo 2: Valido
+        content_val = "ENTIDAD,MUN,AGEB,MZA,POBTOT,P_15YMAS\n23,005,0001,1,100,70\n"
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as f1:
+            f1.write(content_inv)
+            tmp1 = f1.name
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as f2:
+            f2.write(content_val)
+            tmp2 = f2.name
+        try:
+            # Debe procesar tmp2 ignorando tmp1
+            df_geo = load_cpv_demography([tmp1, tmp2], df_denue, bbox, tasa_pea=0.65)
+            self.assertEqual(len(df_geo), 1)
+            self.assertAlmostEqual(df_geo.iloc[0]['lon'], -86.85)
+        finally:
+            os.remove(tmp1)
+            os.remove(tmp2)
+
+    def test_calculate_cpv_pea_rate_semicolon_and_cp1252(self):
+        """calculate_cpv_pea_rate con delimitador punto y coma y acentos en CP1252."""
+        content = (
+            "ENTIDAD;NOM_ENT;MUN;NOM_MUN;LOC;NOM_LOC;AGEB;MZA;POBTOT;P_15YMAS;PEA\n"
+            "23;Quintana Roo;005;Benito Juárez;0000;Total del municipio;0000;000;100000;80000;56000\n"
+        )
+        with tempfile.NamedTemporaryFile(mode='wb', suffix='.csv', delete=False) as f:
+            f.write(content.encode('cp1252'))
+            tmp = f.name
+        try:
+            rate = calculate_cpv_pea_rate(tmp, ['23005'])
+            self.assertIsNotNone(rate)
+            self.assertAlmostEqual(rate, 0.70, places=3)
+        finally:
+            os.remove(tmp)
+
+    def test_load_cpv_demography_late_cp1252_byte(self):
+        """Archivo CP1252 cuyo byte no-ASCII aparece después de los primeros 100 KB de ASCII puro."""
+        bbox = {"min_lon": -87.0, "min_lat": 21.0, "max_lon": -86.7, "max_lat": 21.3}
+        df_denue = pd.DataFrame([
+            {"cve_mun_clean": "23005", "ageb_clean": "0001", "mza_clean": "1", "lon": -86.85, "lat": 21.15, "calibrated_jobs": 50.0},
+        ])
+        with tempfile.NamedTemporaryFile(mode='wb', suffix='.csv', delete=False) as f:
+            # Cabecera estándar
+            f.write(b"ENTIDAD,MUN,AGEB,MZA,POBTOT,P_15YMAS\n")
+            # 100 KB de líneas dummy de padding ASCII
+            dummy_row = b"23,005,0001,1,0,0\n"
+            f.write(dummy_row * 5000)
+            # Fila censal con población
+            f.write(b"23,005,0001,1,100,70\n")
+            # Byte no-ASCII en CP1252 (0xf3 = 'o' con acento)
+            f.write(b"# Comentario: Canc\xf3n\n")
+            tmp = f.name
+        try:
+            df_geo = load_cpv_demography(tmp, df_denue, bbox, tasa_pea=0.65)
+            self.assertEqual(len(df_geo), 1)
+            self.assertAlmostEqual(df_geo.iloc[0]['lon'], -86.85)
+        finally:
+            os.remove(tmp)
+
 if __name__ == "__main__":
     unittest.main()
 

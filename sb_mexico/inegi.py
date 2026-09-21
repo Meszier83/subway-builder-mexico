@@ -198,17 +198,58 @@ def parse_enoe_indicators(enoe_path: str) -> Dict[str, float]:
     }
 
 
+def _detect_cpv_format(path: str) -> Tuple[str, str]:
+    """Detecta la codificación y delimitador de un archivo censal CPV CSV analizando su encabezado."""
+    with open(path, "rb") as f:
+        raw_sample = f.read(262144)  # 256 KB para capturar encabezados anchos y primeros caracteres no-ASCII
+    if not raw_sample:
+        raise ValueError(f"El archivo censal está vacío: {path}")
+
+    encodings = ["utf-8-sig", "utf-8", "cp1252", "latin1"]
+    delimiters = [",", ";", "\t", "|"]
+
+    valid_enc = "latin1"
+    decoded_sample = None
+    for enc in encodings:
+        try:
+            decoded_sample = raw_sample.decode(enc)
+            valid_enc = enc
+            break
+        except UnicodeDecodeError:
+            continue
+
+    if decoded_sample is None:
+        decoded_sample = raw_sample.decode("latin1", errors="replace")
+
+    first_line = decoded_sample.splitlines()[0] if decoded_sample.splitlines() else ""
+
+    best_delim = ","
+    max_cols = 0
+    cpv_known_cols = {
+        "entidad", "cve_ent", "mun", "cve_mun", "ageb", "cve_ageb",
+        "mza", "cve_mza", "manzana", "pobtot", "p_15ymas", "pob15", "p15ymas",
+        "loc", "pea"
+    }
+    for d in delimiters:
+        cols = [c.strip().strip('"').strip("'").lower() for c in first_line.split(d)]
+        matches = sum(1 for c in cols if c in cpv_known_cols)
+        if len(cols) > 1 and matches > 0:
+            if matches > max_cols:
+                max_cols = matches
+                best_delim = d
+
+    return valid_enc, best_delim
+
+
 def calculate_cpv_pea_rate(cpv_path: str, target_cve_muns: Optional[List[str]] = None) -> Optional[float]:
     """
     Calcula la Tasa PEA real (PEA / P_15YMAS) a partir del archivo RESAGEBURB del Censo CPV 2020.
     Si se especifican target_cve_muns, filtra los registros municipales correspondientes al BBOX.
     Si target_cve_muns es None, calcula la tasa estatal ponderada.
+    Soporta codificaciones UTF-8/CP1252/Latin1 y delimitadores coma, punto y coma, tabulador.
     """
     if not os.path.exists(cpv_path):
         return None
-
-    total_pea = 0.0
-    total_p15 = 0.0
 
     mun_set = set()
     if target_cve_muns:
@@ -218,14 +259,21 @@ def calculate_cpv_pea_rate(cpv_path: str, target_cve_muns: Optional[List[str]] =
             if len(s) == 5:
                 mun_set.add(s[2:])  # Código de 3 dígitos del municipio
 
-    for enc in ['utf-8-sig', 'utf-8', 'latin1', 'cp1252']:
+    try:
+        detected_enc, sep = _detect_cpv_format(cpv_path)
+    except Exception:
+        detected_enc, sep = "latin1", ","
+
+    candidate_encs = [detected_enc] + [e for e in ['utf-8-sig', 'utf-8', 'cp1252', 'latin1'] if e != detected_enc]
+
+    for enc in candidate_encs:
         try:
-            with open(cpv_path, mode='r', encoding=enc, errors='ignore') as f:
-                reader = csv.reader(f)
+            with open(cpv_path, mode='r', encoding=enc, errors='replace') as f:
+                reader = csv.reader(f, delimiter=sep)
                 header = next(reader, None)
                 if not header:
                     continue
-                clean_header = [str(c).strip().replace('"', '') for c in header]
+                clean_header = [str(c).strip().replace('"', '').upper() for c in header]
                 if 'MUN' not in clean_header or 'PEA' not in clean_header or 'P_15YMAS' not in clean_header:
                     continue
 
@@ -234,6 +282,9 @@ def calculate_cpv_pea_rate(cpv_path: str, target_cve_muns: Optional[List[str]] =
                 pea_idx = clean_header.index('PEA')
                 p15_idx = clean_header.index('P_15YMAS')
                 ent_idx = clean_header.index('ENTIDAD') if 'ENTIDAD' in clean_header else 0
+
+                cur_pea = 0.0
+                cur_p15 = 0.0
 
                 for row in reader:
                     if not row or len(row) <= max(pea_idx, p15_idx):
@@ -253,13 +304,13 @@ def calculate_cpv_pea_rate(cpv_path: str, target_cve_muns: Optional[List[str]] =
                                 pea_val = float(str(row[pea_idx]).replace(',', '').strip())
                                 p15_val = float(str(row[p15_idx]).replace(',', '').strip())
                                 if p15_val > 0:
-                                    total_pea += pea_val
-                                    total_p15 += p15_val
+                                    cur_pea += pea_val
+                                    cur_p15 += p15_val
                             except (ValueError, TypeError):
                                 pass
 
-                if total_p15 > 0:
-                    return round(total_pea / total_p15, 4)
+                if cur_p15 > 0:
+                    return round(cur_pea / cur_p15, 4)
         except Exception:
             continue
 
@@ -833,48 +884,6 @@ def load_marco_geoestadistico_coords(
     return mza_df, ageb_df
 
 
-def _detect_cpv_format(path: str) -> Tuple[str, str]:
-    """Detecta la codificación y delimitador de un archivo censal CPV CSV analizando su encabezado."""
-    with open(path, "rb") as f:
-        raw_sample = f.read(65536)
-    if not raw_sample:
-        raise ValueError(f"El archivo censal está vacío: {path}")
-
-    encodings = ["utf-8-sig", "utf-8", "cp1252", "latin1"]
-    delimiters = [",", ";", "\t", "|"]
-
-    valid_enc = "latin1"
-    decoded_sample = None
-    for enc in encodings:
-        try:
-            decoded_sample = raw_sample.decode(enc)
-            valid_enc = enc
-            break
-        except UnicodeDecodeError:
-            continue
-
-    if decoded_sample is None:
-        decoded_sample = raw_sample.decode("latin1", errors="replace")
-
-    first_line = decoded_sample.splitlines()[0] if decoded_sample.splitlines() else ""
-
-    best_delim = ","
-    max_cols = 0
-    cpv_known_cols = {
-        "entidad", "cve_ent", "mun", "cve_mun", "ageb", "cve_ageb",
-        "mza", "cve_mza", "manzana", "pobtot", "p_15ymas", "pob15", "p15ymas"
-    }
-    for d in delimiters:
-        cols = [c.strip().strip('"').strip("'").lower() for c in first_line.split(d)]
-        matches = sum(1 for c in cols if c in cpv_known_cols)
-        if len(cols) > 1 and matches > 0:
-            if matches > max_cols:
-                max_cols = matches
-                best_delim = d
-
-    return valid_enc, best_delim
-
-
 def load_cpv_demography(
     cpv_paths: Union[str, List[str]],
     df_denue: pd.DataFrame,
@@ -887,13 +896,19 @@ def load_cpv_demography(
 ) -> pd.DataFrame:
     """
     Carga e imputa georreferenciación de población (CPV 2020) por manzana.
-    Aplica tasa PEA y resuelve coordenadas mediante jerarquía resiliente:
-    1. Marco Geoestadístico de INEGI (centroides vectoriales oficiales de manzana o AGEB).
-    2. Cruce con comercios DENUE a nivel Manzana.
-    3. Cruce con comercios DENUE a nivel AGEB dentro del BBOX.
+    Aplica tasa PEA y resuelve coordenadas mediante jerarquía resiliente por resolución espacial:
+    - Nivel 1 (Resolución Fina Manzana ~100m):
+      1. Marco Geoestadístico de INEGI (centroides vectoriales oficiales de manzana).
+      2. Comercios DENUE a nivel Manzana (centroide baricéntrico local).
+    - Nivel 2 (Resolución Zonal AGEB ~1-2km):
+      3. Marco Geoestadístico de INEGI (centroides vectoriales oficiales de AGEB).
+      4. Comercios DENUE a nivel AGEB (centroide baricéntrico zonal).
+    Esta jerarquía prioriza la distribución barrial fina de 100m evitando colapsar
+    todas las manzanas de un vecindario en un único punto cuando solo existe la capa de AGEBs.
     Deriva factores de proyección poblacional (CONAPO) soportando tanto ratios directos
     como proyecciones poblacionales absolutas.
-    Optimizado con lectura por chunks, filtrado municipal temprano y georreferenciación atómica.
+    Optimizado con lectura por chunks, filtrado municipal temprano, tolerancia a esquemas
+    heterogéneos y georreferenciación atómica.
     """
     if isinstance(cpv_paths, (str, bytes)):
         paths = [str(cpv_paths)]
@@ -926,99 +941,129 @@ def load_cpv_demography(
         if is_excel:
             try:
                 df_temp = pd.read_excel(path, dtype=str)
-            except Exception:
+            except Exception as e:
+                print(f"[WARN] No se pudo leer archivo Excel censal ({os.path.basename(path)}): {e}")
                 continue
-            reader = [df_temp]
+            enc_candidates = [None]
         else:
-            enc, sep = _detect_cpv_format(path)
             try:
-                reader = pd.read_csv(
-                    path,
-                    encoding=enc,
-                    sep=sep,
-                    chunksize=100_000,
-                    dtype=str,
-                    low_memory=False
-                )
+                detected_enc, sep = _detect_cpv_format(path)
             except Exception:
+                detected_enc, sep = "latin1", ","
+            enc_candidates = [detected_enc] + [e for e in ["utf-8-sig", "utf-8", "cp1252", "latin1"] if e != detected_enc]
+
+        file_loaded = False
+        file_has_error = False
+
+        for enc in enc_candidates:
+            if file_loaded or file_has_error:
+                break
+            try:
+                if is_excel:
+                    reader = [df_temp]
+                else:
+                    reader = pd.read_csv(
+                        path,
+                        encoding=enc,
+                        sep=sep,
+                        chunksize=100_000,
+                        dtype=str,
+                        low_memory=False
+                    )
+
+                file_chunks = []
+                file_has_error = False
+
+                for chunk in reader:
+                    chunk.columns = [str(c).strip().upper() for c in chunk.columns]
+
+                    # Normalización de alias de columnas
+                    col_ent = "ENTIDAD" if "ENTIDAD" in chunk.columns else ("CVE_ENT" if "CVE_ENT" in chunk.columns else None)
+                    col_mun = "MUN" if "MUN" in chunk.columns else ("CVE_MUN" if "CVE_MUN" in chunk.columns else None)
+                    col_ageb = "AGEB" if "AGEB" in chunk.columns else ("CVE_AGEB" if "CVE_AGEB" in chunk.columns else None)
+                    col_mza = "MZA" if "MZA" in chunk.columns else ("CVE_MZA" if "CVE_MZA" in chunk.columns else ("MANZANA" if "MANZANA" in chunk.columns else None))
+                    col_pobtot = "POBTOT" if "POBTOT" in chunk.columns else ("POB_TOTAL" if "POB_TOTAL" in chunk.columns else None)
+                    col_pob15 = "P_15YMAS" if "P_15YMAS" in chunk.columns else ("P15YMAS" if "P15YMAS" in chunk.columns else ("POB15" if "POB15" in chunk.columns else None))
+
+                    missing = []
+                    if not col_ent: missing.append('ENTIDAD')
+                    if not col_mun: missing.append('MUN')
+                    if not col_pobtot: missing.append('POBTOT')
+                    if not col_pob15: missing.append('P_15YMAS')
+                    if not col_ageb: missing.append('AGEB')
+                    if not col_mza: missing.append('MZA')
+
+                    # Si faltan columnas requeridas, marcar error de archivo y continuar con los siguientes
+                    if missing:
+                        print(f"[WARN] Archivo censal omitido ({os.path.basename(path)}): falta columna {missing[0]}")
+                        file_has_error = True
+                        break
+
+                    # Calcular clave municipal homologada
+                    cve_mun_clean = [
+                        format_cve_mun(m, e) for m, e in zip(chunk[col_mun], chunk[col_ent])
+                    ]
+                    chunk['cve_mun_clean'] = cve_mun_clean
+
+                    # Filtrado municipal temprano para evitar saturación de memoria en estados masivos
+                    if target_muns:
+                        chunk = chunk[chunk['cve_mun_clean'].isin(target_muns)].copy()
+                        if chunk.empty:
+                            continue
+
+                    # Limpieza y filtrado censal seguro
+                    # NOTA CRÍTICA: Nunca reemplazar '*' por '1' en MZA para no atribuir población censurada
+                    # a la manzana urbana 0001 real. Asteriscos y valores no numéricos se descartan (mza_num > 0).
+                    mza_num = pd.to_numeric(chunk[col_mza], errors='coerce').fillna(0).astype(int)
+
+                    # Población total y de 15+ años (manejo seguro de asteriscos confidenciales y cadenas)
+                    pobtot_s = chunk[col_pobtot].astype(str).str.strip().replace({'*': '1.5', 'N/D': '0', 'nan': '0', '': '0'})
+                    pobtot_num = pd.to_numeric(pobtot_s, errors='coerce').fillna(0.0)
+                    pobtot_num = np.maximum(0.0, np.where(np.isfinite(pobtot_num), pobtot_num, 0.0))
+
+                    pob15_s = chunk[col_pob15].astype(str).str.strip().replace({'*': '1.0', 'N/D': '0', 'nan': '0', '': '0'})
+                    pob15_num = pd.to_numeric(pob15_s, errors='coerce').fillna(0.0)
+                    pob15_num = np.maximum(0.0, np.where(np.isfinite(pob15_num), pob15_num, 0.0))
+
+                    # Restricción demográfica: P_15YMAS no puede exceder POBTOT
+                    pob15_num = np.minimum(pob15_num, pobtot_num)
+
+                    # Filtrar solo manzanas habitadas reales
+                    valid_mask = (mza_num > 0) & (pobtot_num > 0)
+                    if not valid_mask.any():
+                        continue
+
+                    chunk = chunk[valid_mask].copy()
+                    chunk['mza_num'] = mza_num[valid_mask]
+                    chunk['pobtot_num'] = pobtot_num[valid_mask]
+                    chunk['pob15_num'] = pob15_num[valid_mask]
+
+                    chunk['ageb_clean'] = (
+                        chunk[col_ageb]
+                        .astype(str)
+                        .str.strip()
+                        .str.upper()
+                        .str.replace('-', '', regex=False)
+                        .str.zfill(4)
+                    )
+                    chunk['mza_clean'] = chunk['mza_num'].astype(str)
+
+                    # Conservar exclusivamente las columnas necesarias para liberar RAM
+                    cols_to_keep = [
+                        'cve_mun_clean', 'ageb_clean', 'mza_clean',
+                        'pobtot_num', 'pob15_num'
+                    ]
+                    file_chunks.append(chunk[cols_to_keep])
+
+                if not file_has_error:
+                    valid_chunks.extend(file_chunks)
+                    file_loaded = True
+            except (UnicodeDecodeError, UnicodeError):
+                # Fallback dinámico si un byte no-ASCII aparece después del sample de detección
                 continue
-
-        for chunk in reader:
-            chunk.columns = [str(c).strip().upper() for c in chunk.columns]
-
-            # Normalización de alias de columnas
-            col_ent = "ENTIDAD" if "ENTIDAD" in chunk.columns else ("CVE_ENT" if "CVE_ENT" in chunk.columns else None)
-            col_mun = "MUN" if "MUN" in chunk.columns else ("CVE_MUN" if "CVE_MUN" in chunk.columns else None)
-            col_ageb = "AGEB" if "AGEB" in chunk.columns else ("CVE_AGEB" if "CVE_AGEB" in chunk.columns else None)
-            col_mza = "MZA" if "MZA" in chunk.columns else ("CVE_MZA" if "CVE_MZA" in chunk.columns else ("MANZANA" if "MANZANA" in chunk.columns else None))
-            col_pobtot = "POBTOT" if "POBTOT" in chunk.columns else ("POB_TOTAL" if "POB_TOTAL" in chunk.columns else None)
-            col_pob15 = "P_15YMAS" if "P_15YMAS" in chunk.columns else ("P15YMAS" if "P15YMAS" in chunk.columns else ("POB15" if "POB15" in chunk.columns else None))
-
-            missing = []
-            if not col_ent: missing.append('ENTIDAD')
-            if not col_mun: missing.append('MUN')
-            if not col_pobtot: missing.append('POBTOT')
-            if not col_pob15: missing.append('P_15YMAS')
-            if not col_ageb: missing.append('AGEB')
-            if not col_mza: missing.append('MZA')
-            if missing:
-                raise KeyError(f"Columna censal faltante: {missing[0]}")
-
-            # Calcular clave municipal homologada
-            cve_mun_clean = [
-                format_cve_mun(m, e) for m, e in zip(chunk[col_mun], chunk[col_ent])
-            ]
-            chunk['cve_mun_clean'] = cve_mun_clean
-
-            # Filtrado municipal temprano para evitar saturación de memoria en estados masivos
-            if target_muns:
-                chunk = chunk[chunk['cve_mun_clean'].isin(target_muns)].copy()
-                if chunk.empty:
-                    continue
-
-            # Limpieza y filtrado censal seguro
-            # NOTA CRÍTICA: Nunca reemplazar '*' por '1' en MZA para no atribuir población censurada
-            # a la manzana urbana 0001 real. Asteriscos y valores no numéricos se descartan (mza_num > 0).
-            mza_num = pd.to_numeric(chunk[col_mza], errors='coerce').fillna(0).astype(int)
-
-            # Población total y de 15+ años (manejo seguro de asteriscos confidenciales y cadenas)
-            pobtot_s = chunk[col_pobtot].astype(str).str.strip().replace({'*': '1.5', 'N/D': '0', 'nan': '0', '': '0'})
-            pobtot_num = pd.to_numeric(pobtot_s, errors='coerce').fillna(0.0)
-            pobtot_num = np.maximum(0.0, np.where(np.isfinite(pobtot_num), pobtot_num, 0.0))
-
-            pob15_s = chunk[col_pob15].astype(str).str.strip().replace({'*': '1.0', 'N/D': '0', 'nan': '0', '': '0'})
-            pob15_num = pd.to_numeric(pob15_s, errors='coerce').fillna(0.0)
-            pob15_num = np.maximum(0.0, np.where(np.isfinite(pob15_num), pob15_num, 0.0))
-
-            # Restricción demográfica: P_15YMAS no puede exceder POBTOT
-            pob15_num = np.minimum(pob15_num, pobtot_num)
-
-            # Filtrar solo manzanas habitadas reales
-            valid_mask = (mza_num > 0) & (pobtot_num > 0)
-            if not valid_mask.any():
-                continue
-
-            chunk = chunk[valid_mask].copy()
-            chunk['mza_num'] = mza_num[valid_mask]
-            chunk['pobtot_num'] = pobtot_num[valid_mask]
-            chunk['pob15_num'] = pob15_num[valid_mask]
-
-            chunk['ageb_clean'] = (
-                chunk[col_ageb]
-                .astype(str)
-                .str.strip()
-                .str.upper()
-                .str.replace('-', '', regex=False)
-                .str.zfill(4)
-            )
-            chunk['mza_clean'] = chunk['mza_num'].astype(str)
-
-            # Conservar exclusivamente las columnas necesarias para liberar RAM
-            cols_to_keep = [
-                'cve_mun_clean', 'ageb_clean', 'mza_clean',
-                'pobtot_num', 'pob15_num'
-            ]
-            valid_chunks.append(chunk[cols_to_keep])
+            except Exception as e:
+                print(f"[WARN] Error procesando archivo censal ({os.path.basename(path)}): {e}")
+                break
 
     if not valid_chunks:
         raise ValueError("No se pudo cargar ningún archivo censal válido.")
@@ -1059,15 +1104,32 @@ def load_cpv_demography(
             df_geo = pd.merge(df_geo, ageb_geo, on=['cve_mun_clean', 'ageb_clean'], how='left')
 
     # Nivel 1 & 2: Centroides DENUE a nivel Manzana y AGEB dentro del BBOX
+    # Atomicidad previa: descartar registros que no posean ambos ejes válidos y finitos
+    # para evitar sintetizar centroides quiméricos a partir de filas con coordenadas parciales
     if df_denue is not None and not df_denue.empty and all(c in df_denue.columns for c in ['cve_mun_clean', 'ageb_clean', 'mza_clean', 'lon', 'lat']):
-        mza_coords = df_denue.groupby(['cve_mun_clean', 'ageb_clean', 'mza_clean'])[['lon', 'lat']].mean().reset_index().rename(
-            columns={'lon': 'lon_mza_denue', 'lat': 'lat_mza_denue'}
-        )
-        ageb_coords = df_denue.groupby(['cve_mun_clean', 'ageb_clean'])[['lon', 'lat']].mean().reset_index().rename(
-            columns={'lon': 'lon_ageb_denue', 'lat': 'lat_ageb_denue'}
-        )
-        df_geo = pd.merge(df_geo, mza_coords, on=['cve_mun_clean', 'ageb_clean', 'mza_clean'], how='left')
-        df_geo = pd.merge(df_geo, ageb_coords, on=['cve_mun_clean', 'ageb_clean'], how='left')
+        denue_valid = df_denue.dropna(subset=['lon', 'lat']).copy()
+        lon_num = pd.to_numeric(denue_valid['lon'], errors='coerce')
+        lat_num = pd.to_numeric(denue_valid['lat'], errors='coerce')
+        denue_valid = denue_valid[
+            lon_num.notna() & lat_num.notna() & np.isfinite(lon_num) & np.isfinite(lat_num)
+        ].copy()
+        denue_valid['lon'] = lon_num
+        denue_valid['lat'] = lat_num
+
+        if not denue_valid.empty:
+            mza_coords = denue_valid.groupby(['cve_mun_clean', 'ageb_clean', 'mza_clean'])[['lon', 'lat']].mean().reset_index().rename(
+                columns={'lon': 'lon_mza_denue', 'lat': 'lat_mza_denue'}
+            )
+            ageb_coords = denue_valid.groupby(['cve_mun_clean', 'ageb_clean'])[['lon', 'lat']].mean().reset_index().rename(
+                columns={'lon': 'lon_ageb_denue', 'lat': 'lat_ageb_denue'}
+            )
+            df_geo = pd.merge(df_geo, mza_coords, on=['cve_mun_clean', 'ageb_clean', 'mza_clean'], how='left')
+            df_geo = pd.merge(df_geo, ageb_coords, on=['cve_mun_clean', 'ageb_clean'], how='left')
+        else:
+            df_geo['lon_mza_denue'] = np.nan
+            df_geo['lat_mza_denue'] = np.nan
+            df_geo['lon_ageb_denue'] = np.nan
+            df_geo['lat_ageb_denue'] = np.nan
     else:
         df_geo['lon_mza_denue'] = np.nan
         df_geo['lat_mza_denue'] = np.nan
