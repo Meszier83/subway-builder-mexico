@@ -30,6 +30,23 @@ DEFAULT_RADIUS_METERS = {
 }
 
 
+def sanitize_max_distance_km(val: Any, default: float = 55.0) -> float:
+    """
+    Sanea de forma determinista el parámetro max_distance_km.
+    Filtra None, cadenas corruptas, nan, inf, -inf y valores <= 0.0,
+    retornando el valor por defecto si la entrada es inválida.
+    """
+    if val is None:
+        return default
+    try:
+        f = float(val)
+        if math.isfinite(f) and f > 0.0:
+            return f
+        return default
+    except (ValueError, TypeError):
+        return default
+
+
 def is_point_in_zone(lon: float, lat: float, zone: Dict[str, Any]) -> bool:
     """
     Verifica si una coordenada [lon, lat] cae dentro de una zona (polígono o bbox).
@@ -937,6 +954,7 @@ def simulate_gravity_demand(
     y respeta las barreras topológicas insulares (isolated_zones).
     """
     rng = np.random.default_rng(seed)
+    max_distance_km = sanitize_max_distance_km(max_distance_km, default=55.0)
 
     # 1. Separar orígenes residenciales y destinos
     origins = [p for p in demand_points if p.get("pea_15ymas", 0) > 0]
@@ -1069,9 +1087,9 @@ def simulate_gravity_demand(
                     "drivingSeconds": driving_seconds,
                     "drivingDistance": dist_m
                 })
-                orig["popIds"].append(pid)
+                orig.setdefault("popIds", []).append(pid)
                 if sp_dest["id"] != orig["id"]:
-                    sp_dest["popIds"].append(pid)
+                    sp_dest.setdefault("popIds", []).append(pid)
                 pop_id += 1
                 pax_left -= chunk
 
@@ -1229,8 +1247,8 @@ def simulate_gravity_demand(
                             "drivingSeconds": driving_seconds,
                             "drivingDistance": dist_m
                         })
-                        orig["popIds"].append(pid)
-                        dest["popIds"].append(pid)
+                        orig.setdefault("popIds", []).append(pid)
+                        dest.setdefault("popIds", []).append(pid)
                         pop_id += 1
 
     return pops
@@ -1885,23 +1903,6 @@ def calculate_commute_distance_distribution(
     }
 
 
-def sanitize_max_distance_km(val: Any, default: float = 55.0) -> float:
-    """
-    Sanea de forma determinista el parámetro max_distance_km.
-    Filtra None, cadenas corruptas, nan, inf, -inf y valores <= 0.0,
-    retornando el valor por defecto si la entrada es inválida.
-    """
-    if val is None:
-        return default
-    try:
-        f = float(val)
-        if math.isfinite(f) and f > 0.0:
-            return f
-        return default
-    except (ValueError, TypeError):
-        return default
-
-
 def _calibrate_beta_from_demand_points(
     demand_points: List[Dict],
     bbox: Optional[List[float]] = None,
@@ -1955,23 +1956,24 @@ def _calibrate_beta_from_demand_points(
         return None
 
     # Agrupación espacial por coordenadas para garantizar invarianza ante fragmentación representacional (ESS)
+    # Conservando simultáneamente el desglose de masa por ID para auto-viajes idénticos a Furness
     orig_spatial = {}
     for o in origins_raw:
         k = (round(o["lon"], 5), round(o["lat"], 5))
         if k not in orig_spatial:
-            orig_spatial[k] = {"lon": o["lon"], "lat": o["lat"], "pea": 0.0, "ids": set()}
+            orig_spatial[k] = {"lon": o["lon"], "lat": o["lat"], "pea": 0.0, "pea_by_id": {}}
         orig_spatial[k]["pea"] += o["pea"]
         if o["id"]:
-            orig_spatial[k]["ids"].add(o["id"])
+            orig_spatial[k]["pea_by_id"][o["id"]] = orig_spatial[k]["pea_by_id"].get(o["id"], 0.0) + o["pea"]
 
     dest_spatial = {}
     for d in destinations_raw:
         k = (round(d["lon"], 5), round(d["lat"], 5))
         if k not in dest_spatial:
-            dest_spatial[k] = {"lon": d["lon"], "lat": d["lat"], "jobs": 0.0, "ids": set()}
+            dest_spatial[k] = {"lon": d["lon"], "lat": d["lat"], "jobs": 0.0, "jobs_by_id": {}}
         dest_spatial[k]["jobs"] += d["jobs"]
         if d["id"]:
-            dest_spatial[k]["ids"].add(d["id"])
+            dest_spatial[k]["jobs_by_id"][d["id"]] = dest_spatial[k]["jobs_by_id"].get(d["id"], 0.0) + d["jobs"]
 
     origins = list(orig_spatial.values())
     destinations = list(dest_spatial.values())
@@ -2006,146 +2008,184 @@ def _calibrate_beta_from_demand_points(
     orig_zones = assign_zones(orig_coords_deg, isolated_zones) if isolated_zones else np.zeros(len(origins), dtype=int)
     dest_zones = assign_zones(dest_coords_deg, isolated_zones) if isolated_zones else np.zeros(len(destinations), dtype=int)
 
-    # Conteo de destinos disponibles por zona (Furness solo anula auto-viajes si len(dest_indices) > 1)
-    dest_count_per_zone = {}
-    for z_val in np.unique(dest_zones):
-        dest_count_per_zone[int(z_val)] = int(np.sum(dest_zones == z_val))
-
-    # Mapeo invertido de auto-viajes por ID (emula estrictamente orig_id == dest_id de Furness)
-    dest_id_to_indices = {}
+    # Conteo de destinos disponibles por zona (Furness anula auto-viajes sólo si len(dest_indices) > 1)
+    raw_dest_count_per_zone = {}
     for j, d in enumerate(destinations):
-        for did in d["ids"]:
-            dest_id_to_indices.setdefault(did, []).append(j)
+        z_val = int(dest_zones[j])
+        cnt = max(1, len(d["jobs_by_id"]))
+        raw_dest_count_per_zone[z_val] = raw_dest_count_per_zone.get(z_val, 0) + cnt
 
-    self_dest_indices = []
-    for i, o in enumerate(origins):
-        matching_dests = set()
-        for oid in o["ids"]:
-            for j in dest_id_to_indices.get(oid, []):
-                matching_dests.add(j)
-        self_dest_indices.append(matching_dests)
+    # Mapeo invertido de puestos de trabajo por ID hacia celdas destino
+    dest_id_to_nodes = {}
+    for v_idx, d in enumerate(destinations):
+        for did, j_val in d["jobs_by_id"].items():
+            dest_id_to_nodes.setdefault(did, []).append((v_idx, j_val))
+
+    # Precomputar deducción de masa cruzada para pares de celdas que comparten ID (auto-viajes reales)
+    shared_deductions_map = {}
+    for u_idx, o in enumerate(origins):
+        u_deductions = {}
+        for oid, p_val in o["pea_by_id"].items():
+            if oid in dest_id_to_nodes:
+                for v_idx, j_val in dest_id_to_nodes[oid]:
+                    u_deductions[v_idx] = u_deductions.get(v_idx, 0.0) + (p_val * j_val)
+        if u_deductions:
+            shared_deductions_map[u_idx] = u_deductions
 
     # -------------------------------------------------------------------------
-    # Morfología por Componentes Topológicos Admisibles
-    # Para evitar que barreras marítimas o vacíos inter-zonales se interpreten
-    # falsamente como un "corredor lineal" o "megaciudad", la inercia espacial
-    # se calcula por componente admisible activo y se agrega ponderada por masa.
+    # Morfología por Componentes Conexos del Soporte Espacial Admisible
+    # Derivada del grafo de interacción admisible (zona idéntica y d <= max_distance_km)
+    # para evitar falsos corredores lineales entre localidades radiales sin pares cruzados.
     # -------------------------------------------------------------------------
-    unique_active_zones = np.unique(np.concatenate([orig_zones, dest_zones]))
-    zone_metrics_list = []
-    zone_masses = []
+    effective_max_dist = sanitize_max_distance_km(max_distance_km, default=55.0)
+    effective_max_dist = max(5.0, effective_max_dist)
 
-    for z in unique_active_zones:
-        z_o_mask = (orig_zones == z)
-        z_d_mask = (dest_zones == z)
+    comb_coords = np.concatenate([orig_coords_deg, dest_coords_deg], axis=0)
+    comb_zones = np.concatenate([orig_zones, dest_zones], axis=0)
+    mean_lat = float(np.mean(comb_coords[:, 1]))
+    mean_lon = float(np.mean(comb_coords[:, 0]))
+    kx = 111.320 * math.cos(math.radians(mean_lat))
+    ky = 110.574
+    comb_xy = np.column_stack([(comb_coords[:, 0] - mean_lon) * kx, (comb_coords[:, 1] - mean_lat) * ky])
 
-        z_pea = float(np.sum(orig_pea[z_o_mask]))
-        z_jobs = float(np.sum(dest_jobs[z_d_mask]))
+    tree = cKDTree(comb_xy)
+    pairs = tree.query_pairs(r=effective_max_dist)
 
-        # Solo zonas con capacidad de interacción interna admisible (PEA y Empleo)
-        if z_pea <= 0.0 or z_jobs <= 0.0:
+    parent = list(range(len(comb_xy)))
+
+    def find(i: int) -> int:
+        path = []
+        while parent[i] != i:
+            path.append(i)
+            i = parent[i]
+        for p in path:
+            parent[p] = i
+        return i
+
+    def union(i: int, j: int):
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            parent[rj] = ri
+
+    for i, j in pairs:
+        if comb_zones[i] == comb_zones[j]:
+            union(i, j)
+
+    orig_comp = np.array([find(i) for i in range(len(origins))], dtype=int)
+    dest_comp = np.array([find(len(origins) + j) for j in range(len(destinations))], dtype=int)
+    unique_comps = np.unique(np.concatenate([orig_comp, dest_comp]))
+
+    comp_metrics_list = []
+    comp_masses = []
+
+    for c in unique_comps:
+        o_mask = (orig_comp == c)
+        d_mask = (dest_comp == c)
+
+        c_pea = float(np.sum(orig_pea[o_mask]))
+        c_jobs = float(np.sum(dest_jobs[d_mask]))
+
+        # Solo componentes con capacidad de interacción interna admisible (PEA y Empleo)
+        if c_pea <= 0.0 or c_jobs <= 0.0:
             continue
 
-        z_orig_w = orig_pea[z_o_mask] / z_pea
-        z_dest_w = dest_jobs[z_d_mask] / z_jobs
+        c_orig_lons = orig_lons[o_mask]
+        c_orig_lats = orig_lats[o_mask]
+        c_dest_lons = dest_lons[d_mask]
+        c_dest_lats = dest_lats[d_mask]
 
-        z_orig_lons = orig_lons[z_o_mask]
-        z_orig_lats = orig_lats[z_o_mask]
-        z_dest_lons = dest_lons[z_d_mask]
-        z_dest_lats = dest_lats[z_d_mask]
+        c_orig_w = orig_pea[o_mask] / c_pea
+        c_dest_w = dest_jobs[d_mask] / c_jobs
 
-        z_comb_lons = np.concatenate([z_orig_lons, z_dest_lons])
-        z_comb_lats = np.concatenate([z_orig_lats, z_dest_lats])
-        z_comb_w = np.concatenate([0.5 * z_orig_w, 0.5 * z_dest_w])
+        c_comb_lons = np.concatenate([c_orig_lons, c_dest_lons])
+        c_comb_lats = np.concatenate([c_orig_lats, c_dest_lats])
+        c_comb_w = np.concatenate([0.5 * c_orig_w, 0.5 * c_dest_w])
 
-        z_center_lon = float(np.sum(z_comb_w * z_comb_lons))
-        z_center_lat = float(np.sum(z_comb_w * z_comb_lats))
+        c_center_lon = float(np.sum(c_comb_w * c_comb_lons))
+        c_center_lat = float(np.sum(c_comb_w * c_comb_lats))
 
-        z_cos_lat = math.cos(math.radians(z_center_lat))
-        z_kx = 111.320 * z_cos_lat
-        z_ky = 110.574
+        c_cos_lat = math.cos(math.radians(c_center_lat))
+        c_kx = 111.320 * c_cos_lat
+        c_ky = 110.574
 
-        z_orig_x = (z_orig_lons - z_center_lon) * z_kx
-        z_orig_y = (z_orig_lats - z_center_lat) * z_ky
-        z_dest_x = (z_dest_lons - z_center_lon) * z_kx
-        z_dest_y = (z_dest_lats - z_center_lat) * z_ky
+        c_orig_x = (c_orig_lons - c_center_lon) * c_kx
+        c_orig_y = (c_orig_lats - c_center_lat) * c_ky
+        c_dest_x = (c_dest_lons - c_center_lon) * c_kx
+        c_dest_y = (c_dest_lats - c_center_lat) * c_ky
 
-        mu_o_x, mu_o_y = float(np.sum(z_orig_w * z_orig_x)), float(np.sum(z_orig_w * z_orig_y))
-        mu_d_x, mu_d_y = float(np.sum(z_dest_w * z_dest_x)), float(np.sum(z_dest_w * z_dest_y))
-        z_centroid_sep = float(math.hypot(mu_o_x - mu_d_x, mu_o_y - mu_d_y))
+        mu_o_x, mu_o_y = float(np.sum(c_orig_w * c_orig_x)), float(np.sum(c_orig_w * c_orig_y))
+        mu_d_x, mu_d_y = float(np.sum(c_dest_w * c_dest_x)), float(np.sum(c_dest_w * c_dest_y))
+        c_centroid_sep = float(math.hypot(mu_o_x - mu_d_x, mu_o_y - mu_d_y))
 
-        z_orig_dx = z_orig_x - mu_o_x
-        z_orig_dy = z_orig_y - mu_o_y
-        z_origin_rg = float(math.sqrt(max(0.0, np.sum(z_orig_w * (z_orig_dx**2 + z_orig_dy**2)))))
+        c_orig_dx = c_orig_x - mu_o_x
+        c_orig_dy = c_orig_y - mu_o_y
+        c_origin_rg = float(math.sqrt(max(0.0, np.sum(c_orig_w * (c_orig_dx**2 + c_orig_dy**2)))))
 
-        z_dest_dx = z_dest_x - mu_d_x
-        z_dest_dy = z_dest_y - mu_d_y
-        z_dest_rg = float(math.sqrt(max(0.0, np.sum(z_dest_w * (z_dest_dx**2 + z_dest_dy**2)))))
+        c_dest_dx = c_dest_x - mu_d_x
+        c_dest_dy = c_dest_y - mu_d_y
+        c_dest_rg = float(math.sqrt(max(0.0, np.sum(c_dest_w * (c_dest_dx**2 + c_dest_dy**2)))))
 
-        z_comb_x = np.concatenate([z_orig_x, z_dest_x])
-        z_comb_y = np.concatenate([z_orig_y, z_dest_y])
+        c_comb_x = np.concatenate([c_orig_x, c_dest_x])
+        c_comb_y = np.concatenate([c_orig_y, c_dest_y])
 
-        z_var_xx = float(np.sum(z_comb_w * z_comb_x**2))
-        z_var_yy = float(np.sum(z_comb_w * z_comb_y**2))
-        z_cov_xy = float(np.sum(z_comb_w * z_comb_x * z_comb_y))
-        z_combined_rg = float(math.sqrt(max(0.0, z_var_xx + z_var_yy)))
+        c_var_xx = float(np.sum(c_comb_w * c_comb_x**2))
+        c_var_yy = float(np.sum(c_comb_w * c_comb_y**2))
+        c_cov_xy = float(np.sum(c_comb_w * c_comb_x * c_comb_y))
+        c_combined_rg = float(math.sqrt(max(0.0, c_var_xx + c_var_yy)))
 
-        trace = z_var_xx + z_var_yy
-        diff = z_var_xx - z_var_yy
-        delta = math.sqrt(diff**2 + 4.0 * z_cov_xy**2)
+        trace = c_var_xx + c_var_yy
+        diff = c_var_xx - c_var_yy
+        delta = math.sqrt(diff**2 + 4.0 * c_cov_xy**2)
         l1 = max(0.0, (trace + delta) / 2.0)
         l2 = max(0.0, (trace - delta) / 2.0)
 
-        z_major_axis = float(math.sqrt(l1))
-        z_minor_axis = float(math.sqrt(l2))
-        z_elongation = float(z_major_axis / max(z_minor_axis, 0.05))
+        c_major_axis = float(math.sqrt(l1))
+        c_minor_axis = float(math.sqrt(l2))
+        c_elongation = float(c_major_axis / max(c_minor_axis, 0.05))
 
-        z_orientation_rad = 0.5 * math.atan2(2.0 * z_cov_xy, diff)
-        z_orientation_deg = float(math.degrees(z_orientation_rad) % 180.0)
+        c_orientation_rad = 0.5 * math.atan2(2.0 * c_cov_xy, diff)
+        c_orientation_deg = float(math.degrees(c_orientation_rad) % 180.0)
 
-        mass_frac = float(0.5 * (z_pea / total_pea) + 0.5 * (z_jobs / total_jobs))
-        zone_masses.append(mass_frac)
-        zone_metrics_list.append({
-            "zone": z,
-            "center_lon": z_center_lon,
-            "center_lat": z_center_lat,
-            "origin_rg_km": z_origin_rg,
-            "dest_rg_km": z_dest_rg,
-            "combined_rg_km": z_combined_rg,
-            "major_axis_km": z_major_axis,
-            "minor_axis_km": z_minor_axis,
-            "elongation_ratio": z_elongation,
-            "centroid_sep_km": z_centroid_sep,
-            "orientation_deg": z_orientation_deg,
+        mass_frac = float(0.5 * (c_pea / total_pea) + 0.5 * (c_jobs / total_jobs))
+        comp_masses.append(mass_frac)
+        comp_metrics_list.append({
+            "component": c,
+            "center_lon": c_center_lon,
+            "center_lat": c_center_lat,
+            "origin_rg_km": c_origin_rg,
+            "dest_rg_km": c_dest_rg,
+            "combined_rg_km": c_combined_rg,
+            "major_axis_km": c_major_axis,
+            "minor_axis_km": c_minor_axis,
+            "elongation_ratio": c_elongation,
+            "centroid_sep_km": c_centroid_sep,
+            "orientation_deg": c_orientation_deg,
             "mass_fraction": mass_frac
         })
 
-    if not zone_masses or sum(zone_masses) <= 0.0:
+    if not comp_masses or sum(comp_masses) <= 0.0:
         return None
 
-    mass_weights = np.array(zone_masses, dtype=np.float64) / sum(zone_masses)
+    mass_weights = np.array(comp_masses, dtype=np.float64) / sum(comp_masses)
 
-    origin_rg_km = float(np.sum(mass_weights * [m["origin_rg_km"] for m in zone_metrics_list]))
-    dest_rg_km = float(np.sum(mass_weights * [m["dest_rg_km"] for m in zone_metrics_list]))
-    combined_rg_km = float(np.sum(mass_weights * [m["combined_rg_km"] for m in zone_metrics_list]))
-    major_axis_km = float(np.sum(mass_weights * [m["major_axis_km"] for m in zone_metrics_list]))
-    minor_axis_km = float(np.sum(mass_weights * [m["minor_axis_km"] for m in zone_metrics_list]))
+    origin_rg_km = float(np.sum(mass_weights * [m["origin_rg_km"] for m in comp_metrics_list]))
+    dest_rg_km = float(np.sum(mass_weights * [m["dest_rg_km"] for m in comp_metrics_list]))
+    combined_rg_km = float(np.sum(mass_weights * [m["combined_rg_km"] for m in comp_metrics_list]))
+    major_axis_km = float(np.sum(mass_weights * [m["major_axis_km"] for m in comp_metrics_list]))
+    minor_axis_km = float(np.sum(mass_weights * [m["minor_axis_km"] for m in comp_metrics_list]))
     elongation_ratio = float(major_axis_km / max(minor_axis_km, 0.05))
-    centroid_sep_km = float(np.sum(mass_weights * [m["centroid_sep_km"] for m in zone_metrics_list]))
+    centroid_sep_km = float(np.sum(mass_weights * [m["centroid_sep_km"] for m in comp_metrics_list]))
 
     dominant_idx = int(np.argmax(mass_weights))
-    center_lon = zone_metrics_list[dominant_idx]["center_lon"]
-    center_lat = zone_metrics_list[dominant_idx]["center_lat"]
-    orientation_deg = zone_metrics_list[dominant_idx]["orientation_deg"]
+    center_lon = comp_metrics_list[dominant_idx]["center_lon"]
+    center_lat = comp_metrics_list[dominant_idx]["center_lat"]
+    orientation_deg = comp_metrics_list[dominant_idx]["orientation_deg"]
 
     # -------------------------------------------------------------------------
     # Histograma de Oportunidades y Streaming Adaptativo
-    # Mantiene precisión intracélula completa y fidelidad OD idéntica a Furness
-    # sin censura previa ni colapso de puntos compactos.
+    # Mantiene consumo de RAM < 20 MB (bloques <= 100k elementos) y fidelidad exacta a Furness
     # -------------------------------------------------------------------------
     BIN_WIDTH = 0.25
-    effective_max_dist = sanitize_max_distance_km(max_distance_km, default=55.0)
-    effective_max_dist = max(5.0, effective_max_dist)
     num_bins = max(10, int(math.ceil(effective_max_dist / BIN_WIDTH)))
     H = np.zeros(num_bins, dtype=np.float64)
     bin_centers = (np.arange(num_bins, dtype=np.float64) + 0.5) * BIN_WIDTH
@@ -2155,10 +2195,10 @@ def _calibrate_beta_from_demand_points(
     rlat_d = np.radians(dest_lats)
     rlon_d = np.radians(dest_lons)
 
-    # Chunking dinámico adaptativo para mantener uso de RAM < 20 MB y streaming exacto
-    target_elements_per_chunk = 2_000_000
-    chunk_size = max(50, min(1000, target_elements_per_chunk // max(1, len(dest_lons))))
+    target_elements_per_chunk = 100_000
+    chunk_size = max(1, min(250, target_elements_per_chunk // max(1, len(dest_lons))))
     admissible_pairs_count = 0
+    total_denom = total_pea * total_jobs
 
     for start_idx in range(0, len(orig_lons), chunk_size):
         end_idx = min(start_idx + chunk_size, len(orig_lons))
@@ -2171,7 +2211,9 @@ def _calibrate_beta_from_demand_points(
 
         dlat = rlat_d[np.newaxis, :] - chunk_lat_o
         dlon = rlon_d[np.newaxis, :] - chunk_lon_o
-        a = np.sin(dlat / 2.0)**2 + np.cos(chunk_lat_o) * np.cos(rlat_d[np.newaxis, :]) * np.sin(dlon / 2.0)**2
+        sin_half_dlat = np.sin(0.5 * dlat)
+        sin_half_dlon = np.sin(0.5 * dlon)
+        a = sin_half_dlat**2 + np.cos(chunk_lat_o) * np.cos(rlat_d[np.newaxis, :]) * sin_half_dlon**2
         d_km = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
 
         # Admisibilidad idéntica a Furness:
@@ -2179,20 +2221,26 @@ def _calibrate_beta_from_demand_points(
         zone_mask = (chunk_z_o == dest_zones[np.newaxis, :])
         # 2. Truncamiento por distancia máxima
         dist_mask = (d_km <= effective_max_dist)
-        # 3. Supresión de auto-viajes idénticos cuando hay alternativas en la zona (idéntico a Furness)
-        self_mask = np.zeros((chunk_len, len(destinations)), dtype=bool)
-        for local_i, o_idx in enumerate(range(start_idx, end_idx)):
-            z_o = int(orig_zones[o_idx])
-            if dest_count_per_zone.get(z_o, 0) > 1:
-                for d_idx in self_dest_indices[o_idx]:
-                    self_mask[local_i, d_idx] = True
-
-        admissible = zone_mask & dist_mask & (~self_mask)
-        admissible_pairs_count += int(np.sum(admissible))
+        admissible = zone_mask & dist_mask
 
         pair_w = np.where(admissible, chunk_w_o * dest_w[np.newaxis, :], 0.0)
-        bin_idx = np.clip((d_km / BIN_WIDTH).astype(np.int64), 0, num_bins - 1)
-        np.add.at(H, bin_idx, pair_w)
+
+        # 3. Deducción estricta de auto-viajes a nivel de ID individual
+        for local_u, u_idx in enumerate(range(start_idx, end_idx)):
+            z_u = int(orig_zones[u_idx])
+            if raw_dest_count_per_zone.get(z_u, 0) > 1 and u_idx in shared_deductions_map:
+                for v_idx, ded_mass in shared_deductions_map[u_idx].items():
+                    if admissible[local_u, v_idx]:
+                        ded_w = ded_mass / total_denom
+                        pair_w[local_u, v_idx] = max(0.0, pair_w[local_u, v_idx] - ded_w)
+
+        valid_mask = pair_w > 0.0
+        if np.any(valid_mask):
+            admissible_pairs_count += int(np.sum(valid_mask))
+            valid_d = d_km[valid_mask]
+            valid_w = pair_w[valid_mask]
+            bin_idx = np.clip((valid_d / BIN_WIDTH).astype(np.int64), 0, num_bins - 1)
+            np.add.at(H, bin_idx, valid_w)
 
     h_sum = H.sum()
     if h_sum <= 0 or admissible_pairs_count < 2:
@@ -2205,7 +2253,9 @@ def _calibrate_beta_from_demand_points(
     def _interp_quantile(pct_val: float) -> float:
         idx = int(np.searchsorted(cum_h, pct_val))
         if idx == 0:
-            return float(bin_centers[0])
+            denom = max(1e-12, cum_h[0])
+            alpha = min(1.0, max(0.0, pct_val / denom))
+            return float(alpha * BIN_WIDTH)
         idx = min(idx, num_bins - 1)
         prev_c = cum_h[idx - 1]
         curr_c = cum_h[idx]
@@ -2274,7 +2324,9 @@ def _calibrate_beta_from_demand_points(
         c_b = np.cumsum(w_b) / s_b
         idx = int(np.searchsorted(c_b, 0.50))
         if idx == 0:
-            return float(bin_centers[0])
+            denom = max(1e-12, c_b[0])
+            alpha = min(1.0, max(0.0, 0.50 / denom))
+            return float(alpha * BIN_WIDTH)
         idx = min(idx, num_bins - 1)
         prev_c = c_b[idx - 1]
         curr_c = c_b[idx]

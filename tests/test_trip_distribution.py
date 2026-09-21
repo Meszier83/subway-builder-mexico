@@ -4,7 +4,8 @@ import numpy as np
 from sb_mexico.gravity import (
     calculate_commute_distance_distribution,
     recommend_gravity_beta,
-    sanitize_max_distance_km
+    sanitize_max_distance_km,
+    simulate_gravity_demand
 )
 
 
@@ -324,7 +325,7 @@ class TestTripDistribution(unittest.TestCase):
         for p in dp_original:
             for sub_i in range(5):
                 dp_split.append({
-                    "id": f"{p['id']}_{sub_i}",
+                    "id": p["id"],
                     "location": list(p["location"]),
                     "pea_15ymas": p["pea_15ymas"] / 5.0,
                     "jobs": p["jobs"] / 5.0,
@@ -500,7 +501,7 @@ class TestTripDistribution(unittest.TestCase):
                     "jobs": 50
                 })
                 node_idx += 1
-        
+
         self.assertEqual(len(demand_points), 2025)
         rec = recommend_gravity_beta(demand_points=demand_points)
         self.assertIsNotNone(rec)
@@ -539,6 +540,7 @@ class TestTripDistribution(unittest.TestCase):
                 "jobs": int(rng.integers(100, 500))
             })
 
+        # 1. Con isolated_zones declaradas
         rec = recommend_gravity_beta(
             demand_points=demand_points,
             isolated_zones=isolated_zones,
@@ -550,6 +552,38 @@ class TestTripDistribution(unittest.TestCase):
         self.assertLess(m["major_axis_km"], 6.0)
         self.assertNotEqual(rec["archetype"], "corredor_lineal")
         self.assertIn(rec["archetype"], ["compacta", "intermedia"])
+
+        # 2. Sin isolated_zones (ambas en la misma zona base pero separadas 95 km)
+        # La conectividad por distancia en el grafo de soporte efectivo evita el falso corredor
+        rec_nz = recommend_gravity_beta(
+            demand_points=demand_points,
+            isolated_zones=None,
+            max_distance_km=55.0
+        )
+        self.assertIsNotNone(rec_nz)
+        m_nz = rec_nz["metrics"]
+        self.assertLess(m_nz["elongation_ratio"], 1.6)
+        self.assertLess(m_nz["major_axis_km"], 6.0)
+        self.assertNotEqual(rec_nz["archetype"], "corredor_lineal")
+        self.assertIn(rec_nz["archetype"], ["compacta", "intermedia"])
+
+    def test_colocated_distinct_ids_furness_equivalence(self):
+        # Contraejemplo Sol: Dos centroides separados ~10.38 km, con dos IDs distintos en cada uno.
+        # Furness anula el auto-viaje del mismo ID pero permite viajes cruzados colocados (distancia 0 km).
+        # El calibrador a nivel de masa ID-celda debe admitir esa masa a 0 km y reportar mediana en bin 0 (< 0.25 km).
+        c1 = [-86.85, 21.10]
+        c2 = [-86.75, 21.10]
+        demand_points = [
+            {"id": "A", "location": c1, "pea_15ymas": 100, "jobs": 100},
+            {"id": "B", "location": c1, "pea_15ymas": 100, "jobs": 100},
+            {"id": "C", "location": c2, "pea_15ymas": 100, "jobs": 100},
+            {"id": "D", "location": c2, "pea_15ymas": 100, "jobs": 100},
+        ]
+        rec = recommend_gravity_beta(demand_points=demand_points, max_distance_km=55.0)
+        self.assertIsNotNone(rec)
+        m = rec["metrics"]
+        self.assertEqual(m["admissible_pairs"], 4)
+        self.assertLessEqual(m["calibrated_median_km"], 0.25)
 
     def test_sanitize_max_distance_km_robustness(self):
         # Contraejemplo Sol: Saneamiento de max_distance_km ante None, strings, inf, nan, negativos
@@ -571,8 +605,17 @@ class TestTripDistribution(unittest.TestCase):
             self.assertIsNotNone(rec)
             self.assertEqual(rec["metrics"]["max_distance_km"], 55.0)
 
+    def test_simulate_gravity_demand_sanitizes_max_distance_km(self):
+        # Contraejemplo Sol: Propagación de saneamiento a simulate_gravity_demand
+        dp = [
+            {"id": "p1", "location": [-99.15, 19.40], "pea_15ymas": 500, "jobs": 400},
+            {"id": "p2", "location": [-99.16, 19.41], "pea_15ymas": 600, "jobs": 500},
+        ]
+        for bad_val in [None, "bad", float("inf"), float("nan"), -10.0]:
+            pops = simulate_gravity_demand(demand_points=dp, max_distance_km=bad_val, seed=42)
+            self.assertIsInstance(pops, list)
+            self.assertGreater(len(pops), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
-
-
