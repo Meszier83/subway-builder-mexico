@@ -2033,54 +2033,251 @@ def _calibrate_beta_from_demand_points(
             shared_deductions_map[u_idx] = u_deductions
 
     # -------------------------------------------------------------------------
-    # Morfología por Componentes Conexos del Soporte Espacial Admisible
-    # Derivada del grafo de interacción admisible (zona idéntica y d <= max_distance_km)
-    # para evitar falsos corredores lineales entre localidades radiales sin pares cruzados.
+    # Soporte Espacial y Grafo Bipartito de Interacción Admisible
+    # Alineado estrictamente con Furness / IPFP (zonas aisladas, distancia máxima,
+    # auto-viajes y conectividad de respaldo para huérfanos).
+    # Streaming adaptativo para mantener consumo de RAM < 20 MB sin materializar pares densos.
     # -------------------------------------------------------------------------
     effective_max_dist = sanitize_max_distance_km(max_distance_km, default=55.0)
     effective_max_dist = max(5.0, effective_max_dist)
 
-    comb_coords = np.concatenate([orig_coords_deg, dest_coords_deg], axis=0)
-    comb_zones = np.concatenate([orig_zones, dest_zones], axis=0)
-    mean_lat = float(np.mean(comb_coords[:, 1]))
-    mean_lon = float(np.mean(comb_coords[:, 0]))
-    kx = 111.320 * math.cos(math.radians(mean_lat))
-    ky = 110.574
-    comb_xy = np.column_stack([(comb_coords[:, 0] - mean_lon) * kx, (comb_coords[:, 1] - mean_lat) * ky])
+    n_orig = len(origins)
+    n_dest = len(destinations)
 
-    tree = cKDTree(comb_xy)
-    pairs = tree.query_pairs(r=effective_max_dist)
-
-    parent = list(range(len(comb_xy)))
+    parent = np.arange(n_orig + n_dest, dtype=np.int32)
+    dest_comp = np.arange(n_dest, dtype=np.int32) + n_orig
 
     def find(i: int) -> int:
-        path = []
         while parent[i] != i:
-            path.append(i)
+            parent[i] = parent[parent[i]]
             i = parent[i]
-        for p in path:
-            parent[p] = i
         return i
 
-    def union(i: int, j: int):
-        ri, rj = find(i), find(j)
-        if ri != rj:
-            parent[rj] = ri
+    orig_has_dest = np.zeros(n_orig, dtype=bool)
+    dest_has_orig = np.zeros(n_dest, dtype=bool)
 
-    for i, j in pairs:
-        if comb_zones[i] == comb_zones[j]:
-            union(i, j)
+    BIN_WIDTH = 0.25
+    num_bins = max(10, int(math.ceil(effective_max_dist / BIN_WIDTH)))
+    H = np.zeros(num_bins, dtype=np.float64)
+    bin_centers = (np.arange(num_bins, dtype=np.float64) + 0.5) * BIN_WIDTH
 
+    rlat_o = np.radians(orig_lats)
+    rlon_o = np.radians(orig_lons)
+    rlat_d = np.radians(dest_lats)
+    rlon_d = np.radians(dest_lons)
+
+    target_elements_per_chunk = 100_000
+    chunk_size = max(1, min(250, target_elements_per_chunk // max(1, len(dest_lons))))
+    admissible_pairs_count = 0
+    total_denom = total_pea * total_jobs
+
+    for start_idx in range(0, len(orig_lons), chunk_size):
+        end_idx = min(start_idx + chunk_size, len(orig_lons))
+        chunk_len = end_idx - start_idx
+
+        chunk_lat_o = rlat_o[start_idx:end_idx, np.newaxis]
+        chunk_lon_o = rlon_o[start_idx:end_idx, np.newaxis]
+        chunk_w_o = orig_w[start_idx:end_idx, np.newaxis]
+        chunk_z_o = orig_zones[start_idx:end_idx, np.newaxis]
+
+        dlat = rlat_d[np.newaxis, :] - chunk_lat_o
+        dlon = rlon_d[np.newaxis, :] - chunk_lon_o
+        sin_half_dlat = np.sin(0.5 * dlat)
+        sin_half_dlon = np.sin(0.5 * dlon)
+        a = sin_half_dlat**2 + np.cos(chunk_lat_o) * np.cos(rlat_d[np.newaxis, :]) * sin_half_dlon**2
+        d_km = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
+
+        # Admisibilidad idéntica a Furness:
+        # 1. Zonas aisladas: orígenes en zona z solo viajan a destinos en la misma zona z
+        zone_mask = (chunk_z_o == dest_zones[np.newaxis, :])
+        # 2. Truncamiento por distancia máxima
+        dist_mask = (d_km <= effective_max_dist)
+        admissible = zone_mask & dist_mask
+
+        pair_w = np.where(admissible, chunk_w_o * dest_w[np.newaxis, :], 0.0)
+
+        # 3. Deducción estricta de auto-viajes a nivel de ID individual
+        for local_u, u_idx in enumerate(range(start_idx, end_idx)):
+            z_u = int(orig_zones[u_idx])
+            if raw_dest_count_per_zone.get(z_u, 0) > 1 and u_idx in shared_deductions_map:
+                for v_idx, ded_mass in shared_deductions_map[u_idx].items():
+                    if admissible[local_u, v_idx]:
+                        ded_w = ded_mass / total_denom
+                        pair_w[local_u, v_idx] = max(0.0, pair_w[local_u, v_idx] - ded_w)
+
+        valid_mask = pair_w > 0.0
+        if np.any(valid_mask):
+            admissible_pairs_count += int(np.sum(valid_mask))
+            valid_d = d_km[valid_mask]
+            valid_w = pair_w[valid_mask]
+            bin_idx = np.clip((valid_d / BIN_WIDTH).astype(np.int64), 0, num_bins - 1)
+            np.add.at(H, bin_idx, valid_w)
+
+            orig_has_dest[start_idx:end_idx] |= np.any(valid_mask, axis=1)
+            dest_has_orig |= np.any(valid_mask, axis=0)
+
+            # Grafo bipartito: conectar u_node (origen) con v_idx (destinos admisibles con flujo positivo)
+            for local_u in range(chunk_len):
+                u_node = start_idx + local_u
+                v_idx = np.where(valid_mask[local_u])[0]
+                if len(v_idx) == 0:
+                    continue
+                v0 = v_idx[0]
+                r0 = find(dest_comp[v0])
+                parent[u_node] = r0
+                comps = dest_comp[v_idx]
+                diff = (comps != r0)
+                if np.any(diff):
+                    for c in np.unique(comps[diff]):
+                        rc = find(c)
+                        if rc != r0:
+                            parent[rc] = r0
+                    dest_comp[v_idx] = r0
+
+    # Soporte de Respaldo para Filas/Columnas Huérfanas (Equivalencia exacta con Furness)
+    # Furness conecta cada fila o columna sin pares admisibles a sus <= 5 destinos/orígenes
+    # más cercanos en la misma zona para preservar la masa y conectividad de la red.
+    orphan_pairs = {}
+    if np.any(~orig_has_dest):
+        orphan_origins = np.where(~orig_has_dest)[0]
+        for u_idx in orphan_origins:
+            z_u = int(orig_zones[u_idx])
+            cand_dests = np.where(dest_zones == z_u)[0]
+            if len(cand_dests) == 0:
+                continue
+
+            dlat = rlat_d[cand_dests] - rlat_o[u_idx]
+            dlon = rlon_d[cand_dests] - rlon_o[u_idx]
+            sin_half_dlat = np.sin(0.5 * dlat)
+            sin_half_dlon = np.sin(0.5 * dlon)
+            a = sin_half_dlat**2 + math.cos(rlat_o[u_idx]) * np.cos(rlat_d[cand_dests]) * sin_half_dlon**2
+            d_cand = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
+
+            d_eval = d_cand.copy()
+            if raw_dest_count_per_zone.get(z_u, 0) > 1 and u_idx in shared_deductions_map:
+                for k, v_idx in enumerate(cand_dests):
+                    if v_idx in shared_deductions_map[u_idx]:
+                        ded_w = shared_deductions_map[u_idx][v_idx] / total_denom
+                        raw_w = orig_w[u_idx] * dest_w[v_idx]
+                        if raw_w - ded_w <= 1e-12:
+                            d_eval[k] += 1e6
+
+            k_closest = min(5, len(cand_dests))
+            closest_idx = np.argsort(d_eval)[:k_closest]
+            for c_idx in closest_idx:
+                v_idx = cand_dests[c_idx]
+                d_val = float(d_cand[c_idx])
+                pw = orig_w[u_idx] * dest_w[v_idx]
+                if raw_dest_count_per_zone.get(z_u, 0) > 1 and u_idx in shared_deductions_map:
+                    if v_idx in shared_deductions_map[u_idx]:
+                        ded_w = shared_deductions_map[u_idx][v_idx] / total_denom
+                        pw = max(0.0, pw - ded_w)
+                if pw > 0.0:
+                    pair_key = (u_idx, v_idx)
+                    orphan_pairs[pair_key] = (d_val, pw)
+                    orig_has_dest[u_idx] = True
+                    dest_has_orig[v_idx] = True
+
+    if np.any(~dest_has_orig):
+        orphan_dests = np.where(~dest_has_orig)[0]
+        for v_idx in orphan_dests:
+            z_v = int(dest_zones[v_idx])
+            cand_origs = np.where(orig_zones == z_v)[0]
+            if len(cand_origs) == 0:
+                continue
+
+            dlat = rlat_d[v_idx] - rlat_o[cand_origs]
+            dlon = rlon_d[v_idx] - rlon_o[cand_origs]
+            sin_half_dlat = np.sin(0.5 * dlat)
+            sin_half_dlon = np.sin(0.5 * dlon)
+            a = sin_half_dlat**2 + np.cos(rlat_o[cand_origs]) * math.cos(rlat_d[v_idx]) * sin_half_dlon**2
+            d_cand = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
+
+            d_eval = d_cand.copy()
+            if raw_dest_count_per_zone.get(z_v, 0) > 1:
+                for k, u_idx in enumerate(cand_origs):
+                    if u_idx in shared_deductions_map and v_idx in shared_deductions_map[u_idx]:
+                        ded_w = shared_deductions_map[u_idx][v_idx] / total_denom
+                        raw_w = orig_w[u_idx] * dest_w[v_idx]
+                        if raw_w - ded_w <= 1e-12:
+                            d_eval[k] += 1e6
+
+            k_closest = min(5, len(cand_origs))
+            closest_idx = np.argsort(d_eval)[:k_closest]
+            for c_idx in closest_idx:
+                u_idx = cand_origs[c_idx]
+                d_val = float(d_cand[c_idx])
+                pw = orig_w[u_idx] * dest_w[v_idx]
+                if raw_dest_count_per_zone.get(z_v, 0) > 1 and u_idx in shared_deductions_map:
+                    if v_idx in shared_deductions_map[u_idx]:
+                        ded_w = shared_deductions_map[u_idx][v_idx] / total_denom
+                        pw = max(0.0, pw - ded_w)
+                if pw > 0.0:
+                    pair_key = (u_idx, v_idx)
+                    orphan_pairs[pair_key] = (d_val, pw)
+                    orig_has_dest[u_idx] = True
+                    dest_has_orig[v_idx] = True
+
+    if orphan_pairs:
+        max_orphan_d = max(d for d, _ in orphan_pairs.values())
+        if max_orphan_d >= effective_max_dist:
+            new_num_bins = int(math.ceil(max_orphan_d / BIN_WIDTH)) + 1
+            if new_num_bins > num_bins:
+                extra_bins = new_num_bins - num_bins
+                H = np.pad(H, (0, extra_bins), mode='constant')
+                bin_centers = (np.arange(new_num_bins, dtype=np.float64) + 0.5) * BIN_WIDTH
+                num_bins = new_num_bins
+
+        for (u_idx, v_idx), (d_val, pw) in orphan_pairs.items():
+            admissible_pairs_count += 1
+            bin_idx = np.clip(int(d_val / BIN_WIDTH), 0, num_bins - 1)
+            H[bin_idx] += pw
+
+            ru = find(u_idx)
+            rv = find(dest_comp[v_idx])
+            if ru != rv:
+                parent[ru] = rv
+                dest_comp[v_idx] = rv
+
+    h_sum = H.sum()
+    if h_sum <= 0 or admissible_pairs_count < 2:
+        return None
+    H /= h_sum
+
+    opportunity_mean_km = float(np.sum(H * bin_centers))
+    cum_h = np.cumsum(H)
+
+    def _interp_quantile(pct_val: float) -> float:
+        idx = int(np.searchsorted(cum_h, pct_val))
+        if idx == 0:
+            denom = max(1e-12, cum_h[0])
+            alpha = min(1.0, max(0.0, pct_val / denom))
+            return float(alpha * BIN_WIDTH)
+        idx = min(idx, num_bins - 1)
+        prev_c = cum_h[idx - 1]
+        curr_c = cum_h[idx]
+        denom = max(1e-12, curr_c - prev_c)
+        alpha = min(1.0, max(0.0, (pct_val - prev_c) / denom))
+        return float(idx * BIN_WIDTH + alpha * BIN_WIDTH)
+
+    opportunity_median_km = _interp_quantile(0.50)
+    opportunity_p75_km = _interp_quantile(0.75)
+
+    # -------------------------------------------------------------------------
+    # Morfología por Componentes Conexos del Grafo Bipartito Admisible
+    # Calculada exclusivamente sobre componentes con interacción bidireccional
+    # (PEA > 0 y Empleo > 0), evitando puentes artificiales O-O o D-D.
+    # -------------------------------------------------------------------------
     orig_comp = np.array([find(i) for i in range(len(origins))], dtype=int)
-    dest_comp = np.array([find(len(origins) + j) for j in range(len(destinations))], dtype=int)
-    unique_comps = np.unique(np.concatenate([orig_comp, dest_comp]))
+    dest_comp_roots = np.array([find(dest_comp[j]) for j in range(len(destinations))], dtype=int)
+    unique_comps = np.unique(np.concatenate([orig_comp, dest_comp_roots]))
 
     comp_metrics_list = []
     comp_masses = []
 
     for c in unique_comps:
         o_mask = (orig_comp == c)
-        d_mask = (dest_comp == c)
+        d_mask = (dest_comp_roots == c)
 
         c_pea = float(np.sum(orig_pea[o_mask]))
         c_jobs = float(np.sum(dest_jobs[d_mask]))
@@ -2180,91 +2377,6 @@ def _calibrate_beta_from_demand_points(
     center_lon = comp_metrics_list[dominant_idx]["center_lon"]
     center_lat = comp_metrics_list[dominant_idx]["center_lat"]
     orientation_deg = comp_metrics_list[dominant_idx]["orientation_deg"]
-
-    # -------------------------------------------------------------------------
-    # Histograma de Oportunidades y Streaming Adaptativo
-    # Mantiene consumo de RAM < 20 MB (bloques <= 100k elementos) y fidelidad exacta a Furness
-    # -------------------------------------------------------------------------
-    BIN_WIDTH = 0.25
-    num_bins = max(10, int(math.ceil(effective_max_dist / BIN_WIDTH)))
-    H = np.zeros(num_bins, dtype=np.float64)
-    bin_centers = (np.arange(num_bins, dtype=np.float64) + 0.5) * BIN_WIDTH
-
-    rlat_o = np.radians(orig_lats)
-    rlon_o = np.radians(orig_lons)
-    rlat_d = np.radians(dest_lats)
-    rlon_d = np.radians(dest_lons)
-
-    target_elements_per_chunk = 100_000
-    chunk_size = max(1, min(250, target_elements_per_chunk // max(1, len(dest_lons))))
-    admissible_pairs_count = 0
-    total_denom = total_pea * total_jobs
-
-    for start_idx in range(0, len(orig_lons), chunk_size):
-        end_idx = min(start_idx + chunk_size, len(orig_lons))
-        chunk_len = end_idx - start_idx
-
-        chunk_lat_o = rlat_o[start_idx:end_idx, np.newaxis]
-        chunk_lon_o = rlon_o[start_idx:end_idx, np.newaxis]
-        chunk_w_o = orig_w[start_idx:end_idx, np.newaxis]
-        chunk_z_o = orig_zones[start_idx:end_idx, np.newaxis]
-
-        dlat = rlat_d[np.newaxis, :] - chunk_lat_o
-        dlon = rlon_d[np.newaxis, :] - chunk_lon_o
-        sin_half_dlat = np.sin(0.5 * dlat)
-        sin_half_dlon = np.sin(0.5 * dlon)
-        a = sin_half_dlat**2 + np.cos(chunk_lat_o) * np.cos(rlat_d[np.newaxis, :]) * sin_half_dlon**2
-        d_km = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
-
-        # Admisibilidad idéntica a Furness:
-        # 1. Zonas aisladas: orígenes en zona z solo viajan a destinos en la misma zona z
-        zone_mask = (chunk_z_o == dest_zones[np.newaxis, :])
-        # 2. Truncamiento por distancia máxima
-        dist_mask = (d_km <= effective_max_dist)
-        admissible = zone_mask & dist_mask
-
-        pair_w = np.where(admissible, chunk_w_o * dest_w[np.newaxis, :], 0.0)
-
-        # 3. Deducción estricta de auto-viajes a nivel de ID individual
-        for local_u, u_idx in enumerate(range(start_idx, end_idx)):
-            z_u = int(orig_zones[u_idx])
-            if raw_dest_count_per_zone.get(z_u, 0) > 1 and u_idx in shared_deductions_map:
-                for v_idx, ded_mass in shared_deductions_map[u_idx].items():
-                    if admissible[local_u, v_idx]:
-                        ded_w = ded_mass / total_denom
-                        pair_w[local_u, v_idx] = max(0.0, pair_w[local_u, v_idx] - ded_w)
-
-        valid_mask = pair_w > 0.0
-        if np.any(valid_mask):
-            admissible_pairs_count += int(np.sum(valid_mask))
-            valid_d = d_km[valid_mask]
-            valid_w = pair_w[valid_mask]
-            bin_idx = np.clip((valid_d / BIN_WIDTH).astype(np.int64), 0, num_bins - 1)
-            np.add.at(H, bin_idx, valid_w)
-
-    h_sum = H.sum()
-    if h_sum <= 0 or admissible_pairs_count < 2:
-        return None
-    H /= h_sum
-
-    opportunity_mean_km = float(np.sum(H * bin_centers))
-    cum_h = np.cumsum(H)
-
-    def _interp_quantile(pct_val: float) -> float:
-        idx = int(np.searchsorted(cum_h, pct_val))
-        if idx == 0:
-            denom = max(1e-12, cum_h[0])
-            alpha = min(1.0, max(0.0, pct_val / denom))
-            return float(alpha * BIN_WIDTH)
-        idx = min(idx, num_bins - 1)
-        prev_c = cum_h[idx - 1]
-        curr_c = cum_h[idx]
-        denom = max(1e-12, curr_c - prev_c)
-        alpha = min(1.0, max(0.0, (pct_val - prev_c) / denom))
-        return float(idx * BIN_WIDTH + alpha * BIN_WIDTH)
-
-    opportunity_median_km = _interp_quantile(0.50)
-    opportunity_p75_km = _interp_quantile(0.75)
     opportunity_rms_km = float(math.sqrt(max(0.0, origin_rg_km**2 + dest_rg_km**2 + centroid_sep_km**2)))
 
     # Diagonal de BBOX (referencial)

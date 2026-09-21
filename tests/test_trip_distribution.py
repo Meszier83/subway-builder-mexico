@@ -616,6 +616,96 @@ class TestTripDistribution(unittest.TestCase):
             self.assertIsInstance(pops, list)
             self.assertGreater(len(pops), 0)
 
+    def test_bipartite_demand_graph_prevents_oo_bridge(self):
+        # Contraejemplo Sol: Dos localidades radiales independientes separadas por 95 km.
+        # Dos orígenes fantasma de masa PEA=0.01 colocados a medio camino.
+        # En un grafo puramente bipartito de interacción OD admisible, los orígenes no se conectan
+        # entre sí (O-O), por lo que las dos ciudades permanecen desconectadas y no forman
+        # un falso corredor lineal masivo (elongación < 1.6, eje mayor < 6.0 km).
+        rng = np.random.default_rng(777)
+        demand_points = []
+        for i in range(25):
+            r = rng.uniform(0.2, 2.5)
+            theta = rng.uniform(0, 2 * np.pi)
+            demand_points.append({
+                "id": f"s_{i}",
+                "location": [round(-87.00 + (r * np.cos(theta)) / 104.0, 5), round(20.00 + (r * np.sin(theta)) / 110.5, 5)],
+                "pea_15ymas": int(rng.integers(100, 500)),
+                "jobs": int(rng.integers(100, 500))
+            })
+        for i in range(25):
+            r = rng.uniform(0.2, 2.5)
+            theta = rng.uniform(0, 2 * np.pi)
+            demand_points.append({
+                "id": f"n_{i}",
+                "location": [round(-87.00 + (r * np.cos(theta)) / 104.0, 5), round(20.85 + (r * np.sin(theta)) / 110.5, 5)],
+                "pea_15ymas": int(rng.integers(100, 500)),
+                "jobs": int(rng.integers(100, 500))
+            })
+
+        # Insertar orígenes puente sin puestos de trabajo
+        demand_points.append({"id": "ghost_1", "location": [-87.00, 20.30], "pea_15ymas": 0.01, "jobs": 0})
+        demand_points.append({"id": "ghost_2", "location": [-87.00, 20.55], "pea_15ymas": 0.01, "jobs": 0})
+
+        rec = recommend_gravity_beta(demand_points=demand_points, max_distance_km=55.0)
+        self.assertIsNotNone(rec)
+        m = rec["metrics"]
+        self.assertLess(m["elongation_ratio"], 1.6)
+        self.assertLess(m["major_axis_km"], 6.0)
+        self.assertNotEqual(rec["archetype"], "corredor_lineal")
+        self.assertIn(rec["archetype"], ["compacta", "intermedia"])
+
+    def test_furness_orphan_fallback_equivalence(self):
+        # Contraejemplo Sol: 4 celdas donde todos los pares exceden max_distance_km (> 55 km).
+        # Furness no descarta la masa ni aborta: conecta cada fila/columna huérfana a sus <= 5
+        # contrapartes más cercanas en la misma zona.
+        # El calibrador replica exactamente este respaldo en lugar de caer en bbox_fallback.
+        dp_distant = [
+            {"id": "p1", "location": [-87.00, 20.00], "pea_15ymas": 100, "jobs": 0},
+            {"id": "p2", "location": [-87.00, 20.60], "pea_15ymas": 0, "jobs": 100},
+            {"id": "p3", "location": [-87.00, 21.20], "pea_15ymas": 100, "jobs": 0},
+            {"id": "p4", "location": [-87.00, 21.80], "pea_15ymas": 0, "jobs": 100},
+        ]
+        rec = recommend_gravity_beta(demand_points=dp_distant, max_distance_km=55.0)
+        self.assertIsNotNone(rec)
+        m = rec["metrics"]
+        self.assertEqual(m["method"], "demand_points")
+        self.assertGreaterEqual(m["admissible_pairs"], 2)
+        self.assertGreaterEqual(m["opportunity_median_km"], 60.0)
+
+        # Verificar que simulate_gravity_demand genera cohortes válidas con el beta calibrado
+        pops = simulate_gravity_demand(demand_points=dp_distant, max_distance_km=55.0, beta=rec["recommended_beta"], seed=42)
+        self.assertEqual(len(pops), 2)
+        total_commuters = sum(p["size"] for p in pops)
+        self.assertEqual(total_commuters, 200)
+
+    def test_streaming_low_memory_and_runtime(self):
+        # Auditoría Sol: Eficiencia de memoria < 25 MB y tiempo < 2.5 s en 2,025 nodos (4.1M pares).
+        import time, tracemalloc
+        dp_grid = []
+        node_idx = 0
+        for r in range(45):
+            for c in range(45):
+                dp_grid.append({
+                    "id": f"node_{node_idx}",
+                    "location": [-99.15 + c * 0.005, 19.40 + r * 0.005],
+                    "pea_15ymas": 50,
+                    "jobs": 50
+                })
+                node_idx += 1
+
+        tracemalloc.start()
+        t0 = time.time()
+        rec = recommend_gravity_beta(demand_points=dp_grid, max_distance_km=55.0)
+        elapsed = time.time() - t0
+        _, peak_bytes = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+
+        self.assertIsNotNone(rec)
+        self.assertLess(elapsed, 2.5, f"Tiempo excesivo: {elapsed:.2f}s (meta < 2.5s)")
+        peak_mb = peak_bytes / (1024 * 1024)
+        self.assertLess(peak_mb, 25.0, f"Pico de memoria excesivo: {peak_mb:.1f} MB (meta < 25 MB)")
+
 
 if __name__ == "__main__":
     unittest.main()
