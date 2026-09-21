@@ -40,7 +40,8 @@ from sb_mexico.gravity import (
     sync_demand_points_and_pops,
     apply_modal_competitiveness_experiment,
     calculate_commute_distance_distribution,
-    recommend_gravity_beta
+    recommend_gravity_beta,
+    sanitize_max_distance_km
 )
 from sb_mexico.osrm import (
     is_docker_available,
@@ -523,7 +524,7 @@ def execute_pipeline(
     is_auto = config_beta is None or str(config_beta).strip().lower() in ("auto", "none", "")
 
     if is_auto:
-        max_dist_km = macro.get("max_distance_km", 55.0)
+        max_dist_km = sanitize_max_distance_km(macro.get("max_distance_km"), default=55.0)
         beta_diag = recommend_gravity_beta(
             bbox=bbox_list,
             demand_points=demand_points,

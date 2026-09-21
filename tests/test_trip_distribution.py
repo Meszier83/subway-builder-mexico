@@ -3,7 +3,8 @@ import unittest
 import numpy as np
 from sb_mexico.gravity import (
     calculate_commute_distance_distribution,
-    recommend_gravity_beta
+    recommend_gravity_beta,
+    sanitize_max_distance_km
 )
 
 
@@ -431,6 +432,144 @@ class TestTripDistribution(unittest.TestCase):
         for k, v in m.items():
             if isinstance(v, float):
                 self.assertTrue(math.isfinite(v), f"Métrica {k} no es finita: {v}")
+
+    def test_distinct_ids_close_proximity_admitted(self):
+        # Contraejemplo Sol: IDs distintos separados por ~10 metros.
+        # Furness y el calibrador los admiten (no son auto-viajes idénticos).
+        demand_points = [
+            {"id": "res_1", "location": [-87.00000, 20.00000], "pea_15ymas": 100, "jobs": 0},
+            {"id": "denue_1", "location": [-87.00009, 20.00000], "pea_15ymas": 0, "jobs": 100},
+            {"id": "denue_2", "location": [-87.00000, 20.09000], "pea_15ymas": 0, "jobs": 100},
+            {"id": "res_2", "location": [-87.00000, 20.09000], "pea_15ymas": 100, "jobs": 0},
+        ]
+        rec = recommend_gravity_beta(demand_points=demand_points)
+        self.assertIsNotNone(rec)
+        m = rec["metrics"]
+        self.assertGreater(m["admissible_pairs"], 0)
+        self.assertLess(m["opportunity_median_km"], 6.0)
+
+    def test_same_id_displaced_suppressed_if_alternatives_exist(self):
+        # Contraejemplo Sol: El mismo ID desplazado ~1.25 km.
+        # Furness lo prohíbe si existen alternativas en la zona (orig_id == dest_id).
+        demand_points = [
+            {"id": "node_1", "location": [-87.0000, 20.0000], "pea_15ymas": 200, "jobs": 0},
+            {"id": "node_1", "location": [-87.0120, 20.0000], "pea_15ymas": 0, "jobs": 200},
+            {"id": "node_2", "location": [-87.0000, 20.0900], "pea_15ymas": 200, "jobs": 200},
+        ]
+        rec = recommend_gravity_beta(demand_points=demand_points)
+        self.assertIsNotNone(rec)
+        m = rec["metrics"]
+        self.assertGreaterEqual(m["opportunity_median_km"], 8.0)
+
+    def test_single_destination_per_isolated_zone_retained(self):
+        # Contraejemplo Sol: Una única alternativa por cada zona aislada.
+        # Furness conserva ese destino porque cada zona tiene uno solo (len(dest_indices) == 1).
+        isolated_zones = [
+            {"name": "Zona_Sur", "bbox": [-87.1, 19.9, -86.9, 20.1]},
+            {"name": "Zona_Norte", "bbox": [-87.1, 20.7, -86.9, 20.95]},
+        ]
+        demand_points = [
+            # Zona Sur: 1 centroide mixto (PEA y Empleo con mismo ID)
+            {"id": "sur_hub", "location": [-87.00, 20.00], "pea_15ymas": 500, "jobs": 500},
+            # Zona Norte: 1 centroide mixto a 95 km (PEA y Empleo con mismo ID)
+            {"id": "norte_hub", "location": [-87.00, 20.85], "pea_15ymas": 600, "jobs": 600},
+        ]
+        rec = recommend_gravity_beta(
+            demand_points=demand_points,
+            isolated_zones=isolated_zones,
+            max_distance_km=55.0
+        )
+        self.assertIsNotNone(rec)
+        m = rec["metrics"]
+        self.assertEqual(m["method"], "demand_points")
+        self.assertEqual(m["admissible_pairs"], 2)
+        self.assertNotEqual(rec["archetype"], "megaciudad")
+        self.assertGreaterEqual(rec["recommended_beta"], 0.130)
+
+    def test_large_scale_compact_nodes_no_grid_collapse(self):
+        # Contraejemplo Sol: 2,025 nodos compactos (4,100,625 pares Furness válidos).
+        # El calibrador exacto en streaming NO debe colapsar todo a 1 celda ni forzar bbox_fallback.
+        demand_points = []
+        node_idx = 0
+        for i in range(45):
+            for j in range(45):
+                demand_points.append({
+                    "id": f"nd_{node_idx}",
+                    "location": [round(-86.85 + i * 0.00015, 5), round(21.10 + j * 0.00015, 5)],
+                    "pea_15ymas": 50,
+                    "jobs": 50
+                })
+                node_idx += 1
+        
+        self.assertEqual(len(demand_points), 2025)
+        rec = recommend_gravity_beta(demand_points=demand_points)
+        self.assertIsNotNone(rec)
+        m = rec["metrics"]
+        self.assertEqual(m["method"], "demand_points")
+        self.assertEqual(m["pair_mode"], "exact_chunked")
+        self.assertEqual(m["admissible_pairs"], 4098600)
+        self.assertEqual(rec["archetype"], "compacta")
+        self.assertGreaterEqual(rec["recommended_beta"], 0.140)
+
+    def test_morphology_per_admissible_topological_component(self):
+        # Contraejemplo Sol: Dos localidades radiales independientes separadas por 95 km.
+        # No deben crear una elongación artificial de 7.5x ni un eje mayor de 53 km.
+        isolated_zones = [
+            {"name": "Zona_Sur", "bbox": [-87.15, 19.85, -86.85, 20.15]},
+            {"name": "Zona_Norte", "bbox": [-87.15, 20.70, -86.85, 21.00]},
+        ]
+        demand_points = []
+        rng = np.random.default_rng(777)
+        for i in range(25):
+            r = rng.uniform(0.2, 2.5)
+            theta = rng.uniform(0, 2 * np.pi)
+            demand_points.append({
+                "id": f"s_{i}",
+                "location": [round(-87.00 + (r * np.cos(theta)) / 104.0, 5), round(20.00 + (r * np.sin(theta)) / 110.5, 5)],
+                "pea_15ymas": int(rng.integers(100, 500)),
+                "jobs": int(rng.integers(100, 500))
+            })
+        for i in range(25):
+            r = rng.uniform(0.2, 2.5)
+            theta = rng.uniform(0, 2 * np.pi)
+            demand_points.append({
+                "id": f"n_{i}",
+                "location": [round(-87.00 + (r * np.cos(theta)) / 104.0, 5), round(20.85 + (r * np.sin(theta)) / 110.5, 5)],
+                "pea_15ymas": int(rng.integers(100, 500)),
+                "jobs": int(rng.integers(100, 500))
+            })
+
+        rec = recommend_gravity_beta(
+            demand_points=demand_points,
+            isolated_zones=isolated_zones,
+            max_distance_km=55.0
+        )
+        self.assertIsNotNone(rec)
+        m = rec["metrics"]
+        self.assertLess(m["elongation_ratio"], 1.6)
+        self.assertLess(m["major_axis_km"], 6.0)
+        self.assertNotEqual(rec["archetype"], "corredor_lineal")
+        self.assertIn(rec["archetype"], ["compacta", "intermedia"])
+
+    def test_sanitize_max_distance_km_robustness(self):
+        # Contraejemplo Sol: Saneamiento de max_distance_km ante None, strings, inf, nan, negativos
+        self.assertEqual(sanitize_max_distance_km(None), 55.0)
+        self.assertEqual(sanitize_max_distance_km("bad"), 55.0)
+        self.assertEqual(sanitize_max_distance_km(float("inf")), 55.0)
+        self.assertEqual(sanitize_max_distance_km(float("-inf")), 55.0)
+        self.assertEqual(sanitize_max_distance_km(float("nan")), 55.0)
+        self.assertEqual(sanitize_max_distance_km(-10.0), 55.0)
+        self.assertEqual(sanitize_max_distance_km(0.0), 55.0)
+        self.assertEqual(sanitize_max_distance_km(80.0), 80.0)
+
+        dp = [
+            {"id": "p1", "location": [-99.15, 19.40], "pea_15ymas": 500, "jobs": 400},
+            {"id": "p2", "location": [-99.16, 19.41], "pea_15ymas": 600, "jobs": 500},
+        ]
+        for bad_val in [None, "bad", float("inf"), float("nan"), -25]:
+            rec = recommend_gravity_beta(demand_points=dp, max_distance_km=bad_val)
+            self.assertIsNotNone(rec)
+            self.assertEqual(rec["metrics"]["max_distance_km"], 55.0)
 
 
 if __name__ == "__main__":

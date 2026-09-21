@@ -1885,11 +1885,28 @@ def calculate_commute_distance_distribution(
     }
 
 
+def sanitize_max_distance_km(val: Any, default: float = 55.0) -> float:
+    """
+    Sanea de forma determinista el parámetro max_distance_km.
+    Filtra None, cadenas corruptas, nan, inf, -inf y valores <= 0.0,
+    retornando el valor por defecto si la entrada es inválida.
+    """
+    if val is None:
+        return default
+    try:
+        f = float(val)
+        if math.isfinite(f) and f > 0.0:
+            return f
+        return default
+    except (ValueError, TypeError):
+        return default
+
+
 def _calibrate_beta_from_demand_points(
     demand_points: List[Dict],
     bbox: Optional[List[float]] = None,
     isolated_zones: Optional[List[Dict]] = None,
-    max_distance_km: float = 55.0
+    max_distance_km: Any = 55.0
 ) -> Optional[Dict[str, Any]]:
     """
     Calibra analítica y empíricamente el coeficiente de fricción espacial (beta)
@@ -1942,19 +1959,19 @@ def _calibrate_beta_from_demand_points(
     for o in origins_raw:
         k = (round(o["lon"], 5), round(o["lat"], 5))
         if k not in orig_spatial:
-            orig_spatial[k] = {"lon": o["lon"], "lat": o["lat"], "pea": 0.0, "ids": []}
+            orig_spatial[k] = {"lon": o["lon"], "lat": o["lat"], "pea": 0.0, "ids": set()}
         orig_spatial[k]["pea"] += o["pea"]
         if o["id"]:
-            orig_spatial[k]["ids"].append(o["id"])
+            orig_spatial[k]["ids"].add(o["id"])
 
     dest_spatial = {}
     for d in destinations_raw:
         k = (round(d["lon"], 5), round(d["lat"], 5))
         if k not in dest_spatial:
-            dest_spatial[k] = {"lon": d["lon"], "lat": d["lat"], "jobs": 0.0, "ids": []}
+            dest_spatial[k] = {"lon": d["lon"], "lat": d["lat"], "jobs": 0.0, "ids": set()}
         dest_spatial[k]["jobs"] += d["jobs"]
         if d["id"]:
-            dest_spatial[k]["ids"].append(d["id"])
+            dest_spatial[k]["ids"].add(d["id"])
 
     origins = list(orig_spatial.values())
     destinations = list(dest_spatial.values())
@@ -1983,109 +2000,174 @@ def _calibrate_beta_from_demand_points(
     ess_d = float(1.0 / max(1e-12, np.sum(dest_w**2)))
     conf_factor = float(min(1.0, ess_o / 20.0, ess_d / 20.0))
 
-    # Centro de masa combinado (ponderación 50% PEA y 50% Empleo para evitar sesgo de escala)
-    comb_lons = np.concatenate([orig_lons, dest_lons])
-    comb_lats = np.concatenate([orig_lats, dest_lats])
-    comb_w = np.concatenate([0.5 * orig_w, 0.5 * dest_w])
-
-    center_lon = float(np.sum(comb_w * comb_lons))
-    center_lat = float(np.sum(comb_w * comb_lats))
-
-    # Proyección equirrectangular métrica en km centrada en el baricentro
-    cos_lat = math.cos(math.radians(center_lat))
-    kx = 111.320 * cos_lat
-    ky = 110.574
-
-    orig_x = (orig_lons - center_lon) * kx
-    orig_y = (orig_lats - center_lat) * ky
-    dest_x = (dest_lons - center_lon) * kx
-    dest_y = (dest_lats - center_lat) * ky
-    comb_x = np.concatenate([orig_x, dest_x])
-    comb_y = np.concatenate([orig_y, dest_y])
-
-    # Centroides y radios de giro separados
-    mu_o_x, mu_o_y = float(np.sum(orig_w * orig_x)), float(np.sum(orig_w * orig_y))
-    mu_d_x, mu_d_y = float(np.sum(dest_w * dest_x)), float(np.sum(dest_w * dest_y))
-    centroid_sep_km = float(math.hypot(mu_o_x - mu_d_x, mu_o_y - mu_d_y))
-
-    orig_dx = orig_x - mu_o_x
-    orig_dy = orig_y - mu_o_y
-    origin_rg_km = float(math.sqrt(max(0.0, np.sum(orig_w * (orig_dx**2 + orig_dy**2)))))
-
-    dest_dx = dest_x - mu_d_x
-    dest_dy = dest_y - mu_d_y
-    dest_rg_km = float(math.sqrt(max(0.0, np.sum(dest_w * (dest_dx**2 + dest_dy**2)))))
-
-    # Tensor de dispersión espacial combinado y elongación
-    var_xx = float(np.sum(comb_w * comb_x**2))
-    var_yy = float(np.sum(comb_w * comb_y**2))
-    cov_xy = float(np.sum(comb_w * comb_x * comb_y))
-    combined_rg_km = float(math.sqrt(max(0.0, var_xx + var_yy)))
-
-    trace = var_xx + var_yy
-    diff = var_xx - var_yy
-    delta = math.sqrt(diff**2 + 4.0 * cov_xy**2)
-    lambda1 = max(0.0, (trace + delta) / 2.0)
-    lambda2 = max(0.0, (trace - delta) / 2.0)
-
-    major_axis_km = float(math.sqrt(lambda1))
-    minor_axis_km = float(math.sqrt(lambda2))
-    elongation_ratio = float(major_axis_km / max(minor_axis_km, 0.05))
-
-    orientation_rad = 0.5 * math.atan2(2.0 * cov_xy, diff)
-    orientation_deg = float(math.degrees(orientation_rad) % 180.0)
-
     # Asignación de zonas aisladas idéntica a Furness
     orig_coords_deg = np.column_stack([orig_lons, orig_lats])
     dest_coords_deg = np.column_stack([dest_lons, dest_lats])
     orig_zones = assign_zones(orig_coords_deg, isolated_zones) if isolated_zones else np.zeros(len(origins), dtype=int)
     dest_zones = assign_zones(dest_coords_deg, isolated_zones) if isolated_zones else np.zeros(len(destinations), dtype=int)
 
-    # Techo dinámico del histograma acotado por max_distance_km sin censura espuria
+    # Conteo de destinos disponibles por zona (Furness solo anula auto-viajes si len(dest_indices) > 1)
+    dest_count_per_zone = {}
+    for z_val in np.unique(dest_zones):
+        dest_count_per_zone[int(z_val)] = int(np.sum(dest_zones == z_val))
+
+    # Mapeo invertido de auto-viajes por ID (emula estrictamente orig_id == dest_id de Furness)
+    dest_id_to_indices = {}
+    for j, d in enumerate(destinations):
+        for did in d["ids"]:
+            dest_id_to_indices.setdefault(did, []).append(j)
+
+    self_dest_indices = []
+    for i, o in enumerate(origins):
+        matching_dests = set()
+        for oid in o["ids"]:
+            for j in dest_id_to_indices.get(oid, []):
+                matching_dests.add(j)
+        self_dest_indices.append(matching_dests)
+
+    # -------------------------------------------------------------------------
+    # Morfología por Componentes Topológicos Admisibles
+    # Para evitar que barreras marítimas o vacíos inter-zonales se interpreten
+    # falsamente como un "corredor lineal" o "megaciudad", la inercia espacial
+    # se calcula por componente admisible activo y se agrega ponderada por masa.
+    # -------------------------------------------------------------------------
+    unique_active_zones = np.unique(np.concatenate([orig_zones, dest_zones]))
+    zone_metrics_list = []
+    zone_masses = []
+
+    for z in unique_active_zones:
+        z_o_mask = (orig_zones == z)
+        z_d_mask = (dest_zones == z)
+
+        z_pea = float(np.sum(orig_pea[z_o_mask]))
+        z_jobs = float(np.sum(dest_jobs[z_d_mask]))
+
+        # Solo zonas con capacidad de interacción interna admisible (PEA y Empleo)
+        if z_pea <= 0.0 or z_jobs <= 0.0:
+            continue
+
+        z_orig_w = orig_pea[z_o_mask] / z_pea
+        z_dest_w = dest_jobs[z_d_mask] / z_jobs
+
+        z_orig_lons = orig_lons[z_o_mask]
+        z_orig_lats = orig_lats[z_o_mask]
+        z_dest_lons = dest_lons[z_d_mask]
+        z_dest_lats = dest_lats[z_d_mask]
+
+        z_comb_lons = np.concatenate([z_orig_lons, z_dest_lons])
+        z_comb_lats = np.concatenate([z_orig_lats, z_dest_lats])
+        z_comb_w = np.concatenate([0.5 * z_orig_w, 0.5 * z_dest_w])
+
+        z_center_lon = float(np.sum(z_comb_w * z_comb_lons))
+        z_center_lat = float(np.sum(z_comb_w * z_comb_lats))
+
+        z_cos_lat = math.cos(math.radians(z_center_lat))
+        z_kx = 111.320 * z_cos_lat
+        z_ky = 110.574
+
+        z_orig_x = (z_orig_lons - z_center_lon) * z_kx
+        z_orig_y = (z_orig_lats - z_center_lat) * z_ky
+        z_dest_x = (z_dest_lons - z_center_lon) * z_kx
+        z_dest_y = (z_dest_lats - z_center_lat) * z_ky
+
+        mu_o_x, mu_o_y = float(np.sum(z_orig_w * z_orig_x)), float(np.sum(z_orig_w * z_orig_y))
+        mu_d_x, mu_d_y = float(np.sum(z_dest_w * z_dest_x)), float(np.sum(z_dest_w * z_dest_y))
+        z_centroid_sep = float(math.hypot(mu_o_x - mu_d_x, mu_o_y - mu_d_y))
+
+        z_orig_dx = z_orig_x - mu_o_x
+        z_orig_dy = z_orig_y - mu_o_y
+        z_origin_rg = float(math.sqrt(max(0.0, np.sum(z_orig_w * (z_orig_dx**2 + z_orig_dy**2)))))
+
+        z_dest_dx = z_dest_x - mu_d_x
+        z_dest_dy = z_dest_y - mu_d_y
+        z_dest_rg = float(math.sqrt(max(0.0, np.sum(z_dest_w * (z_dest_dx**2 + z_dest_dy**2)))))
+
+        z_comb_x = np.concatenate([z_orig_x, z_dest_x])
+        z_comb_y = np.concatenate([z_orig_y, z_dest_y])
+
+        z_var_xx = float(np.sum(z_comb_w * z_comb_x**2))
+        z_var_yy = float(np.sum(z_comb_w * z_comb_y**2))
+        z_cov_xy = float(np.sum(z_comb_w * z_comb_x * z_comb_y))
+        z_combined_rg = float(math.sqrt(max(0.0, z_var_xx + z_var_yy)))
+
+        trace = z_var_xx + z_var_yy
+        diff = z_var_xx - z_var_yy
+        delta = math.sqrt(diff**2 + 4.0 * z_cov_xy**2)
+        l1 = max(0.0, (trace + delta) / 2.0)
+        l2 = max(0.0, (trace - delta) / 2.0)
+
+        z_major_axis = float(math.sqrt(l1))
+        z_minor_axis = float(math.sqrt(l2))
+        z_elongation = float(z_major_axis / max(z_minor_axis, 0.05))
+
+        z_orientation_rad = 0.5 * math.atan2(2.0 * z_cov_xy, diff)
+        z_orientation_deg = float(math.degrees(z_orientation_rad) % 180.0)
+
+        mass_frac = float(0.5 * (z_pea / total_pea) + 0.5 * (z_jobs / total_jobs))
+        zone_masses.append(mass_frac)
+        zone_metrics_list.append({
+            "zone": z,
+            "center_lon": z_center_lon,
+            "center_lat": z_center_lat,
+            "origin_rg_km": z_origin_rg,
+            "dest_rg_km": z_dest_rg,
+            "combined_rg_km": z_combined_rg,
+            "major_axis_km": z_major_axis,
+            "minor_axis_km": z_minor_axis,
+            "elongation_ratio": z_elongation,
+            "centroid_sep_km": z_centroid_sep,
+            "orientation_deg": z_orientation_deg,
+            "mass_fraction": mass_frac
+        })
+
+    if not zone_masses or sum(zone_masses) <= 0.0:
+        return None
+
+    mass_weights = np.array(zone_masses, dtype=np.float64) / sum(zone_masses)
+
+    origin_rg_km = float(np.sum(mass_weights * [m["origin_rg_km"] for m in zone_metrics_list]))
+    dest_rg_km = float(np.sum(mass_weights * [m["dest_rg_km"] for m in zone_metrics_list]))
+    combined_rg_km = float(np.sum(mass_weights * [m["combined_rg_km"] for m in zone_metrics_list]))
+    major_axis_km = float(np.sum(mass_weights * [m["major_axis_km"] for m in zone_metrics_list]))
+    minor_axis_km = float(np.sum(mass_weights * [m["minor_axis_km"] for m in zone_metrics_list]))
+    elongation_ratio = float(major_axis_km / max(minor_axis_km, 0.05))
+    centroid_sep_km = float(np.sum(mass_weights * [m["centroid_sep_km"] for m in zone_metrics_list]))
+
+    dominant_idx = int(np.argmax(mass_weights))
+    center_lon = zone_metrics_list[dominant_idx]["center_lon"]
+    center_lat = zone_metrics_list[dominant_idx]["center_lat"]
+    orientation_deg = zone_metrics_list[dominant_idx]["orientation_deg"]
+
+    # -------------------------------------------------------------------------
+    # Histograma de Oportunidades y Streaming Adaptativo
+    # Mantiene precisión intracélula completa y fidelidad OD idéntica a Furness
+    # sin censura previa ni colapso de puntos compactos.
+    # -------------------------------------------------------------------------
     BIN_WIDTH = 0.25
-    effective_max_dist = max(5.0, float(max_distance_km))
+    effective_max_dist = sanitize_max_distance_km(max_distance_km, default=55.0)
+    effective_max_dist = max(5.0, effective_max_dist)
     num_bins = max(10, int(math.ceil(effective_max_dist / BIN_WIDTH)))
     H = np.zeros(num_bins, dtype=np.float64)
     bin_centers = (np.arange(num_bins, dtype=np.float64) + 0.5) * BIN_WIDTH
 
-    total_pairs = len(origins) * len(destinations)
-    pair_mode = "exact_chunked"
+    rlat_o = np.radians(orig_lats)
+    rlon_o = np.radians(orig_lons)
+    rlat_d = np.radians(dest_lats)
+    rlon_d = np.radians(dest_lons)
 
-    if total_pairs > 4_000_000:
-        pair_mode = "grid_aggregated"
-        def _aggregate_cells(lons, lats, weights, zones):
-            cell_coords = np.column_stack([np.round(lons * kx / 1.0), np.round(lats * ky / 1.0), zones])
-            unique_cells, inv = np.unique(cell_coords, axis=0, return_inverse=True)
-            w_sum = np.bincount(inv, weights=weights)
-            lons_sum = np.bincount(inv, weights=weights * lons)
-            lats_sum = np.bincount(inv, weights=weights * lats)
-            agg_w = w_sum / max(1e-12, w_sum.sum())
-            agg_lons = lons_sum / np.maximum(w_sum, 1e-12)
-            agg_lats = lats_sum / np.maximum(w_sum, 1e-12)
-            agg_zones = unique_cells[:, 2].astype(int)
-            return agg_lons, agg_lats, agg_w, agg_zones
-
-        calc_orig_lons, calc_orig_lats, calc_orig_w, calc_orig_zones = _aggregate_cells(orig_lons, orig_lats, orig_w, orig_zones)
-        calc_dest_lons, calc_dest_lats, calc_dest_w, calc_dest_zones = _aggregate_cells(dest_lons, dest_lats, dest_w, dest_zones)
-    else:
-        calc_orig_lons, calc_orig_lats, calc_orig_w, calc_orig_zones = orig_lons, orig_lats, orig_w, orig_zones
-        calc_dest_lons, calc_dest_lats, calc_dest_w, calc_dest_zones = dest_lons, dest_lats, dest_w, dest_zones
-
-    rlat_o = np.radians(calc_orig_lats)
-    rlon_o = np.radians(calc_orig_lons)
-    rlat_d = np.radians(calc_dest_lats)
-    rlon_d = np.radians(calc_dest_lons)
-
-    chunk_size = 500
+    # Chunking dinámico adaptativo para mantener uso de RAM < 20 MB y streaming exacto
+    target_elements_per_chunk = 2_000_000
+    chunk_size = max(50, min(1000, target_elements_per_chunk // max(1, len(dest_lons))))
     admissible_pairs_count = 0
-    has_alternative_destinations = len(calc_dest_lons) > 1
 
-    for start_idx in range(0, len(calc_orig_lons), chunk_size):
-        end_idx = min(start_idx + chunk_size, len(calc_orig_lons))
+    for start_idx in range(0, len(orig_lons), chunk_size):
+        end_idx = min(start_idx + chunk_size, len(orig_lons))
+        chunk_len = end_idx - start_idx
+
         chunk_lat_o = rlat_o[start_idx:end_idx, np.newaxis]
         chunk_lon_o = rlon_o[start_idx:end_idx, np.newaxis]
-        chunk_w_o = calc_orig_w[start_idx:end_idx, np.newaxis]
-        chunk_z_o = calc_orig_zones[start_idx:end_idx, np.newaxis]
+        chunk_w_o = orig_w[start_idx:end_idx, np.newaxis]
+        chunk_z_o = orig_zones[start_idx:end_idx, np.newaxis]
 
         dlat = rlat_d[np.newaxis, :] - chunk_lat_o
         dlon = rlon_d[np.newaxis, :] - chunk_lon_o
@@ -2094,19 +2176,21 @@ def _calibrate_beta_from_demand_points(
 
         # Admisibilidad idéntica a Furness:
         # 1. Zonas aisladas: orígenes en zona z solo viajan a destinos en la misma zona z
-        zone_mask = (chunk_z_o == calc_dest_zones[np.newaxis, :])
+        zone_mask = (chunk_z_o == dest_zones[np.newaxis, :])
         # 2. Truncamiento por distancia máxima
         dist_mask = (d_km <= effective_max_dist)
-        # 3. Exclusión de auto-viajes idénticos cuando existen alternativas
-        if has_alternative_destinations:
-            self_mask = (d_km >= 0.05)
-        else:
-            self_mask = np.ones_like(dist_mask, dtype=bool)
+        # 3. Supresión de auto-viajes idénticos cuando hay alternativas en la zona (idéntico a Furness)
+        self_mask = np.zeros((chunk_len, len(destinations)), dtype=bool)
+        for local_i, o_idx in enumerate(range(start_idx, end_idx)):
+            z_o = int(orig_zones[o_idx])
+            if dest_count_per_zone.get(z_o, 0) > 1:
+                for d_idx in self_dest_indices[o_idx]:
+                    self_mask[local_i, d_idx] = True
 
-        admissible = zone_mask & dist_mask & self_mask
+        admissible = zone_mask & dist_mask & (~self_mask)
         admissible_pairs_count += int(np.sum(admissible))
 
-        pair_w = np.where(admissible, chunk_w_o * calc_dest_w[np.newaxis, :], 0.0)
+        pair_w = np.where(admissible, chunk_w_o * dest_w[np.newaxis, :], 0.0)
         bin_idx = np.clip((d_km / BIN_WIDTH).astype(np.int64), 0, num_bins - 1)
         np.add.at(H, bin_idx, pair_w)
 
@@ -2260,7 +2344,7 @@ def _calibrate_beta_from_demand_points(
             "calibrated_median_km": round(calibrated_median_km, 2),
             "calibration_confidence": round(conf_factor, 2),
             "calibration_status": calib_status,
-            "pair_mode": pair_mode,
+            "pair_mode": "exact_chunked",
             "max_distance_km": round(effective_max_dist, 1),
             "admissible_pairs": admissible_pairs_count,
             "beta_bounds": [BETA_MIN, BETA_MAX],
@@ -2276,7 +2360,7 @@ def recommend_gravity_beta(
     city_archetype: Optional[str] = None,
     demand_points: Optional[List[Dict]] = None,
     isolated_zones: Optional[List[Dict]] = None,
-    max_distance_km: float = 55.0
+    max_distance_km: Any = 55.0
 ) -> Dict[str, Any]:
     """
     Recomienda el coeficiente de fricción espacial óptimo (beta) según:
@@ -2327,11 +2411,12 @@ def recommend_gravity_beta(
 
     # Intentar calibración analítica de alta fidelidad con demand_points si están presentes
     if demand_points:
+        sanitized_max_dist = sanitize_max_distance_km(max_distance_km, default=55.0)
         calib = _calibrate_beta_from_demand_points(
             demand_points=demand_points,
             bbox=bbox,
             isolated_zones=isolated_zones,
-            max_distance_km=max_distance_km
+            max_distance_km=sanitized_max_dist
         )
         if calib is not None:
             return calib
