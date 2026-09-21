@@ -913,13 +913,11 @@ def load_cpv_demography(
     if not unique_paths:
         raise ValueError("No se pudo cargar ningún archivo censal válido.")
 
-    # Derivar municipios objetivo desde DENUE / growth_factors para filtrado temprano en RAM
+    # Derivar municipios objetivo exclusivamente desde DENUE (área BBOX) para filtrado temprano en RAM
     target_muns = set()
     if df_denue is not None and not df_denue.empty and 'cve_mun_clean' in df_denue.columns:
         valid_m = df_denue['cve_mun_clean'].dropna().astype(str).str.strip()
         target_muns = {m for m in valid_m if m and m != "-1"}
-    if growth_factors:
-        target_muns.update(str(k).strip() for k in growth_factors.keys() if str(k).strip() and str(k).strip() != "-1")
 
     valid_chunks = []
 
