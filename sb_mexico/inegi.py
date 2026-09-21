@@ -958,6 +958,7 @@ def load_cpv_demography(
         for enc in enc_candidates:
             if file_loaded or file_has_error:
                 break
+            reader = None
             try:
                 if is_excel:
                     reader = [df_temp]
@@ -972,7 +973,6 @@ def load_cpv_demography(
                     )
 
                 file_chunks = []
-                file_has_error = False
 
                 for chunk in reader:
                     chunk.columns = [str(c).strip().upper() for c in chunk.columns]
@@ -1064,6 +1064,12 @@ def load_cpv_demography(
             except Exception as e:
                 print(f"[WARN] Error procesando archivo censal ({os.path.basename(path)}): {e}")
                 break
+            finally:
+                if reader is not None and hasattr(reader, 'close'):
+                    try:
+                        reader.close()
+                    except Exception:
+                        pass
 
     if not valid_chunks:
         raise ValueError("No se pudo cargar ningún archivo censal válido.")

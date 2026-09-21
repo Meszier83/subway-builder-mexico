@@ -391,7 +391,8 @@ class TestInegi(unittest.TestCase):
             os.remove(tmp)
 
     def test_load_cpv_demography_heterogeneous_files_tolerance(self):
-        """Un archivo censal con columnas faltantes no debe abortar la carga de archivos válidos posteriores."""
+        """Un archivo censal con columnas faltantes no debe abortar la carga de archivos válidos posteriores ni dejar file descriptors abiertos."""
+        import warnings
         bbox = {"min_lon": -87.0, "min_lat": 21.0, "max_lon": -86.7, "max_lat": 21.3}
         df_denue = pd.DataFrame([
             {"cve_mun_clean": "23005", "ageb_clean": "0001", "mza_clean": "1", "lon": -86.85, "lat": 21.15, "calibrated_jobs": 50.0},
@@ -408,10 +409,14 @@ class TestInegi(unittest.TestCase):
             f2.write(content_val)
             tmp2 = f2.name
         try:
-            # Debe procesar tmp2 ignorando tmp1
-            df_geo = load_cpv_demography([tmp1, tmp2], df_denue, bbox, tasa_pea=0.65)
-            self.assertEqual(len(df_geo), 1)
-            self.assertAlmostEqual(df_geo.iloc[0]['lon'], -86.85)
+            # Debe procesar tmp2 ignorando tmp1 y cerrar todos los file readers sin ResourceWarning
+            with warnings.catch_warnings(record=True) as recorded_warnings:
+                warnings.simplefilter("always")
+                df_geo = load_cpv_demography([tmp1, tmp2], df_denue, bbox, tasa_pea=0.65)
+                self.assertEqual(len(df_geo), 1)
+                self.assertAlmostEqual(df_geo.iloc[0]['lon'], -86.85)
+                resource_warnings = [w for w in recorded_warnings if issubclass(w.category, ResourceWarning)]
+                self.assertEqual(len(resource_warnings), 0, "No debe dejarse abierto ningún TextFileReader al omitir un archivo inválido")
         finally:
             os.remove(tmp1)
             os.remove(tmp2)
@@ -433,7 +438,7 @@ class TestInegi(unittest.TestCase):
             os.remove(tmp)
 
     def test_load_cpv_demography_late_cp1252_byte(self):
-        """Archivo CP1252 cuyo byte no-ASCII aparece después de los primeros 100 KB de ASCII puro."""
+        """Archivo CP1252 cuyo byte no-ASCII aparece después de 288 KB (> muestra inicial de 256 KB)."""
         bbox = {"min_lon": -87.0, "min_lat": 21.0, "max_lon": -86.7, "max_lat": 21.3}
         df_denue = pd.DataFrame([
             {"cve_mun_clean": "23005", "ageb_clean": "0001", "mza_clean": "1", "lon": -86.85, "lat": 21.15, "calibrated_jobs": 50.0},
@@ -441,9 +446,9 @@ class TestInegi(unittest.TestCase):
         with tempfile.NamedTemporaryFile(mode='wb', suffix='.csv', delete=False) as f:
             # Cabecera estándar
             f.write(b"ENTIDAD,MUN,AGEB,MZA,POBTOT,P_15YMAS\n")
-            # 100 KB de líneas dummy de padding ASCII
+            # 288 KB de líneas dummy de padding ASCII (16,000 * 18 bytes) para exceder los 256 KB de _detect_cpv_format
             dummy_row = b"23,005,0001,1,0,0\n"
-            f.write(dummy_row * 5000)
+            f.write(dummy_row * 16000)
             # Fila censal con población
             f.write(b"23,005,0001,1,100,70\n")
             # Byte no-ASCII en CP1252 (0xf3 = 'o' con acento)
