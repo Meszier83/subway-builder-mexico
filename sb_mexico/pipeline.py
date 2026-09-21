@@ -519,9 +519,30 @@ def execute_pipeline(
 
     console.print(f"-> Escala canónica de cohortes: [cyan]min_pop_size = {min_pop_size} | target_pop_size = {target_pop_size} | max_pop_size = {max_pop_size} | seed = {seed}[/cyan] (PEA Total: {total_pea:,})")
 
+    config_beta = macro.get("gravity_beta")
+    beta_diag = recommend_gravity_beta(bbox=bbox_list, demand_points=demand_points)
+    is_auto = config_beta is None or str(config_beta).strip().lower() in ("auto", "none", "")
+
+    if is_auto:
+        effective_beta = float(beta_diag.get("recommended_beta", 0.12))
+        rec_m = beta_diag.get("metrics", {})
+        console.print(
+            f"-> Fricción espacial [bold green]AUTO-CALIBRADA[/]: beta = [bold green]{effective_beta:.3f}[/] "
+            f"({beta_diag.get('label', '')} | Rg = {rec_m.get('combined_rg_km', 0.0):.1f} km, "
+            f"Elongación = {rec_m.get('elongation_ratio', 1.0):.1f}x, "
+            f"Mediana esperada: {beta_diag.get('expected_median_km', 'N/A')})"
+        )
+    else:
+        effective_beta = float(config_beta)
+        rec_val = beta_diag.get("recommended_beta", 0.12)
+        console.print(
+            f"-> Fricción espacial YAML: [cyan]beta = {effective_beta:.3f}[/] "
+            f"(Calibración morfológica sugerida: {rec_val:.3f} [{beta_diag.get('label', '')}])"
+        )
+
     raw_pops = simulate_gravity_demand(
         demand_points=demand_points,
-        beta=macro.get("gravity_beta", 0.12),
+        beta=effective_beta,
         max_distance_km=macro.get("max_distance_km", 55.0),
         min_pop_size=min_pop_size,
         max_pop_size=max_pop_size,

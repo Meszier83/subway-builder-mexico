@@ -1883,14 +1883,334 @@ def calculate_commute_distance_distribution(
     }
 
 
+def _calibrate_beta_from_demand_points(
+    demand_points: List[Dict],
+    bbox: Optional[List[float]] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Calibra analítica y empíricamente el coeficiente de fricción espacial (beta)
+    analizando la dispersión morfológica de centroides de demanda (PEA residencial
+    y puestos de trabajo ordinarios).
+    """
+    if not demand_points or not isinstance(demand_points, list):
+        return None
+
+    origins = []
+    destinations = []
+    for p in demand_points:
+        if not isinstance(p, dict):
+            continue
+        loc = p.get("location")
+        if not loc or len(loc) < 2:
+            continue
+        try:
+            lon, lat = float(loc[0]), float(loc[1])
+            if not (math.isfinite(lon) and math.isfinite(lat)):
+                continue
+        except (ValueError, TypeError):
+            continue
+
+        pea = float(p.get("pea_15ymas", 0) or 0)
+        jobs = float(p.get("jobs", 0) or 0)
+        is_special = bool(p.get("is_special", False))
+
+        if pea > 0:
+            origins.append({"lon": lon, "lat": lat, "pea": pea, "id": p.get("id")})
+        if jobs > 0 and not is_special:
+            destinations.append({"lon": lon, "lat": lat, "jobs": jobs, "id": p.get("id")})
+
+    if len(origins) < 2 or len(destinations) < 2:
+        return None
+
+    total_pea = sum(o["pea"] for o in origins)
+    total_jobs = sum(d["jobs"] for d in destinations)
+    if total_pea <= 0 or total_jobs <= 0:
+        return None
+
+    orig_lons = np.array([o["lon"] for o in origins], dtype=np.float64)
+    orig_lats = np.array([o["lat"] for o in origins], dtype=np.float64)
+    orig_pea = np.array([o["pea"] for o in origins], dtype=np.float64)
+
+    dest_lons = np.array([d["lon"] for d in destinations], dtype=np.float64)
+    dest_lats = np.array([d["lat"] for d in destinations], dtype=np.float64)
+    dest_jobs = np.array([d["jobs"] for d in destinations], dtype=np.float64)
+
+    orig_w = orig_pea / total_pea
+    dest_w = dest_jobs / total_jobs
+
+    # Centro de masa combinado (ponderación 50% PEA y 50% Empleo para evitar sesgo de escala)
+    comb_lons = np.concatenate([orig_lons, dest_lons])
+    comb_lats = np.concatenate([orig_lats, dest_lats])
+    comb_w = np.concatenate([0.5 * orig_w, 0.5 * dest_w])
+
+    center_lon = float(np.sum(comb_w * comb_lons))
+    center_lat = float(np.sum(comb_w * comb_lats))
+
+    # Proyección equirrectangular métrica en km centrada en el baricentro
+    cos_lat = math.cos(math.radians(center_lat))
+    kx = 111.320 * cos_lat
+    ky = 110.574
+
+    orig_x = (orig_lons - center_lon) * kx
+    orig_y = (orig_lats - center_lat) * ky
+    dest_x = (dest_lons - center_lon) * kx
+    dest_y = (dest_lats - center_lat) * ky
+    comb_x = np.concatenate([orig_x, dest_x])
+    comb_y = np.concatenate([orig_y, dest_y])
+
+    # Centroides y radios de giro separados
+    mu_o_x, mu_o_y = float(np.sum(orig_w * orig_x)), float(np.sum(orig_w * orig_y))
+    mu_d_x, mu_d_y = float(np.sum(dest_w * dest_x)), float(np.sum(dest_w * dest_y))
+    centroid_sep_km = float(math.hypot(mu_o_x - mu_d_x, mu_o_y - mu_d_y))
+
+    orig_dx = orig_x - mu_o_x
+    orig_dy = orig_y - mu_o_y
+    origin_rg_km = float(math.sqrt(max(0.0, np.sum(orig_w * (orig_dx**2 + orig_dy**2)))))
+
+    dest_dx = dest_x - mu_d_x
+    dest_dy = dest_y - mu_d_y
+    dest_rg_km = float(math.sqrt(max(0.0, np.sum(dest_w * (dest_dx**2 + dest_dy**2)))))
+
+    # Tensor de dispersión espacial combinado y elongación
+    var_xx = float(np.sum(comb_w * comb_x**2))
+    var_yy = float(np.sum(comb_w * comb_y**2))
+    cov_xy = float(np.sum(comb_w * comb_x * comb_y))
+    combined_rg_km = float(math.sqrt(max(0.0, var_xx + var_yy)))
+
+    trace = var_xx + var_yy
+    diff = var_xx - var_yy
+    delta = math.sqrt(diff**2 + 4.0 * cov_xy**2)
+    lambda1 = max(0.0, (trace + delta) / 2.0)
+    lambda2 = max(0.0, (trace - delta) / 2.0)
+
+    major_axis_km = float(math.sqrt(lambda1))
+    minor_axis_km = float(math.sqrt(lambda2))
+    elongation_ratio = float(major_axis_km / max(minor_axis_km, 0.05))
+
+    orientation_rad = 0.5 * math.atan2(2.0 * cov_xy, diff)
+    orientation_deg = float(math.degrees(orientation_rad) % 180.0)
+
+    # Tamaño de muestra efectivo (ESS)
+    ess_o = float(1.0 / max(1e-12, np.sum(orig_w**2)))
+    ess_d = float(1.0 / max(1e-12, np.sum(dest_w**2)))
+    conf_factor = float(min(1.0, ess_o / 20.0, ess_d / 20.0))
+
+    # Matriz / Histograma de distancias de oportunidad (Haversine en bloques de 0.25 km)
+    BIN_WIDTH = 0.25
+    MAX_HIST_KM = 160.0
+    num_bins = int(MAX_HIST_KM / BIN_WIDTH)
+    H = np.zeros(num_bins, dtype=np.float64)
+    bin_centers = (np.arange(num_bins, dtype=np.float64) + 0.5) * BIN_WIDTH
+
+    total_pairs = len(origins) * len(destinations)
+    pair_mode = "exact_chunked"
+
+    # Si la cantidad de pares es gigantesca (> 4M), agregamos previamente en celdas de 1 km
+    if total_pairs > 4_000_000:
+        pair_mode = "grid_aggregated"
+        def _aggregate_cells(lons, lats, weights):
+            cell_coords = np.column_stack([np.round(lons * kx / 1.0), np.round(lats * ky / 1.0)])
+            unique_cells, inv = np.unique(cell_coords, axis=0, return_inverse=True)
+            w_sum = np.bincount(inv, weights=weights)
+            lons_sum = np.bincount(inv, weights=weights * lons)
+            lats_sum = np.bincount(inv, weights=weights * lats)
+            agg_w = w_sum / max(1e-12, w_sum.sum())
+            agg_lons = lons_sum / np.maximum(w_sum, 1e-12)
+            agg_lats = lats_sum / np.maximum(w_sum, 1e-12)
+            return agg_lons, agg_lats, agg_w
+
+        calc_orig_lons, calc_orig_lats, calc_orig_w = _aggregate_cells(orig_lons, orig_lats, orig_w)
+        calc_dest_lons, calc_dest_lats, calc_dest_w = _aggregate_cells(dest_lons, dest_lats, dest_w)
+    else:
+        calc_orig_lons, calc_orig_lats, calc_orig_w = orig_lons, orig_lats, orig_w
+        calc_dest_lons, calc_dest_lats, calc_dest_w = dest_lons, dest_lats, dest_w
+
+    rlat_o = np.radians(calc_orig_lats)
+    rlon_o = np.radians(calc_orig_lons)
+    rlat_d = np.radians(calc_dest_lats)
+    rlon_d = np.radians(calc_dest_lons)
+
+    chunk_size = 500
+    for start_idx in range(0, len(calc_orig_lons), chunk_size):
+        end_idx = min(start_idx + chunk_size, len(calc_orig_lons))
+        chunk_lat_o = rlat_o[start_idx:end_idx, np.newaxis]
+        chunk_lon_o = rlon_o[start_idx:end_idx, np.newaxis]
+        chunk_w_o = calc_orig_w[start_idx:end_idx, np.newaxis]
+
+        dlat = rlat_d[np.newaxis, :] - chunk_lat_o
+        dlon = rlon_d[np.newaxis, :] - chunk_lon_o
+        a = np.sin(dlat / 2.0)**2 + np.cos(chunk_lat_o) * np.cos(rlat_d[np.newaxis, :]) * np.sin(dlon / 2.0)**2
+        d_km = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
+
+        pair_w = chunk_w_o * calc_dest_w[np.newaxis, :]
+        bin_idx = np.clip((d_km / BIN_WIDTH).astype(np.int64), 0, num_bins - 1)
+        np.add.at(H, bin_idx, pair_w)
+
+    h_sum = H.sum()
+    if h_sum <= 0:
+        return None
+    H /= h_sum
+
+    opportunity_mean_km = float(np.sum(H * bin_centers))
+    cum_h = np.cumsum(H)
+
+    def _interp_pct(pct_val: float) -> float:
+        idx = int(np.searchsorted(cum_h, pct_val))
+        if idx == 0:
+            return float(bin_centers[0])
+        idx = min(idx, num_bins - 1)
+        prev_c = cum_h[idx - 1]
+        curr_c = cum_h[idx]
+        denom = max(1e-12, curr_c - prev_c)
+        alpha = (pct_val - prev_c) / denom
+        return float(bin_centers[idx - 1] + alpha * BIN_WIDTH)
+
+    opportunity_median_km = _interp_pct(0.50)
+    opportunity_p75_km = _interp_pct(0.75)
+    opportunity_rms_km = float(math.sqrt(max(0.0, origin_rg_km**2 + dest_rg_km**2 + centroid_sep_km**2)))
+
+    # Diagonal de BBOX (referencial)
+    diag_km = 40.0
+    if bbox and len(bbox) == 4:
+        min_lon, min_lat, max_lon, max_lat = [float(x) for x in bbox]
+        rlat1, rlon1 = math.radians(min_lat), math.radians(min_lon)
+        rlat2, rlon2 = math.radians(max_lat), math.radians(max_lon)
+        a_b = math.sin((rlat2 - rlat1) / 2.0)**2 + math.cos(rlat1) * math.cos(rlat2) * math.sin((rlon2 - rlon1) / 2.0)**2
+        diag_km = float(6371.0 * 2.0 * math.asin(math.sqrt(max(0.0, min(1.0, a_b)))))
+
+    # Clasificación Morfológica en Arquetipos
+    is_linear = (elongation_ratio >= 2.25 and major_axis_km >= 8.0 and opportunity_p75_km >= 14.0)
+
+    if is_linear:
+        archetype = "corredor_lineal"
+        label = "Conurbación Lineal / Corredor Turístico-Industrial"
+        target_median_km = 12.0
+        beta_prior = 0.095
+        expected_median_km = "14 – 18 km"
+        rationale = f"Corredor lineal detectado (elongación={elongation_ratio:.2f}x, eje mayor={major_axis_km:.1f} km, P75 OD={opportunity_p75_km:.1f} km)."
+    elif not is_linear and (combined_rg_km >= 15.0 or opportunity_mean_km >= 22.0 or opportunity_p75_km >= 30.0):
+        archetype = "megaciudad"
+        label = "Megaciudad / Conurbación Metropolitana Masiva"
+        target_median_km = 16.0
+        beta_prior = 0.085
+        expected_median_km = "18 – 25 km"
+        rationale = f"Conurbación metropolitana masiva (Rg={combined_rg_km:.1f} km, media OD={opportunity_mean_km:.1f} km)."
+    elif combined_rg_km <= 8.0 and opportunity_mean_km <= 12.0 and centroid_sep_km <= 6.0:
+        archetype = "compacta"
+        label = "Ciudad Monocéntrica Compacta"
+        target_median_km = 5.5
+        beta_prior = 0.150
+        expected_median_km = "6 – 9 km"
+        rationale = f"Morfología concentrada monocéntrica (Rg={combined_rg_km:.1f} km, media OD={opportunity_mean_km:.1f} km)."
+    else:
+        archetype = "intermedia"
+        label = "Metrópoli Policéntrica Intermedia"
+        target_median_km = 8.5
+        beta_prior = 0.120
+        expected_median_km = "10 – 15 km"
+        rationale = f"Escala metropolitana intermedia (Rg={combined_rg_km:.1f} km, media OD={opportunity_mean_km:.1f} km)."
+
+    # La mediana objetivo no puede superar la fracción física de oportunidad de la conurbación
+    target_median_eff = min(target_median_km, 0.70 * opportunity_median_km)
+
+    # Calibración Numérica por Bisección sobre H_beta(d) = H(d) * exp(-beta * d)
+    def _eval_median_for_beta(b_val: float) -> float:
+        w_b = H * np.exp(-b_val * bin_centers)
+        s_b = w_b.sum()
+        if s_b <= 0:
+            return 0.0
+        c_b = np.cumsum(w_b) / s_b
+        idx = int(np.searchsorted(c_b, 0.50))
+        if idx == 0:
+            return float(bin_centers[0])
+        idx = min(idx, num_bins - 1)
+        prev_c = c_b[idx - 1]
+        curr_c = c_b[idx]
+        denom = max(1e-12, curr_c - prev_c)
+        alpha = (0.50 - prev_c) / denom
+        return float(bin_centers[idx - 1] + alpha * BIN_WIDTH)
+
+    BETA_MIN = 0.065
+    BETA_MAX = 0.180
+    med_at_min = _eval_median_for_beta(BETA_MIN)
+    med_at_max = _eval_median_for_beta(BETA_MAX)
+
+    if target_median_eff >= med_at_min:
+        beta_emp = BETA_MIN
+        calib_status = "bounded_min"
+    elif target_median_eff <= med_at_max:
+        beta_emp = BETA_MAX
+        calib_status = "bounded_max"
+    else:
+        # Bisección (16 iteraciones dan precisión < 0.0001)
+        low_b, high_b = BETA_MIN, BETA_MAX
+        for _ in range(16):
+            mid_b = (low_b + high_b) / 2.0
+            mid_med = _eval_median_for_beta(mid_b)
+            if mid_med > target_median_eff:
+                low_b = mid_b
+            else:
+                high_b = mid_b
+        beta_emp = (low_b + high_b) / 2.0
+        calib_status = "solved"
+
+    calibrated_median_km = float(_eval_median_for_beta(beta_emp))
+
+    # Regularización con prior según ESS
+    beta_final = float(np.clip((1.0 - conf_factor) * beta_prior + conf_factor * beta_emp, BETA_MIN, BETA_MAX))
+    rec_beta = round(beta_final, 3)
+
+    return {
+        "recommended_beta": rec_beta,
+        "archetype": archetype,
+        "label": label,
+        "metrics": {
+            "method": "demand_points",
+            "origin_count": len(origins),
+            "destination_count": len(destinations),
+            "total_pea": float(total_pea),
+            "total_jobs": float(total_jobs),
+            "effective_origins": round(ess_o, 1),
+            "effective_destinations": round(ess_d, 1),
+            "center_lon": round(center_lon, 5),
+            "center_lat": round(center_lat, 5),
+            "origin_rg_km": round(origin_rg_km, 2),
+            "destination_rg_km": round(dest_rg_km, 2),
+            "combined_rg_km": round(combined_rg_km, 2),
+            "major_axis_km": round(major_axis_km, 2),
+            "minor_axis_km": round(minor_axis_km, 2),
+            "elongation_ratio": round(elongation_ratio, 2),
+            "orientation_deg": round(orientation_deg, 1),
+            "centroid_separation_km": round(centroid_sep_km, 2),
+            "opportunity_mean_km": round(opportunity_mean_km, 2),
+            "opportunity_median_km": round(opportunity_median_km, 2),
+            "opportunity_p75_km": round(opportunity_p75_km, 2),
+            "opportunity_rms_km": round(opportunity_rms_km, 2),
+            "target_median_km": round(target_median_eff, 2),
+            "calibrated_median_km": round(calibrated_median_km, 2),
+            "calibration_confidence": round(conf_factor, 2),
+            "calibration_status": calib_status,
+            "pair_mode": pair_mode,
+            "beta_bounds": [BETA_MIN, BETA_MAX],
+            "bbox_diagonal_km": round(diag_km, 1)
+        },
+        "expected_median_km": expected_median_km,
+        "rationale": rationale
+    }
+
+
 def recommend_gravity_beta(
     bbox: Optional[List[float]] = None,
-    city_archetype: Optional[str] = None
+    city_archetype: Optional[str] = None,
+    demand_points: Optional[List[Dict]] = None
 ) -> Dict[str, Any]:
     """
-    Recomienda el coeficiente de fricción espacial óptimo (beta) según la extensión
-    geográfica (diagonal del BBOX) o el arquetipo urbano de la metrópoli.
-    Emula la calibración empírica oficial de Colin Miller en Subway Builder.
+    Recomienda el coeficiente de fricción espacial óptimo (beta) según:
+    1. Override manual de arquetipo urbano (city_archetype).
+    2. Calibración analítica y empírica a partir de la malla espacial de centroides
+       de demanda (demand_points).
+    3. Fallback heurístico por diagonal del BBOX si no se dispone de centroides.
+    Emula y expande la calibración empírica oficial de Colin Miller en Subway Builder.
     """
     arch = str(city_archetype or "").strip().lower()
 
@@ -1900,7 +2220,8 @@ def recommend_gravity_beta(
             "label": "Ciudad Compacta",
             "recommended_beta": 0.150,
             "expected_median_km": "6 – 9 km",
-            "rationale": "Metrópoli concentrada o costera. Fricción alta para evitar dispersión ficticia hacia la periferia rural."
+            "rationale": "Metrópoli concentrada o costera. Fricción alta para evitar dispersión ficticia hacia la periferia rural.",
+            "metrics": {"method": "explicit_archetype"}
         }
     elif arch in ["megaciudad", "metropolis", "megacity", "extendida"]:
         return {
@@ -1908,7 +2229,17 @@ def recommend_gravity_beta(
             "label": "Megaciudad Extendida",
             "recommended_beta": 0.085,
             "expected_median_km": "18 – 25 km",
-            "rationale": "Gran valle conurbado con múltiples municipios. Fricción reducida para permitir flujos metropolitanos de largo alcance."
+            "rationale": "Gran valle conurbado con múltiples municipios. Fricción reducida para permitir flujos metropolitanos de largo alcance.",
+            "metrics": {"method": "explicit_archetype"}
+        }
+    elif arch in ["corredor", "corredor_lineal", "lineal", "linear"]:
+        return {
+            "archetype": "corredor_lineal",
+            "label": "Conurbación Lineal / Corredor Turístico-Industrial",
+            "recommended_beta": 0.095,
+            "expected_median_km": "14 – 18 km",
+            "rationale": "Corredor intermunicipal lineal. Fricción modulada para permitir interacción entre polos funcionales contiguos.",
+            "metrics": {"method": "explicit_archetype"}
         }
     elif arch in ["intermedia", "intermediate", "media"]:
         return {
@@ -1916,9 +2247,17 @@ def recommend_gravity_beta(
             "label": "Metrópoli Intermedia",
             "recommended_beta": 0.120,
             "expected_median_km": "10 – 15 km",
-            "rationale": "Escala metropolitana estándar con balance entre centralidad y expansión suburbana."
+            "rationale": "Escala metropolitana estándar con balance entre centralidad y expansión suburbana.",
+            "metrics": {"method": "explicit_archetype"}
         }
 
+    # Intentar calibración analítica de alta fidelidad con demand_points si están presentes
+    if demand_points:
+        calib = _calibrate_beta_from_demand_points(demand_points, bbox=bbox)
+        if calib is not None:
+            return calib
+
+    # Fallback BBOX heurístico
     diag_km = 40.0
     if bbox and len(bbox) == 4:
         min_lon, min_lat, max_lon, max_lat = [float(x) for x in bbox]
@@ -1936,7 +2275,8 @@ def recommend_gravity_beta(
             "diagonal_km": round(diag_km, 1),
             "recommended_beta": 0.150,
             "expected_median_km": "6 – 9 km",
-            "rationale": f"BBOX diagonal de {diag_km:.1f} km (< 28 km). Perfil compacto detectado."
+            "rationale": f"BBOX diagonal de {diag_km:.1f} km (< 28 km). Perfil compacto detectado.",
+            "metrics": {"method": "bbox_fallback", "bbox_diagonal_km": round(diag_km, 1)}
         }
     elif diag_km > 65.0:
         return {
@@ -1945,7 +2285,8 @@ def recommend_gravity_beta(
             "diagonal_km": round(diag_km, 1),
             "recommended_beta": 0.085,
             "expected_median_km": "18 – 25 km",
-            "rationale": f"BBOX diagonal de {diag_km:.1f} km (> 65 km). Conurbación masiva detectada."
+            "rationale": f"BBOX diagonal de {diag_km:.1f} km (> 65 km). Conurbación masiva detectada.",
+            "metrics": {"method": "bbox_fallback", "bbox_diagonal_km": round(diag_km, 1)}
         }
     else:
         return {
@@ -1954,6 +2295,7 @@ def recommend_gravity_beta(
             "diagonal_km": round(diag_km, 1),
             "recommended_beta": 0.120,
             "expected_median_km": "10 – 15 km",
-            "rationale": f"BBOX diagonal de {diag_km:.1f} km (28–65 km). Escala metropolitana típica."
+            "rationale": f"BBOX diagonal de {diag_km:.1f} km (28–65 km). Escala metropolitana típica.",
+            "metrics": {"method": "bbox_fallback", "bbox_diagonal_km": round(diag_km, 1)}
         }
 
