@@ -244,6 +244,130 @@ class TestInegi(unittest.TestCase):
         finally:
             os.remove(tmp)
 
+    def test_load_cpv_demography_semicolon_and_cp1252(self):
+        bbox = {"min_lon": -87.0, "min_lat": 21.0, "max_lon": -86.7, "max_lat": 21.3}
+        df_denue = pd.DataFrame([
+            {"cve_mun_clean": "23005", "ageb_clean": "0001", "mza_clean": "1", "lon": -86.85, "lat": 21.15, "calibrated_jobs": 50.0},
+        ])
+        content = (
+            "ENTIDAD;MUN;AGEB;MZA;POBTOT;P_15YMAS\n"
+            "23;005;0001;1;120;90\n"
+        )
+        with tempfile.NamedTemporaryFile(mode='wb', suffix='.csv', delete=False) as f:
+            f.write(content.encode('cp1252'))
+            tmp = f.name
+        try:
+            df_geo = load_cpv_demography(tmp, df_denue, bbox, tasa_pea=0.65)
+            self.assertEqual(len(df_geo), 1)
+            self.assertAlmostEqual(df_geo.iloc[0]['lon'], -86.85, places=3)
+            self.assertAlmostEqual(df_geo.iloc[0]['pobtot_adj'], 120.0)
+            self.assertAlmostEqual(df_geo.iloc[0]['pea_real'], 90.0 * 0.65)
+        finally:
+            os.remove(tmp)
+
+    def test_load_cpv_demography_mza_asterisk_and_clamping(self):
+        bbox = {"min_lon": -87.0, "min_lat": 21.0, "max_lon": -86.7, "max_lat": 21.3}
+        df_denue = pd.DataFrame([
+            {"cve_mun_clean": "23005", "ageb_clean": "0001", "mza_clean": "1", "lon": -86.85, "lat": 21.15, "calibrated_jobs": 50.0},
+            {"cve_mun_clean": "23005", "ageb_clean": "0001", "mza_clean": "2", "lon": -86.86, "lat": 21.16, "calibrated_jobs": 30.0},
+        ])
+        # Fila 1: Manzana 1 legítima (POBTOT 50)
+        # Fila 2: MZA '*' (confidencial/resumen) -> NO debe asociarse a Manzana 1, debe descartarse
+        # Fila 3: Manzana 2 legítima donde P_15YMAS (60) > POBTOT (40) -> debe clampearse a 40
+        # Fila 4: Manzana 3 legítima con '*' en POBTOT y P_15YMAS -> 1.5 y 1.0
+        # Fila 5: MZA '000' (resumen de AGEB) -> debe descartarse
+        df_censo = pd.DataFrame([
+            {"ENTIDAD": "23", "MUN": "005", "AGEB": "0001", "MZA": "1", "POBTOT": "50", "P_15YMAS": "30"},
+            {"ENTIDAD": "23", "MUN": "005", "AGEB": "0001", "MZA": "*", "POBTOT": "999", "P_15YMAS": "500"},
+            {"ENTIDAD": "23", "MUN": "005", "AGEB": "0001", "MZA": "2", "POBTOT": "40", "P_15YMAS": "60"},
+            {"ENTIDAD": "23", "MUN": "005", "AGEB": "0001", "MZA": "3", "POBTOT": "*", "P_15YMAS": "*"},
+            {"ENTIDAD": "23", "MUN": "005", "AGEB": "0001", "MZA": "000", "POBTOT": "5000", "P_15YMAS": "3000"},
+        ])
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as f:
+            df_censo.to_csv(f.name, index=False)
+            tmp = f.name
+        try:
+            df_geo = load_cpv_demography(tmp, df_denue, bbox, tasa_pea=0.5)
+            # Solo deben pasar Manzana 1, 2 y 3 (todas dentro del AGEB 0001 en BBOX)
+            self.assertEqual(len(df_geo), 3)
+            # Manzana 1 no absorbió la fila con MZA '*'
+            row1 = df_geo[df_geo['mza_clean'] == '1'].iloc[0]
+            self.assertAlmostEqual(row1['pobtot_adj'], 50.0)
+
+            # Manzana 2: P_15YMAS debe estar clampeada a POBTOT (40)
+            row2 = df_geo[df_geo['mza_clean'] == '2'].iloc[0]
+            self.assertAlmostEqual(row2['pobtot_adj'], 40.0)
+            self.assertAlmostEqual(row2['pob15_adj'], 40.0)
+            self.assertAlmostEqual(row2['pea_real'], 20.0)
+
+            # Manzana 3: POBTOT 1.5, P_15YMAS 1.0
+            row3 = df_geo[df_geo['mza_clean'] == '3'].iloc[0]
+            self.assertAlmostEqual(row3['pobtot_adj'], 1.5)
+            self.assertAlmostEqual(row3['pob15_adj'], 1.0)
+            self.assertAlmostEqual(row3['pea_real'], 0.5)
+        finally:
+            os.remove(tmp)
+
+    def test_load_cpv_demography_duplicate_paths(self):
+        bbox = {"min_lon": -87.0, "min_lat": 21.0, "max_lon": -86.7, "max_lat": 21.3}
+        df_denue = pd.DataFrame([
+            {"cve_mun_clean": "23005", "ageb_clean": "0001", "mza_clean": "1", "lon": -86.85, "lat": 21.15, "calibrated_jobs": 50.0},
+        ])
+        content = "ENTIDAD,MUN,AGEB,MZA,POBTOT,P_15YMAS\n23,005,0001,1,100,70\n"
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as f:
+            f.write(content)
+            tmp = f.name
+        try:
+            df_geo = load_cpv_demography([tmp, tmp], df_denue, bbox, tasa_pea=0.65)
+            self.assertEqual(len(df_geo), 1)
+        finally:
+            os.remove(tmp)
+
+    def test_load_cpv_demography_early_municipal_filter(self):
+        bbox = {"min_lon": -87.0, "min_lat": 21.0, "max_lon": -86.7, "max_lat": 21.3}
+        # Solo municipio 23005 en DENUE
+        df_denue = pd.DataFrame([
+            {"cve_mun_clean": "23005", "ageb_clean": "0001", "mza_clean": "1", "lon": -86.85, "lat": 21.15, "calibrated_jobs": 50.0},
+        ])
+        content = (
+            "ENTIDAD,MUN,AGEB,MZA,POBTOT,P_15YMAS\n"
+            "23,005,0001,1,100,70\n"
+            "23,001,0002,1,500,350\n"  # Cozumel fuera de DENUE target
+            "23,008,0003,1,800,600\n"  # Solidaridad fuera de DENUE target
+        )
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as f:
+            f.write(content)
+            tmp = f.name
+        try:
+            df_geo = load_cpv_demography(tmp, df_denue, bbox, tasa_pea=0.65)
+            # Solo el municipio 23005 debe ingresar a df_geo
+            self.assertEqual(len(df_geo), 1)
+            self.assertEqual(df_geo.iloc[0]['cve_mun_clean'], "23005")
+        finally:
+            os.remove(tmp)
+
+    def test_load_cpv_demography_atomic_coords(self):
+        bbox = {"min_lon": -87.0, "min_lat": 21.0, "max_lon": -86.7, "max_lat": 21.3}
+        # DENUE con coordenadas para AGEB 0001
+        df_denue = pd.DataFrame([
+            {"cve_mun_clean": "23005", "ageb_clean": "0001", "mza_clean": "-1", "lon": -86.80, "lat": 21.10, "calibrated_jobs": 10.0},
+        ])
+        content = (
+            "ENTIDAD,MUN,AGEB,MZA,POBTOT,P_15YMAS\n"
+            "23,005,0001,1,100,70\n"
+        )
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as f:
+            f.write(content)
+            tmp = f.name
+        try:
+            # Imputación por AGEB DENUE (nivel 3): tanto lon como lat provienen atómicamente de DENUE AGEB
+            df_geo = load_cpv_demography(tmp, df_denue, bbox, tasa_pea=0.65)
+            self.assertEqual(len(df_geo), 1)
+            self.assertAlmostEqual(df_geo.iloc[0]['lon'], -86.80)
+            self.assertAlmostEqual(df_geo.iloc[0]['lat'], 21.10)
+        finally:
+            os.remove(tmp)
+
 if __name__ == "__main__":
     unittest.main()
 
