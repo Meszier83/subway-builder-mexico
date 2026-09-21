@@ -8,7 +8,8 @@ from sb_mexico.inegi import (
     calibrate_denue_employment,
     load_cpv_demography,
     calculate_cpv_pea_rate,
-    STATE_MACRO_BENCHMARKS
+    STATE_MACRO_BENCHMARKS,
+    load_denue,
 )
 
 class TestInegi(unittest.TestCase):
@@ -178,6 +179,70 @@ class TestInegi(unittest.TestCase):
             self.assertLess(bm["tasa_pea"], 0.85)
             self.assertGreater(bm["til_1"], 0.20)
             self.assertLess(bm["til_1"], 0.90)
+
+    def test_load_denue_resilient_formats(self):
+        bbox = {"min_lon": -87.0, "min_lat": 21.0, "max_lon": -86.7, "max_lat": 21.3}
+
+        # Archivo 1: CSV delimitado por punto y coma, UTF-8, columna personal_ocupado
+        # Incluye una fila dentro de BBOX y una fuera
+        with tempfile.NamedTemporaryFile(mode='wb', suffix='.csv', delete=False) as f1:
+            content1 = (
+                "id;nom_estab;latitud;longitud;cve_ent;cve_mun;personal_ocupado;ageb;manzana\n"
+                "1;Abarrotes El Sol;21.15;-86.85;23;005;0 a 5 personas;0001;1\n"
+                "2;Hotel Selva;20.50;-87.50;23;009;51 a 100 personas;0002;2\n"
+            )
+            f1.write(content1.encode("utf-8"))
+            tmp1 = f1.name
+
+        # Archivo 2: CSV delimitado por comas, Latin-1, columna per_ocu con acento
+        with tempfile.NamedTemporaryFile(mode='wb', suffix='.csv', delete=False) as f2:
+            content2 = (
+                "id,nom_estab,latitud,longitud,cve_ent,cve_mun,per_ocu,ageb,manzana\n"
+                "3,Fábrica Grande,21.16,-86.84,23,005,251 y más personas,0001,3\n"
+            )
+            f2.write(content2.encode("latin1"))
+            tmp2 = f2.name
+
+        try:
+            df = load_denue([tmp1, tmp2], bbox)
+            # Solo deben incluirse id 1 e id 3 (ambos en BBOX)
+            self.assertEqual(len(df), 2)
+            self.assertIn("jobs_formal", df.columns)
+            self.assertIn("is_micro_small", df.columns)
+
+            # id 1: 0 a 5 personas -> 2.24, micro=True
+            row1 = df[df["id"] == "1"].iloc[0]
+            self.assertAlmostEqual(row1["jobs_formal"], 2.24)
+            self.assertTrue(row1["is_micro_small"])
+
+            # id 3: 251 y más personas -> 450.0, micro=False
+            row3 = df[df["id"] == "3"].iloc[0]
+            self.assertAlmostEqual(row3["jobs_formal"], 450.0)
+            self.assertFalse(row3["is_micro_small"])
+
+            # mun_totals_global debe incluir id 2 (fuera de BBOX) acumulado antes del corte
+            # id 1 (23005): 2.24 + id 3 (23005): 450.0 = 452.24
+            # id 2 (23009): 71.41
+            totals = df.attrs.get("mun_totals_global", {})
+            self.assertIn("23005", totals)
+            self.assertIn("23009", totals)
+            self.assertAlmostEqual(totals["23005"], 452.24, places=2)
+            self.assertAlmostEqual(totals["23009"], 71.41, places=2)
+        finally:
+            os.remove(tmp1)
+            os.remove(tmp2)
+
+    def test_load_denue_duplicate_paths(self):
+        bbox = {"min_lon": -87.0, "min_lat": 21.0, "max_lon": -86.7, "max_lat": 21.3}
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8') as f:
+            f.write("latitud,longitud,cve_ent,cve_mun,per_ocu\n21.15,-86.85,23,005,0 a 5 personas\n")
+            tmp = f.name
+        try:
+            # Pasar la misma ruta dos veces
+            df = load_denue([tmp, tmp], bbox)
+            self.assertEqual(len(df), 1)
+        finally:
+            os.remove(tmp)
 
 if __name__ == "__main__":
     unittest.main()

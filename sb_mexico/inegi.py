@@ -440,64 +440,211 @@ def parse_conapo_growth_factors(conapo_path: str, target_year: int = 2024) -> Di
     return parse_conapo_projections(conapo_path, target_year=target_year, as_growth_factors=True)
 
 
+_NORMALIZED_DENUE_ESTRATOS = {
+    "0 A 5 PERSONAS": (2.24, True),
+    "6 A 10 PERSONAS": (7.75, True),
+    "11 A 30 PERSONAS": (18.17, True),
+    "31 A 50 PERSONAS": (39.37, True),
+    "51 A 100 PERSONAS": (71.41, False),
+    "101 A 250 PERSONAS": (158.90, False),
+    "251 Y MAS PERSONAS": (450.00, False),
+    "251 Y MÁS PERSONAS": (450.00, False),
+}
+
+
+def _detect_denue_format(path: str) -> Tuple[str, str]:
+    """Detecta la codificación y delimitador de un CSV DENUE analizando su encabezado."""
+    with open(path, "rb") as f:
+        raw_sample = f.read(65536)
+    if not raw_sample:
+        raise ValueError(f"El archivo DENUE está vacío: {path}")
+
+    encodings = ["utf-8-sig", "utf-8", "cp1252", "latin1"]
+    delimiters = [",", ";", "\t", "|"]
+
+    valid_enc = "latin1"
+    decoded_sample = None
+    for enc in encodings:
+        try:
+            decoded_sample = raw_sample.decode(enc)
+            valid_enc = enc
+            break
+        except UnicodeDecodeError:
+            continue
+
+    if decoded_sample is None:
+        decoded_sample = raw_sample.decode("latin1", errors="replace")
+
+    first_line = decoded_sample.splitlines()[0] if decoded_sample.splitlines() else ""
+
+    best_delim = ","
+    max_cols = 0
+    denue_known_cols = {
+        "latitud", "lat", "longitud", "lon", "nom_estab", "nombre",
+        "per_ocu", "personal_ocupado", "cve_mun", "cve_ent", "id"
+    }
+    for d in delimiters:
+        cols = [c.strip().strip('"').strip("'").lower() for c in first_line.split(d)]
+        if len(cols) > 1 and any(c in denue_known_cols for c in cols):
+            if len(cols) > max_cols:
+                max_cols = len(cols)
+                best_delim = d
+
+    return valid_enc, best_delim
+
+
+def _parse_denue_strata_series(series: pd.Series) -> Tuple[pd.Series, pd.Series]:
+    """Normaliza y mapea la serie de estratos a (jobs_formal, is_micro_small)."""
+    norm = (
+        series.fillna("")
+        .astype(str)
+        .str.strip()
+        .str.upper()
+        .str.replace("\u00a0", " ", regex=False)
+        .str.replace(r"\s+", " ", regex=True)
+    )
+    jobs_map = {k: v[0] for k, v in _NORMALIZED_DENUE_ESTRATOS.items()}
+    micro_map = {k: v[1] for k, v in _NORMALIZED_DENUE_ESTRATOS.items()}
+
+    jobs = norm.map(jobs_map).fillna(2.24)
+    micro = norm.map(micro_map).fillna(True).astype(bool)
+    return jobs, micro
+
+
 def load_denue(denue_paths: Union[str, List[str]], bbox: Dict[str, float]) -> pd.DataFrame:
     """
     Carga e inicializa los registros del DENUE dentro del BBOX (soporta múltiples archivos para zonas multi-estado).
     Calcula empleos formales base por estrato y normaliza las claves espaciales.
     Almacena en df_denue.attrs['mun_totals_global'] la suma global de empleos por municipio
     antes del recorte BBOX para permitir calibración proporcional exacta.
+    Optimizado para bajo consumo de memoria mediante lectura por chunks y filtrado temprano de BBOX.
     """
     if isinstance(denue_paths, str):
         paths = [denue_paths]
     else:
-        paths = denue_paths
+        paths = list(denue_paths)
 
-    dfs = []
-    for path in paths:
-        if not os.path.exists(path):
-            continue
-        df_temp = None
-        for enc in ['utf-8-sig', 'latin1', 'utf-8', 'ISO-8859-1']:
-            try:
-                df_temp = pd.read_csv(path, encoding=enc, low_memory=False, dtype=str)
-                df_temp.columns = [c.strip().lower() for c in df_temp.columns]
-                dfs.append(df_temp)
-                break
-            except Exception:
-                continue
+    # Eliminar rutas repetidas preservando el orden
+    seen = set()
+    clean_paths = []
+    for p in paths:
+        if p and os.path.exists(p):
+            norm = os.path.abspath(p)
+            if norm not in seen:
+                seen.add(norm)
+                clean_paths.append(p)
 
-    if not dfs:
+    if not clean_paths:
         raise ValueError("No se pudo leer ningún archivo DENUE válido.")
 
-    df_denue = pd.concat(dfs, ignore_index=True)
+    min_lon, max_lon = float(bbox["min_lon"]), float(bbox["max_lon"])
+    min_lat, max_lat = float(bbox["min_lat"]), float(bbox["max_lat"])
 
-    df_denue['lat'] = pd.to_numeric(df_denue['latitud'], errors='coerce')
-    df_denue['lon'] = pd.to_numeric(df_denue['longitud'], errors='coerce')
+    filtered_chunks = []
+    mun_totals_global: Dict[str, float] = {}
 
-    # Normalización de claves antes del recorte BBOX
-    df_denue['cve_mun_clean'] = [
-        format_cve_mun(m, e) for m, e in zip(df_denue['cve_mun'], df_denue['cve_ent'])
-    ]
+    for path in clean_paths:
+        try:
+            enc, sep = _detect_denue_format(path)
+            reader = pd.read_csv(
+                path,
+                encoding=enc,
+                sep=sep,
+                chunksize=100_000,
+                dtype=str,
+                low_memory=False
+            )
+        except Exception:
+            continue
 
-    col_per = 'per_ocu' if 'per_ocu' in df_denue.columns else 'personal_ocupado'
-    df_denue[col_per] = df_denue[col_per].astype(str).str.strip()
-    df_denue['jobs_formal'] = df_denue[col_per].map(DENUE_ESTRATOS).fillna(2.24)
-    df_denue['is_micro_small'] = df_denue[col_per].isin(["0 a 5 personas", "6 a 10 personas", "11 a 30 personas", "31 a 50 personas"])
+        for chunk in reader:
+            chunk.columns = [c.strip().lower() for c in chunk.columns]
 
-    # Totales globales de empleo formal por municipio (antes del recorte BBOX)
-    mun_totals_global = df_denue[df_denue['cve_mun_clean'] != "-1"].groupby('cve_mun_clean')['jobs_formal'].sum().to_dict()
+            col_lat = "latitud" if "latitud" in chunk.columns else ("lat" if "lat" in chunk.columns else None)
+            col_lon = "longitud" if "longitud" in chunk.columns else ("lon" if "lon" in chunk.columns else None)
 
-    # Filtro espacial estricto dentro del BBOX
-    df_denue = df_denue[
-        (df_denue['lon'] >= bbox["min_lon"]) & (df_denue['lon'] <= bbox["max_lon"]) &
-        (df_denue['lat'] >= bbox["min_lat"]) & (df_denue['lat'] <= bbox["max_lat"])
-    ].dropna(subset=['lat', 'lon']).copy()
+            if not col_lat or not col_lon:
+                continue
 
-    df_denue.attrs['mun_totals_global'] = mun_totals_global
+            chunk["lat"] = pd.to_numeric(chunk[col_lat], errors="coerce")
+            chunk["lon"] = pd.to_numeric(chunk[col_lon], errors="coerce")
 
-    # Normalizar AGEB y Manzana
-    df_denue['ageb_clean'] = df_denue['ageb'].astype(str).str.strip().str.upper().str.replace('-', '').str.zfill(4)
-    df_denue['mza_clean'] = pd.to_numeric(df_denue['manzana'], errors='coerce').fillna(-1).astype(int).astype(str)
+            # Normalización de claves municipales antes del recorte BBOX
+            if "cve_mun" in chunk.columns and "cve_ent" in chunk.columns:
+                chunk["cve_mun_clean"] = [
+                    format_cve_mun(m, e) for m, e in zip(chunk["cve_mun"], chunk["cve_ent"])
+                ]
+            elif "cve_mun" in chunk.columns:
+                chunk["cve_mun_clean"] = [format_cve_mun(m) for m in chunk["cve_mun"]]
+            else:
+                chunk["cve_mun_clean"] = "-1"
+
+            # Resolver estrato combinando per_ocu y personal_ocupado
+            if "per_ocu" in chunk.columns and "personal_ocupado" in chunk.columns:
+                per_s = chunk["per_ocu"].fillna("").astype(str).str.strip()
+                per_alt = chunk["personal_ocupado"].fillna("").astype(str).str.strip()
+                per_s = per_s.where(per_s != "", per_alt)
+            elif "per_ocu" in chunk.columns:
+                per_s = chunk["per_ocu"].fillna("").astype(str).str.strip()
+            elif "personal_ocupado" in chunk.columns:
+                per_s = chunk["personal_ocupado"].fillna("").astype(str).str.strip()
+            else:
+                per_s = pd.Series([""] * len(chunk), index=chunk.index)
+
+            jobs, micro = _parse_denue_strata_series(per_s)
+            chunk["jobs_formal"] = jobs
+            chunk["is_micro_small"] = micro
+
+            # Totales globales de empleo formal por municipio (antes del recorte BBOX)
+            valid_mun = chunk[chunk["cve_mun_clean"] != "-1"]
+            if not valid_mun.empty:
+                chunk_totals = valid_mun.groupby("cve_mun_clean")["jobs_formal"].sum()
+                for mun_code, total_jobs in chunk_totals.items():
+                    mun_totals_global[mun_code] = mun_totals_global.get(mun_code, 0.0) + float(total_jobs)
+
+            # Filtro espacial estricto dentro del BBOX
+            in_bbox = (
+                (chunk["lon"] >= min_lon) & (chunk["lon"] <= max_lon) &
+                (chunk["lat"] >= min_lat) & (chunk["lat"] <= max_lat) &
+                chunk["lat"].notna() & chunk["lon"].notna()
+            )
+            filtered = chunk[in_bbox].copy()
+            if not filtered.empty:
+                filtered_chunks.append(filtered)
+
+    if not filtered_chunks:
+        df_empty = pd.DataFrame(columns=[
+            "lat", "lon", "cve_mun_clean", "jobs_formal", "is_micro_small", "ageb_clean", "mza_clean"
+        ])
+        df_empty.attrs["mun_totals_global"] = mun_totals_global
+        return df_empty
+
+    df_denue = pd.concat(filtered_chunks, ignore_index=True)
+    df_denue.attrs["mun_totals_global"] = mun_totals_global
+
+    # Normalizar AGEB y Manzana con fallbacks seguros
+    if "ageb" in df_denue.columns:
+        df_denue["ageb_clean"] = (
+            df_denue["ageb"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.upper()
+            .str.replace("-", "", regex=False)
+            .str.zfill(4)
+        )
+    else:
+        df_denue["ageb_clean"] = "0000"
+
+    if "manzana" in df_denue.columns:
+        df_denue["mza_clean"] = (
+            pd.to_numeric(df_denue["manzana"], errors="coerce")
+            .fillna(-1)
+            .astype(int)
+            .astype(str)
+        )
+    else:
+        df_denue["mza_clean"] = "-1"
 
     return df_denue
 
