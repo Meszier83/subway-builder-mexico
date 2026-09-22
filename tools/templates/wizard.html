@@ -227,6 +227,19 @@
       stroke-width: 3px !important;
     }
 
+    /* Supresión de eventos sobre capas previas durante cualquier trazado activo */
+    .leaflet-drawing-active .leaflet-overlay-pane svg path:not(.drawing-temp-shape),
+    .leaflet-drawing-active .leaflet-marker-pane .leaflet-marker-icon:not(.drawing-handle-marker) {
+      pointer-events: none !important;
+    }
+    .leaflet-drawing-active .draggable-bbox-rect,
+    .leaflet-drawing-active .draggable-isolated-rect,
+    .leaflet-drawing-active .bbox-corner-handle,
+    .leaflet-drawing-active .isolated-corner-handle {
+      pointer-events: none !important;
+      cursor: crosshair !important;
+    }
+
     .draggable-isolated-rect {
       cursor: pointer !important;
       pointer-events: auto !important;
@@ -640,8 +653,8 @@
           </div>
 
           <div>
-            <label class="block text-stone-700 font-semibold mb-1">Descripción Breve (&lt; 80 car.)</label>
-            <input type="text" id="cfg_city_desc" maxlength="80" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-metro-orange focus:outline-none" placeholder="Zona Metropolitana y Corredor Turístico">
+            <label class="block text-stone-700 font-semibold mb-1">Descripción</label>
+            <input type="text" id="cfg_city_desc" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-metro-orange focus:outline-none" placeholder="Zona Metropolitana y Corredor Turístico">
           </div>
 
           <!-- Coordenadas BBOX -->
@@ -900,12 +913,46 @@
             <p class="text-[11px] text-stone-500 leading-tight">
               Contén la demanda de islas o cuencas para eliminar viajes automovilísticos cruzando el mar.
             </p>
-            <button type="button" onclick="startDrawingIsolatedZone()" id="btnDrawIsolatedZone" class="w-full bg-cyan-50 hover:bg-cyan-100 border border-cyan-300 text-cyan-800 text-xs font-bold py-1.5 px-2.5 rounded-lg flex items-center justify-center space-x-1.5 transition shadow-2xs">
-              <i data-lucide="box-select" class="w-3.5 h-3.5"></i>
-              <span>+ Trazar Zona Aislada</span>
-            </button>
+            <div class="grid grid-cols-2 gap-1.5">
+              <button type="button" onclick="startDrawingIsolatedZone()" id="btnDrawIsolatedZone" class="bg-cyan-50 hover:bg-cyan-100 border border-cyan-300 text-cyan-800 text-xs font-bold py-1.5 px-2 rounded-lg flex items-center justify-center space-x-1 transition shadow-2xs">
+                <i data-lucide="box-select" class="w-3.5 h-3.5"></i>
+                <span>+ Trazar Caja</span>
+              </button>
+              <button type="button" onclick="openIsolatedZoneModal(-1)" id="btnAddIsolatedManual" class="bg-cyan-50 hover:bg-cyan-100 border border-cyan-300 text-cyan-800 text-xs font-bold py-1.5 px-2 rounded-lg flex items-center justify-center space-x-1 transition shadow-2xs">
+                <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
+                <span>+ Manual</span>
+              </button>
+            </div>
             <!-- Lista interactiva de zonas aisladas -->
             <div id="isolatedZonesListContainer" class="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+              <!-- Renderizado dinámicamente -->
+            </div>
+          </div>
+
+          <!-- Zonas de Exclusión de Demanda (Cero Población / Cero Empleo) -->
+          <div class="bg-stone-50 p-3.5 rounded-xl border border-stone-200 space-y-2.5">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-1.5">
+                <i data-lucide="shield-alert" class="w-4 h-4 text-rose-600"></i>
+                <span class="font-bold text-stone-800">Zonas de Exclusión</span>
+              </div>
+              <span id="step1ExclusionBadge" class="text-[10px] bg-rose-100 border border-rose-300 text-rose-800 px-2 py-0.5 rounded-full font-bold">0 zonas</span>
+            </div>
+            <p class="text-[11px] text-stone-500 leading-tight">
+              Suprime habitantes, empleos y viajes en lagunas, manglares o reservas naturales manteniendo el mapa 3D intacto.
+            </p>
+            <div class="grid grid-cols-2 gap-1.5">
+              <button type="button" onclick="startDrawingExclusionZone('polygon', 1)" id="btnDrawExclusionPolyStep1" class="bg-rose-50 hover:bg-rose-100 border border-rose-300 text-rose-800 text-xs font-bold py-1.5 px-2 rounded-lg flex items-center justify-center space-x-1 transition shadow-2xs">
+                <i data-lucide="pentagon" class="w-3.5 h-3.5 text-rose-600"></i>
+                <span>+ Polígono</span>
+              </button>
+              <button type="button" onclick="startDrawingExclusionZone('bbox', 1)" id="btnDrawExclusionBboxStep1" class="bg-rose-50 hover:bg-rose-100 border border-rose-300 text-rose-800 text-xs font-bold py-1.5 px-2 rounded-lg flex items-center justify-center space-x-1 transition shadow-2xs">
+                <i data-lucide="scan" class="w-3.5 h-3.5 text-rose-600"></i>
+                <span>+ Cuadro</span>
+              </button>
+            </div>
+            <!-- Lista interactiva de zonas de exclusión en Paso 1 -->
+            <div id="step1ExclusionListContainer" class="space-y-1.5 max-h-48 overflow-y-auto pr-1">
               <!-- Renderizado dinámicamente -->
             </div>
           </div>
@@ -928,10 +975,17 @@
       <div class="flex-1 h-full bg-metro-card border border-metro-border rounded-xl overflow-hidden relative shadow-xl z-0">
         <div id="mapBbox" class="w-full h-full"></div>
 
+        <!-- Banner Flotante de Modo Trazado de Exclusión (Paso 1) -->
+        <div id="drawingExclusionStep1Banner" class="hidden absolute top-4 left-1/2 -translate-x-1/2 bg-rose-950/95 text-rose-200 border border-rose-500/60 backdrop-blur-md px-4 py-2 rounded-xl text-xs font-semibold shadow-2xl flex items-center space-x-3 z-[1000]">
+          <i data-lucide="shield-alert" class="w-4 h-4 text-rose-400 animate-pulse"></i>
+          <span id="drawingExclusionStep1BannerText">Haz clics en el mapa para trazar el polígono de exclusión (doble clic o Enter para cerrar)</span>
+          <button type="button" onclick="cancelDrawingExclusionZone()" class="bg-rose-800/80 hover:bg-rose-700 text-white text-[11px] font-bold px-2 py-0.5 rounded border border-rose-400/40 transition">Cancelar (Esc)</button>
+        </div>
+
         <!-- Banner Flotante de Modo Trazado de Zona Aislada -->
         <div id="drawingIsolatedBanner" class="hidden absolute top-4 left-1/2 -translate-x-1/2 bg-cyan-950/95 text-cyan-200 border border-cyan-500/60 backdrop-blur-md px-4 py-2 rounded-xl text-xs font-semibold shadow-2xl flex items-center space-x-3 z-[1000]">
           <i data-lucide="box-select" class="w-4 h-4 text-cyan-400 animate-pulse"></i>
-          <span>Haz clic y arrastra sobre el mapa para encuadrar la isla</span>
+          <span id="drawingIsolatedBannerText">Arrastra un cuadro o haz 2 clics para encuadrar la isla</span>
           <button type="button" onclick="cancelDrawingIsolatedZone()" class="bg-cyan-800/80 hover:bg-cyan-700 text-white text-[11px] font-bold px-2 py-0.5 rounded border border-cyan-400/40 transition">Cancelar (Esc)</button>
         </div>
 
@@ -1463,9 +1517,15 @@
             <p class="text-xs text-gray-400 mt-1" id="conapoSubtitleLabel">Factores de sincronización intercensal $\text{Pob}_{\text{proy}} / \text{Pob}_{2020}$.</p>
           </div>
           <div class="flex items-center space-x-2">
-            <button onclick="autoCalculateConapo()" id="btnAutoConapo" class="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-bold rounded-lg flex items-center space-x-1.5 transition shadow-xs">
+            <div id="conapoYearWrapper" class="flex items-center space-x-1.5 bg-stone-100 border border-stone-300 rounded-lg px-2.5 py-1 text-xs shadow-2xs">
+              <span class="font-mono text-stone-600 font-bold text-[11px]">Año:</span>
+              <select id="conapoYearSelect" onchange="onConapoYearSelectChange(this.value)" class="bg-transparent text-stone-900 font-mono font-bold text-xs focus:outline-hidden cursor-pointer" title="Seleccionar año de proyección demográfica CONAPO">
+                <option value="2026">2026</option>
+              </select>
+            </div>
+            <button onclick="autoCalculateConapo()" id="btnAutoConapo" class="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-bold rounded-lg flex items-center space-x-1.5 transition shadow-2xs">
               <i data-lucide="zap" class="w-3.5 h-3.5 text-emerald-700"></i>
-              <span>Sincronizar con CONAPO</span>
+              <span>Sincronizar</span>
             </button>
             <button onclick="addGrowthFactorRow()" class="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 border border-stone-300 text-stone-800 text-xs font-bold rounded-lg flex items-center space-x-1 transition">
               <i data-lucide="plus" class="w-3.5 h-3.5 text-metro-green"></i>
@@ -2081,6 +2141,17 @@
             <span id="drawingZoneInstructions">Haz clics en el mapa para delimitar vértices. Clic en primer vértice o Enter para cerrar.</span>
           </div>
           <button onclick="cancelDrawingAffluenceZone()" class="px-2.5 py-1 bg-white/20 hover:bg-white/30 text-white rounded-lg font-bold text-[11px] transition">
+            Cancelar (Esc)
+          </button>
+        </div>
+
+        <!-- Banner Flotante de Trazado Activo de Zona de Exclusión (Paso 4) -->
+        <div id="drawingExclusionBanner" class="hidden absolute top-16 left-4 right-4 md:right-auto z-[995] bg-rose-950/95 text-rose-100 backdrop-blur px-4 py-2.5 rounded-xl border border-rose-500/50 shadow-2xl flex items-center justify-between space-x-3 text-xs">
+          <div class="flex items-center space-x-2">
+            <i data-lucide="shield-alert" class="w-4 h-4 text-rose-400 animate-pulse"></i>
+            <span id="drawingExclusionInstructions">Haz clics para trazar los vértices de exclusión (doble clic o Enter para cerrar).</span>
+          </div>
+          <button onclick="cancelDrawingExclusionZone()" class="px-2.5 py-1 bg-rose-800/80 hover:bg-rose-700 text-white rounded-lg font-bold text-[11px] border border-rose-400/40 transition">
             Cancelar (Esc)
           </button>
         </div>
@@ -3606,6 +3677,8 @@
     let selectedIsolatedZoneIndex = -1;
     let isDrawingIsolated = false;
     let drawStartLatLng = null;
+    let isolatedDrawPhase = 0; // 0: inactivo, 1: esquina 1 fijada esperando esquina 2
+    let isolatedIsDragging = false;
     let isolatedCornerMarkers = { NW: null, NE: null, SE: null, SW: null };
 
     // Núcleo Urbano (Urban Core AOI LOD)
@@ -3618,7 +3691,9 @@
 
     // Zonas de Exclusión y Borrador Local
     let exclusionZonesGroup = null;
+    let exclusionZonesBboxGroup = null;
     let exclusionZonesDemandGroup = null;
+    let exclusionDrawStep = 4;
     let selectedExclusionIndex = -1;
     let isDrawingExclusion = false;
     let exclusionDrawMode = 'polygon';
@@ -4156,18 +4231,25 @@
 
       if (step === 2) refreshDataStatus();
       if (step === 3 && (!window.conapoMetadata || Object.keys(window.conapoMetadata).length === 0)) {
-        fetch(`/api/conapo/calculate?file=${encodeURIComponent(currentCityFile)}`)
+        const initYear = (cityData && cityData.macroeconomics && (cityData.macroeconomics.projection_year || cityData.macroeconomics.target_year))
+          ? `&year=${encodeURIComponent(cityData.macroeconomics.projection_year || cityData.macroeconomics.target_year)}`
+          : '';
+        fetch(`/api/conapo/calculate?file=${encodeURIComponent(currentCityFile)}${initYear}`)
           .then(r => r.json())
           .then(data => {
             if (data.status === 'ok') {
               window.conapoMetadata = window.conapoMetadata || {};
               window.conapoYear = data.projection_year;
+              window.conapoAvailableYears = data.available_years || [];
+              if (typeof updateConapoYearSelect === 'function') {
+                updateConapoYearSelect(data.available_years, data.projection_year);
+              }
               data.factors.forEach(f => {
                 f.ano = f.ano || data.projection_year;
                 window.conapoMetadata[f.cve_mun] = f;
               });
               if (document.getElementById('conapoSubtitleLabel')) {
-                document.getElementById('conapoSubtitleLabel').innerText = `Factores de sincronización intercensal Pob_${data.projection_year || 2025} / Pob_2020 (${data.conapo_file || 'CONAPO'}).`;
+                document.getElementById('conapoSubtitleLabel').innerText = `Factores de sincronización intercensal Pob_${data.projection_year || 2026} / Pob_2020 (${data.conapo_file || 'CONAPO'}).`;
               }
               renderGrowthFactorsTable();
             }
@@ -4222,25 +4304,28 @@
         preferCanvas: true         // Motor HTML5 2D Canvas de alto rendimiento
       };
 
-      // 1. Mapa BBOX
+      // 1. Mapa BBOX (Renderizado SVG nativo para permitir puntero transparente durante trazados)
       const b1 = createBaseLayers();
-      mapBbox = L.map('mapBbox', { ...mapOptions, layers: [b1.baseMapDefault] }).setView([21.16, -86.85], 11);
+      mapBbox = L.map('mapBbox', { ...mapOptions, preferCanvas: false, layers: [b1.baseMapDefault] }).setView([21.16, -86.85], 11);
       bboxMainGroup = L.featureGroup().addTo(mapBbox);
       bboxHandlesGroup = L.layerGroup().addTo(mapBbox);
       urbanCoreGroup = L.featureGroup().addTo(mapBbox);
       isolatedZonesGroup = L.featureGroup().addTo(mapBbox);
       isolatedHandlesGroup = L.layerGroup().addTo(mapBbox);
+      exclusionZonesBboxGroup = L.featureGroup().addTo(mapBbox);
       zoomPreviewGroup = L.layerGroup().addTo(mapBbox);
 
       const bboxOverlays = {
         "📦 BBOX Metropolitano": bboxMainGroup,
         "🏛️ Núcleo Urbano (LOD)": urbanCoreGroup,
         "🏝️ Zonas Aisladas (Islas)": isolatedZonesGroup,
+        "🚫 Zonas de Exclusión": exclusionZonesBboxGroup,
         "🖥️ Encuadre Inicial (16:9)": zoomPreviewGroup
       };
       L.control.layers(b1.layerControl, bboxOverlays, { position: 'topright' }).addTo(mapBbox);
       setupIsolatedDrawingEvents();
       setupUrbanCoreDrawingEvents();
+      setupExclusionDrawingEvents();
 
       // 2. Mapa POI Studio
       const b2 = createBaseLayers();
@@ -4378,6 +4463,9 @@
       let startB0 = 0, startB1 = 0, startB2 = 0, startB3 = 0;
 
       function onBoxDragStart(e) {
+        if (isDrawingUrbanCore || isDrawingIsolated || isDrawingExclusion) {
+          return;
+        }
         if (e.originalEvent) {
           L.DomEvent.stopPropagation(e);
           L.DomEvent.preventDefault(e);
@@ -4998,53 +5086,127 @@
       });
     }
 
+    // -------------------------------------------------------------------------
+    // CONTROL CENTRALIZADO DE INTERACTIVIDAD DE CAPAS EN MAPBBOX DURANTE TRAZADOS
+    // -------------------------------------------------------------------------
+    function setMapBboxDrawingInteractivity(isDrawing) {
+      if (!mapBbox) return;
+      const container = mapBbox.getContainer();
+      if (isDrawing) {
+        container.classList.add('leaflet-drawing-active');
+      } else {
+        container.classList.remove('leaflet-drawing-active');
+      }
+
+      // Desactivar o reactivar la interactividad de cada elemento vectorial / marcador en el DOM SVG
+      if (bboxRectangle && bboxRectangle.getElement()) {
+        bboxRectangle.getElement().style.pointerEvents = isDrawing ? 'none' : '';
+      }
+      if (urbanCoreLayer && urbanCoreLayer.getElement()) {
+        urbanCoreLayer.getElement().style.pointerEvents = isDrawing ? 'none' : '';
+      }
+      if (isolatedZonesGroup) {
+        isolatedZonesGroup.eachLayer(l => {
+          if (l.getElement()) l.getElement().style.pointerEvents = isDrawing ? 'none' : '';
+        });
+      }
+      if (isolatedHandlesGroup) {
+        isolatedHandlesGroup.eachLayer(l => {
+          if (l.getElement()) l.getElement().style.pointerEvents = isDrawing ? 'none' : '';
+        });
+      }
+      if (bboxHandlesGroup) {
+        bboxHandlesGroup.eachLayer(l => {
+          if (l.getElement()) l.getElement().style.pointerEvents = isDrawing ? 'none' : '';
+        });
+      }
+      if (exclusionZonesBboxGroup) {
+        exclusionZonesBboxGroup.eachLayer(l => {
+          if (l.getElement()) l.getElement().style.pointerEvents = isDrawing ? 'none' : '';
+        });
+      }
+      if (zoomPreviewGroup) {
+        zoomPreviewGroup.eachLayer(l => {
+          if (l.getElement()) l.getElement().style.pointerEvents = isDrawing ? 'none' : '';
+        });
+      }
+    }
+
     function setupIsolatedDrawingEvents() {
       if (!mapBbox) return;
 
       mapBbox.on('mousedown', (e) => {
         if (!isDrawingIsolated) return;
+        isolatedIsDragging = false;
         drawStartLatLng = e.latlng;
+
         if (drawTempRect) mapBbox.removeLayer(drawTempRect);
         drawTempRect = L.rectangle([drawStartLatLng, drawStartLatLng], {
           color: '#06B6D4',
           weight: 2,
           dashArray: '5, 5',
           fillColor: '#06B6D4',
-          fillOpacity: 0.25
+          fillOpacity: 0.25,
+          interactive: false,
+          className: 'drawing-temp-shape'
         }).addTo(mapBbox);
+
+        window.addEventListener('mousemove', onIsolatedWindowMouseMove);
+        window.addEventListener('mouseup', onIsolatedWindowMouseUp);
       });
+
+      function onIsolatedWindowMouseMove(e) {
+        if (!isDrawingIsolated || !drawStartLatLng || !drawTempRect) return;
+        const pt = mapBbox.mouseEventToLatLng(e);
+        if (!pt) return;
+        const distPx = mapBbox.latLngToLayerPoint(drawStartLatLng).distanceTo(mapBbox.latLngToLayerPoint(pt));
+        if (distPx > 8) {
+          isolatedIsDragging = true;
+        }
+        drawTempRect.setBounds([drawStartLatLng, pt]);
+      }
+
+      function onIsolatedWindowMouseUp(e) {
+        window.removeEventListener('mousemove', onIsolatedWindowMouseMove);
+        window.removeEventListener('mouseup', onIsolatedWindowMouseUp);
+
+        if (!isDrawingIsolated || !drawStartLatLng) return;
+        const endLatLng = mapBbox.mouseEventToLatLng(e);
+        if (!endLatLng) return;
+
+        const distPx = mapBbox.latLngToLayerPoint(drawStartLatLng).distanceTo(mapBbox.latLngToLayerPoint(endLatLng));
+
+        if (isolatedIsDragging && distPx > 12) {
+          // Completar trazado por arrastre continuo
+          finishIsolatedZoneDrawing(drawStartLatLng, endLatLng);
+        } else {
+          // Trazado de 2 clics: si no teníamos esquina 1, fijarla; si ya estaba, completar
+          if (isolatedDrawPhase === 0) {
+            isolatedDrawPhase = 1;
+            const bannerText = document.getElementById('drawingIsolatedBannerText');
+            if (bannerText) bannerText.innerText = "📍 Esquina 1 fijada. Haz clic en la esquina opuesta para completar.";
+            showToast("Esquina 1 fijada. Mueve el cursor y haz clic para la esquina opuesta.", "info");
+          } else {
+            finishIsolatedZoneDrawing(drawStartLatLng, endLatLng);
+          }
+        }
+      }
 
       mapBbox.on('mousemove', (e) => {
-        if (!isDrawingIsolated || !drawStartLatLng || !drawTempRect) return;
-        drawTempRect.setBounds([drawStartLatLng, e.latlng]);
+        if (!isDrawingIsolated) return;
+        if (isolatedDrawPhase === 1 && drawStartLatLng && drawTempRect && !isolatedIsDragging) {
+          drawTempRect.setBounds([drawStartLatLng, e.latlng]);
+        }
       });
 
-      mapBbox.on('mouseup', (e) => {
-        if (!isDrawingIsolated || !drawStartLatLng) return;
-        const endLatLng = e.latlng;
-        const minLon = Math.min(drawStartLatLng.lng, endLatLng.lng);
-        const minLat = Math.min(drawStartLatLng.lat, endLatLng.lat);
-        const maxLon = Math.max(drawStartLatLng.lng, endLatLng.lng);
-        const maxLat = Math.max(drawStartLatLng.lat, endLatLng.lat);
-
-        if (drawTempRect) {
-          mapBbox.removeLayer(drawTempRect);
-          drawTempRect = null;
+      mapBbox.on('click', (e) => {
+        if (!isDrawingIsolated) return;
+        if (isolatedDrawPhase === 1 && drawStartLatLng) {
+          const distPx = mapBbox.latLngToLayerPoint(drawStartLatLng).distanceTo(mapBbox.latLngToLayerPoint(e.latlng));
+          if (distPx > 8) {
+            finishIsolatedZoneDrawing(drawStartLatLng, e.latlng);
+          }
         }
-        cancelDrawingIsolatedZone();
-
-        // Evitar clics accidentales o áreas microscópicas
-        if (maxLon - minLon < 0.001 || maxLat - minLat < 0.001) {
-          showToast("Área trazada muy pequeña o inválida", "warning");
-          return;
-        }
-
-        openIsolatedZoneModal(-1, [
-          parseFloat(minLon.toFixed(4)),
-          parseFloat(minLat.toFixed(4)),
-          parseFloat(maxLon.toFixed(4)),
-          parseFloat(maxLat.toFixed(4))
-        ]);
       });
 
       window.addEventListener('keydown', (e) => {
@@ -5054,24 +5216,66 @@
       });
     }
 
+    function finishIsolatedZoneDrawing(startLatLng, endLatLng) {
+      const minLon = Math.min(startLatLng.lng, endLatLng.lng);
+      const minLat = Math.min(startLatLng.lat, endLatLng.lat);
+      const maxLon = Math.max(startLatLng.lng, endLatLng.lng);
+      const maxLat = Math.max(startLatLng.lat, endLatLng.lat);
+
+      if (drawTempRect && mapBbox) {
+        mapBbox.removeLayer(drawTempRect);
+        drawTempRect = null;
+      }
+      cancelDrawingIsolatedZone();
+
+      // Evitar áreas microscópicas accidentales
+      if (maxLon - minLon < 0.001 || maxLat - minLat < 0.001) {
+        showToast("Área trazada muy pequeña o inválida", "warning");
+        return;
+      }
+
+      openIsolatedZoneModal(-1, [
+        parseFloat(minLon.toFixed(4)),
+        parseFloat(minLat.toFixed(4)),
+        parseFloat(maxLon.toFixed(4)),
+        parseFloat(maxLat.toFixed(4))
+      ]);
+    }
+
     function startDrawingIsolatedZone() {
       if (!currentCityFile) {
         showToast("Selecciona o crea un proyecto primero", "warning");
         return;
       }
       isDrawingIsolated = true;
+      isolatedDrawPhase = 0;
+      isolatedIsDragging = false;
+      drawStartLatLng = null;
+
+      if (drawTempRect && mapBbox) {
+        mapBbox.removeLayer(drawTempRect);
+        drawTempRect = null;
+      }
+
       if (mapBbox) {
         mapBbox.dragging.disable();
         mapBbox.getContainer().style.cursor = 'crosshair';
+        setMapBboxDrawingInteractivity(true);
       }
       const banner = document.getElementById('drawingIsolatedBanner');
-      if (banner) banner.classList.remove('hidden');
+      if (banner) {
+        const bannerText = document.getElementById('drawingIsolatedBannerText');
+        if (bannerText) bannerText.innerText = "Arrastra un cuadro o haz 2 clics para encuadrar la isla";
+        banner.classList.remove('hidden');
+      }
       lucide.createIcons();
-      showToast("Modo trazado activo: Haz clic y arrastra sobre la isla", "info");
+      showToast("Modo trazado activo: Arrastra un cuadro o haz 2 clics para definir las esquinas", "info");
     }
 
     function cancelDrawingIsolatedZone() {
       isDrawingIsolated = false;
+      isolatedDrawPhase = 0;
+      isolatedIsDragging = false;
       drawStartLatLng = null;
       if (drawTempRect && mapBbox) {
         mapBbox.removeLayer(drawTempRect);
@@ -5080,6 +5284,7 @@
       if (mapBbox) {
         mapBbox.dragging.enable();
         mapBbox.getContainer().style.cursor = '';
+        setMapBboxDrawingInteractivity(false);
       }
       const banner = document.getElementById('drawingIsolatedBanner');
       if (banner) banner.classList.add('hidden');
@@ -5108,14 +5313,21 @@
         document.getElementById('iso_id').value = `isla_${nextIdx}`;
         let b = bboxCoords;
         if (!b || b.length !== 4) {
-          const mainB = cityData.city.bbox || [-87.0, 21.0, -86.7, 21.3];
-          const midLon = (mainB[0] + mainB[2]) / 2;
-          const midLat = (mainB[1] + mainB[3]) / 2;
+          // Centrar inteligentemente en el mapa actual o en el centro del BBOX principal
+          let centerLon = -86.85, centerLat = 21.16;
+          if (mapBbox) {
+            const c = mapBbox.getCenter();
+            centerLon = c.lng;
+            centerLat = c.lat;
+          } else if (cityData?.city?.bbox) {
+            centerLon = (cityData.city.bbox[0] + cityData.city.bbox[2]) / 2;
+            centerLat = (cityData.city.bbox[1] + cityData.city.bbox[3]) / 2;
+          }
           b = [
-            parseFloat((midLon - 0.03).toFixed(4)),
-            parseFloat((midLat - 0.03).toFixed(4)),
-            parseFloat((midLon + 0.03).toFixed(4)),
-            parseFloat((midLat + 0.03).toFixed(4))
+            parseFloat((centerLon - 0.025).toFixed(4)),
+            parseFloat((centerLat - 0.025).toFixed(4)),
+            parseFloat((centerLon + 0.025).toFixed(4)),
+            parseFloat((centerLat + 0.025).toFixed(4))
           ];
         }
         document.getElementById('iso_bbox_0').value = b[0];
@@ -5325,12 +5537,81 @@
         `, { sticky: true, className: 'poi-custom-tooltip' });
 
         rect.on('click', (e) => {
+          if (isDrawingIsolated || isDrawingUrbanCore || isDrawingExclusion) return;
           L.DomEvent.stopPropagation(e);
           selectIsolatedZone(idx);
         });
 
+        // Permitir mover la caja completa de la zona aislada arrastrándola
+        if (isSelected) {
+          let isDraggingIsoBox = false;
+          let isoDragStartLatLng = null;
+          let isoStartB0 = 0, isoStartB1 = 0, isoStartB2 = 0, isoStartB3 = 0;
+
+          function onIsoBoxDragStart(e) {
+            if (isDrawingUrbanCore || isDrawingIsolated || isDrawingExclusion) return;
+            if (e.originalEvent) {
+              L.DomEvent.stopPropagation(e);
+              L.DomEvent.preventDefault(e);
+            }
+            isDraggingIsoBox = true;
+            isoDragStartLatLng = e.latlng;
+            isoStartB0 = z.bbox[0];
+            isoStartB1 = z.bbox[1];
+            isoStartB2 = z.bbox[2];
+            isoStartB3 = z.bbox[3];
+
+            mapBbox.dragging.disable();
+            mapBbox.getContainer().style.cursor = 'grabbing';
+            if (rect.getElement()) rect.getElement().style.cursor = 'grabbing';
+
+            mapBbox.on('mousemove touchmove', onIsoBoxDragMove);
+            mapBbox.on('mouseup touchend', onIsoBoxDragEnd);
+            L.DomEvent.on(document, 'mouseup touchend', onIsoBoxDragEnd);
+          }
+
+          function onIsoBoxDragMove(e) {
+            if (!isDraggingIsoBox || !isoDragStartLatLng || !e.latlng) return;
+            const deltaLng = e.latlng.lng - isoDragStartLatLng.lng;
+            const deltaLat = e.latlng.lat - isoDragStartLatLng.lat;
+
+            const newB0 = parseFloat((isoStartB0 + deltaLng).toFixed(4));
+            const newB1 = parseFloat((isoStartB1 + deltaLat).toFixed(4));
+            const newB2 = parseFloat((isoStartB2 + deltaLng).toFixed(4));
+            const newB3 = parseFloat((isoStartB3 + deltaLat).toFixed(4));
+
+            z.bbox = [newB0, newB1, newB2, newB3];
+            rect.setBounds([[newB1, newB0], [newB3, newB2]]);
+
+            if (isolatedCornerMarkers.NW) isolatedCornerMarkers.NW.setLatLng([newB3, newB0]);
+            if (isolatedCornerMarkers.NE) isolatedCornerMarkers.NE.setLatLng([newB3, newB2]);
+            if (isolatedCornerMarkers.SE) isolatedCornerMarkers.SE.setLatLng([newB1, newB2]);
+            if (isolatedCornerMarkers.SW) isolatedCornerMarkers.SW.setLatLng([newB1, newB0]);
+
+            renderIsolatedZonesList();
+          }
+
+          function onIsoBoxDragEnd() {
+            if (!isDraggingIsoBox) return;
+            isDraggingIsoBox = false;
+            isoDragStartLatLng = null;
+
+            mapBbox.off('mousemove touchmove', onIsoBoxDragMove);
+            mapBbox.off('mouseup touchend', onIsoBoxDragEnd);
+            L.DomEvent.off(document, 'mouseup touchend', onIsoBoxDragEnd);
+
+            mapBbox.dragging.enable();
+            mapBbox.getContainer().style.cursor = '';
+            if (rect.getElement()) rect.getElement().style.cursor = 'move';
+            triggerAutoSave();
+          }
+
+          rect.on('mousedown touchstart', onIsoBoxDragStart);
+        }
+
         // Tiradores de esquinas si está seleccionada
         if (isSelected && isolatedHandlesGroup) {
+          isolatedCornerMarkers = { NW: null, NE: null, SE: null, SW: null };
           const cornerConfigs = [
             { key: 'NW', pos: [b[3], b[0]], label: 'NO' },
             { key: 'NE', pos: [b[3], b[2]], label: 'NE' },
@@ -5344,6 +5625,7 @@
               draggable: true,
               zIndexOffset: 1500
             }).addTo(isolatedHandlesGroup);
+            isolatedCornerMarkers[cfg.key] = marker;
 
             marker.bindTooltip(`<strong>${cfg.label} - ${escapeHtml(z.name)}</strong>`, { direction: 'top', offset: [0, -10] });
 
@@ -5359,18 +5641,26 @@
                 b0 = Math.min(latLng.lng, b2 - MIN_SPAN);
                 b3 = Math.max(latLng.lat, b1 + MIN_SPAN);
                 marker.setLatLng([b3, b0]);
+                if (isolatedCornerMarkers.NE) isolatedCornerMarkers.NE.setLatLng([b3, b2]);
+                if (isolatedCornerMarkers.SW) isolatedCornerMarkers.SW.setLatLng([b1, b0]);
               } else if (cfg.key === 'NE') {
                 b2 = Math.max(latLng.lng, b0 + MIN_SPAN);
                 b3 = Math.max(latLng.lat, b1 + MIN_SPAN);
                 marker.setLatLng([b3, b2]);
+                if (isolatedCornerMarkers.NW) isolatedCornerMarkers.NW.setLatLng([b3, b0]);
+                if (isolatedCornerMarkers.SE) isolatedCornerMarkers.SE.setLatLng([b1, b2]);
               } else if (cfg.key === 'SE') {
                 b2 = Math.max(latLng.lng, b0 + MIN_SPAN);
                 b1 = Math.min(latLng.lat, b3 - MIN_SPAN);
                 marker.setLatLng([b1, b2]);
+                if (isolatedCornerMarkers.SW) isolatedCornerMarkers.SW.setLatLng([b1, b0]);
+                if (isolatedCornerMarkers.NE) isolatedCornerMarkers.NE.setLatLng([b3, b2]);
               } else if (cfg.key === 'SW') {
                 b0 = Math.min(latLng.lng, b2 - MIN_SPAN);
                 b1 = Math.min(latLng.lat, b3 - MIN_SPAN);
                 marker.setLatLng([b1, b0]);
+                if (isolatedCornerMarkers.NW) isolatedCornerMarkers.NW.setLatLng([b3, b0]);
+                if (isolatedCornerMarkers.SE) isolatedCornerMarkers.SE.setLatLng([b1, b2]);
               }
 
               z.bbox = [
@@ -5455,6 +5745,7 @@
       if (mapBbox) {
         mapBbox.doubleClickZoom.disable();
         mapBbox.getContainer().style.cursor = 'crosshair';
+        setMapBboxDrawingInteractivity(true);
       }
       const banner = document.getElementById('drawingUrbanCoreBanner');
       if (banner) banner.classList.remove('hidden');
@@ -5476,6 +5767,7 @@
       if (mapBbox) {
         mapBbox.doubleClickZoom.enable();
         mapBbox.getContainer().style.cursor = '';
+        setMapBboxDrawingInteractivity(false);
       }
       const banner = document.getElementById('drawingUrbanCoreBanner');
       if (banner) banner.classList.add('hidden');
@@ -5491,19 +5783,28 @@
         }
       }
 
+      const isFirst = (urbanCoreDrawPoints.length === 0);
       urbanCoreDrawPoints.push(latlng);
 
       const m = L.circleMarker(latlng, {
-        radius: 5,
+        radius: isFirst ? 7 : 5,
         color: '#D97706',
-        fillColor: '#FFFFFF',
+        fillColor: isFirst ? '#D97706' : '#FFFFFF',
         fillOpacity: 1,
-        weight: 2
+        weight: 2,
+        interactive: isFirst,
+        className: isFirst ? 'drawing-handle-marker' : ''
       }).addTo(mapBbox);
       urbanCoreDrawMarkers.push(m);
 
-      if (urbanCoreDrawPoints.length === 1) {
-        m.setStyle({ radius: 7, fillColor: '#D97706', color: '#FFFFFF' });
+      if (isFirst) {
+        m.bindTooltip("Clic para cerrar polígono", { direction: 'top', className: 'poi-custom-tooltip' });
+        m.on('click', (e) => {
+          if (urbanCoreDrawPoints.length >= 3) {
+            L.DomEvent.stopPropagation(e);
+            finishUrbanCoreDrawing();
+          }
+        });
       }
 
       if (!urbanCoreTempShape) {
@@ -5512,7 +5813,9 @@
           weight: 2.5,
           dashArray: '6, 6',
           fillColor: '#F59E0B',
-          fillOpacity: 0.25
+          fillOpacity: 0.25,
+          interactive: false,
+          className: 'drawing-temp-shape'
         }).addTo(mapBbox);
       } else {
         urbanCoreTempShape.setLatLngs([urbanCoreDrawPoints]);
@@ -5662,7 +5965,9 @@
           weight: 2,
           dashArray: '5, 5',
           fillColor: '#F59E0B',
-          fillOpacity: 0.25
+          fillOpacity: 0.25,
+          interactive: false,
+          className: 'drawing-temp-shape'
         }).addTo(mapPoi);
       });
 
@@ -5736,6 +6041,7 @@
       if (mapPoi) {
         if (mode === 'bbox') mapPoi.dragging.disable();
         mapPoi.getContainer().style.cursor = 'crosshair';
+        mapPoi.getContainer().classList.add('leaflet-drawing-active');
       }
 
       const banner = document.getElementById('drawingZoneBanner');
@@ -5769,6 +6075,7 @@
       if (mapPoi) {
         mapPoi.dragging.enable();
         mapPoi.getContainer().style.cursor = '';
+        mapPoi.getContainer().classList.remove('leaflet-drawing-active');
       }
 
       const banner = document.getElementById('drawingZoneBanner');
@@ -5785,19 +6092,28 @@
         }
       }
 
+      const isFirst = (affluenceDrawPoints.length === 0);
       affluenceDrawPoints.push(latlng);
 
       const m = L.circleMarker(latlng, {
-        radius: 5,
+        radius: isFirst ? 7 : 5,
         color: '#F59E0B',
-        fillColor: '#FFFFFF',
+        fillColor: isFirst ? '#F59E0B' : '#FFFFFF',
         fillOpacity: 1,
-        weight: 2
+        weight: 2,
+        interactive: isFirst,
+        className: isFirst ? 'drawing-handle-marker' : ''
       }).addTo(mapPoi);
       affluenceDrawMarkers.push(m);
 
-      if (affluenceDrawPoints.length === 1) {
-        m.setStyle({ radius: 7, fillColor: '#F59E0B', color: '#FFFFFF' });
+      if (isFirst) {
+        m.bindTooltip("Clic para cerrar zona de afluencia", { direction: 'top', className: 'poi-custom-tooltip' });
+        m.on('click', (e) => {
+          if (affluenceDrawPoints.length >= 3) {
+            L.DomEvent.stopPropagation(e);
+            finishAffluencePolygonDrawing();
+          }
+        });
       }
 
       if (!affluenceTempShape) {
@@ -5806,7 +6122,9 @@
           weight: 2,
           dashArray: '5, 5',
           fillColor: '#F59E0B',
-          fillOpacity: 0.2
+          fillOpacity: 0.2,
+          interactive: false,
+          className: 'drawing-temp-shape'
         }).addTo(mapPoi);
       } else {
         affluenceTempShape.setLatLngs([affluenceDrawPoints]);
@@ -6271,78 +6589,58 @@
       custom: { name: "Personalizado / Otro", icon: "slash" }
     };
 
+    function getExclusionTargetMap() {
+      return (exclusionDrawStep === 1 && mapBbox) ? mapBbox : mapPoi;
+    }
+
     function setupExclusionDrawingEvents() {
-      if (!mapPoi) return;
+      const maps = [mapBbox, mapPoi].filter(Boolean);
+      maps.forEach(m => {
+        m.on('click', (e) => {
+          if (!isDrawingExclusion || exclusionDrawMode !== 'polygon') return;
+          if (m !== getExclusionTargetMap()) return;
+          addExclusionPolygonVertex(e.latlng);
+        });
 
-      mapPoi.on('click', (e) => {
-        if (!isDrawingExclusion || exclusionDrawMode !== 'polygon') return;
-        addExclusionPolygonVertex(e.latlng);
-      });
+        m.on('dblclick', (e) => {
+          if (!isDrawingExclusion || exclusionDrawMode !== 'polygon') return;
+          if (m !== getExclusionTargetMap()) return;
+          L.DomEvent.stop(e);
+          finishExclusionPolygonDrawing();
+        });
 
-      mapPoi.on('dblclick', (e) => {
-        if (!isDrawingExclusion || exclusionDrawMode !== 'polygon') return;
-        L.DomEvent.stop(e);
-        finishExclusionPolygonDrawing();
-      });
+        m.on('mousedown', (e) => {
+          if (!isDrawingExclusion || exclusionDrawMode !== 'bbox') return;
+          if (m !== getExclusionTargetMap()) return;
+          exclusionBoxStart = e.latlng;
+          const targetMap = getExclusionTargetMap();
+          if (exclusionTempShape && targetMap) targetMap.removeLayer(exclusionTempShape);
+          exclusionTempShape = L.rectangle([exclusionBoxStart, exclusionBoxStart], {
+            color: '#EF4444',
+            weight: 2,
+            dashArray: '6, 6',
+            fillColor: '#EF4444',
+            fillOpacity: 0.25,
+            interactive: false,
+            className: 'drawing-temp-shape'
+          }).addTo(targetMap);
+        });
 
-      mapPoi.on('mousedown', (e) => {
-        if (!isDrawingExclusion || exclusionDrawMode !== 'bbox') return;
-        exclusionBoxStart = e.latlng;
-        if (exclusionTempShape) mapPoi.removeLayer(exclusionTempShape);
-        exclusionTempShape = L.rectangle([exclusionBoxStart, exclusionBoxStart], {
-          color: '#EF4444',
-          weight: 2,
-          dashArray: '6, 6',
-          fillColor: '#EF4444',
-          fillOpacity: 0.25
-        }).addTo(mapPoi);
-      });
+        m.on('mousemove', (e) => {
+          if (!isDrawingExclusion) return;
+          if (m !== getExclusionTargetMap()) return;
+          if (exclusionDrawMode === 'bbox' && exclusionBoxStart && exclusionTempShape) {
+            exclusionTempShape.setBounds([exclusionBoxStart, e.latlng]);
+          } else if (exclusionDrawMode === 'polygon' && exclusionDrawPoints.length > 0 && exclusionTempShape) {
+            const currentPts = [...exclusionDrawPoints, e.latlng];
+            exclusionTempShape.setLatLngs([currentPts]);
+          }
+        });
 
-      mapPoi.on('mousemove', (e) => {
-        if (!isDrawingExclusion) return;
-        if (exclusionDrawMode === 'bbox' && exclusionBoxStart && exclusionTempShape) {
-          exclusionTempShape.setBounds([exclusionBoxStart, e.latlng]);
-        } else if (exclusionDrawMode === 'polygon' && exclusionDrawPoints.length > 0 && exclusionTempShape) {
-          const currentPts = [...exclusionDrawPoints, e.latlng];
-          exclusionTempShape.setLatLngs([currentPts]);
-        }
-      });
-
-      mapPoi.on('mouseup', (e) => {
-        if (!isDrawingExclusion || exclusionDrawMode !== 'bbox' || !exclusionBoxStart) return;
-        const endLatLng = e.latlng;
-        const minLon = Math.min(exclusionBoxStart.lng, endLatLng.lng);
-        const minLat = Math.min(exclusionBoxStart.lat, endLatLng.lat);
-        const maxLon = Math.max(exclusionBoxStart.lng, endLatLng.lng);
-        const maxLat = Math.max(exclusionBoxStart.lat, endLatLng.lat);
-
-        cancelDrawingExclusionZone();
-
-        if (maxLon - minLon < 0.001 || maxLat - minLat < 0.001) {
-          showToast("Área de exclusión muy pequeña o inválida", "warning");
-          return;
-        }
-
-        const bbox = [
-          parseFloat(minLon.toFixed(5)),
-          parseFloat(minLat.toFixed(5)),
-          parseFloat(maxLon.toFixed(5)),
-          parseFloat(maxLat.toFixed(5))
-        ];
-        const coordinates = [
-          [bbox[0], bbox[1]],
-          [bbox[2], bbox[1]],
-          [bbox[2], bbox[3]],
-          [bbox[0], bbox[3]],
-          [bbox[0], bbox[1]]
-        ];
-
-        openExclusionZoneModal(-1, {
-          type: 'bbox',
-          bbox: bbox,
-          coordinates: coordinates,
-          name: 'Nueva Zona de Exclusión',
-          reason: 'water_body'
+        m.on('mouseup', (e) => {
+          if (!isDrawingExclusion || exclusionDrawMode !== 'bbox' || !exclusionBoxStart) return;
+          if (m !== getExclusionTargetMap()) return;
+          handleExclusionBoxMouseUp(e.latlng);
         });
       });
 
@@ -6355,23 +6653,81 @@
       });
     }
 
-    function startDrawingExclusionZone(mode = 'polygon') {
+    function handleExclusionBoxMouseUp(endLatLng) {
+      if (!exclusionBoxStart) return;
+      const minLon = Math.min(exclusionBoxStart.lng, endLatLng.lng);
+      const minLat = Math.min(exclusionBoxStart.lat, endLatLng.lat);
+      const maxLon = Math.max(exclusionBoxStart.lng, endLatLng.lng);
+      const maxLat = Math.max(exclusionBoxStart.lat, endLatLng.lat);
+
+      cancelDrawingExclusionZone();
+
+      if (maxLon - minLon < 0.001 || maxLat - minLat < 0.001) {
+        showToast("Área de exclusión muy pequeña o inválida", "warning");
+        return;
+      }
+
+      const bbox = [
+        parseFloat(minLon.toFixed(5)),
+        parseFloat(minLat.toFixed(5)),
+        parseFloat(maxLon.toFixed(5)),
+        parseFloat(maxLat.toFixed(5))
+      ];
+      const coordinates = [
+        [bbox[0], bbox[1]],
+        [bbox[2], bbox[1]],
+        [bbox[2], bbox[3]],
+        [bbox[0], bbox[3]],
+        [bbox[0], bbox[1]]
+      ];
+
+      openExclusionZoneModal(-1, {
+        type: 'bbox',
+        bbox: bbox,
+        coordinates: coordinates,
+        name: 'Nueva Zona de Exclusión',
+        reason: 'water_body'
+      });
+    }
+
+    function startDrawingExclusionZone(mode = 'polygon', step = 4) {
       if (!currentCityFile) {
         showToast("Selecciona o crea un proyecto primero", "warning");
         return;
       }
       isDrawingExclusion = true;
       exclusionDrawMode = mode;
+      exclusionDrawStep = step;
       exclusionDrawPoints = [];
       exclusionDrawMarkers = [];
       exclusionBoxStart = null;
 
-      if (mapPoi) {
-        if (mode === 'bbox') mapPoi.dragging.disable();
-        mapPoi.getContainer().style.cursor = 'crosshair';
+      const targetMap = getExclusionTargetMap();
+      if (targetMap) {
+        if (mode === 'bbox') targetMap.dragging.disable();
+        targetMap.getContainer().style.cursor = 'crosshair';
+        targetMap.getContainer().classList.add('leaflet-drawing-active');
+        if (targetMap === mapBbox) setMapBboxDrawingInteractivity(true);
       }
 
-      showToast(`Modo trazado de exclusión activo: ${mode === 'polygon' ? 'Polígono libre (doble clic o Enter para cerrar)' : 'Haz clic y arrastra el rectángulo'}`, "info");
+      if (step === 1) {
+        const b = document.getElementById('drawingExclusionStep1Banner');
+        const txt = document.getElementById('drawingExclusionStep1BannerText');
+        if (b) b.classList.remove('hidden');
+        if (txt) txt.innerText = mode === 'polygon'
+          ? "Haz clics en el mapa para trazar el polígono de exclusión (doble clic o Enter para cerrar)"
+          : "Haz clic y arrastra sobre el mapa para trazar el cuadro de exclusión";
+      } else {
+        const b = document.getElementById('drawingExclusionBanner');
+        const txt = document.getElementById('drawingExclusionInstructions');
+        if (b) b.classList.remove('hidden');
+        if (txt) txt.innerText = mode === 'polygon'
+          ? "Haz clics para trazar los vértices de exclusión (doble clic o Enter para cerrar)."
+          : "Haz clic y arrastra en el mapa para delimitar el cuadro de exclusión.";
+      }
+
+      lucide.createIcons();
+      showToast(`Modo exclusión activo: ${mode === 'polygon' ? 'Polígono libre' : 'Cuadro'}`, "info");
     }
 
     function cancelDrawingExclusionZone() {
@@ -6379,44 +6735,64 @@
       exclusionBoxStart = null;
       exclusionDrawPoints = [];
 
-      if (exclusionTempShape && mapPoi) {
-        mapPoi.removeLayer(exclusionTempShape);
+      const targetMap = getExclusionTargetMap();
+      if (exclusionTempShape && targetMap) {
+        targetMap.removeLayer(exclusionTempShape);
         exclusionTempShape = null;
       }
-      if (exclusionDrawMarkers && mapPoi) {
-        exclusionDrawMarkers.forEach(m => mapPoi.removeLayer(m));
+      if (exclusionDrawMarkers && targetMap) {
+        exclusionDrawMarkers.forEach(m => targetMap.removeLayer(m));
         exclusionDrawMarkers = [];
       }
 
-      if (mapPoi) {
-        mapPoi.dragging.enable();
-        mapPoi.getContainer().style.cursor = '';
-      }
+      [mapBbox, mapPoi].filter(Boolean).forEach(m => {
+        m.dragging.enable();
+        m.getContainer().style.cursor = '';
+        m.getContainer().classList.remove('leaflet-drawing-active');
+      });
+      setMapBboxDrawingInteractivity(false);
+
+      const b1 = document.getElementById('drawingExclusionStep1Banner');
+      if (b1) b1.classList.add('hidden');
+      const b4 = document.getElementById('drawingExclusionBanner');
+      if (b4) b4.classList.add('hidden');
     }
 
     function addExclusionPolygonVertex(latlng) {
+      const targetMap = getExclusionTargetMap();
+      if (!targetMap) return;
+
       if (exclusionDrawPoints.length >= 3) {
         const first = exclusionDrawPoints[0];
-        const dist = mapPoi.distance(first, latlng);
+        const dist = targetMap.distance(first, latlng);
         if (dist < 35) {
           finishExclusionPolygonDrawing();
           return;
         }
       }
 
+      const isFirst = (exclusionDrawPoints.length === 0);
       exclusionDrawPoints.push(latlng);
 
       const m = L.circleMarker(latlng, {
-        radius: 5,
+        radius: isFirst ? 7 : 5,
         color: '#EF4444',
-        fillColor: '#FFFFFF',
+        fillColor: isFirst ? '#EF4444' : '#FFFFFF',
         fillOpacity: 1,
-        weight: 2
-      }).addTo(mapPoi);
+        weight: 2,
+        interactive: isFirst,
+        className: isFirst ? 'drawing-handle-marker' : ''
+      }).addTo(targetMap);
       exclusionDrawMarkers.push(m);
 
-      if (exclusionDrawPoints.length === 1) {
-        m.setStyle({ radius: 7, fillColor: '#EF4444', color: '#FFFFFF' });
+      if (isFirst) {
+        m.bindTooltip("Clic para cerrar exclusión", { direction: 'top', className: 'poi-custom-tooltip' });
+        m.on('click', (e) => {
+          if (exclusionDrawPoints.length >= 3) {
+            L.DomEvent.stopPropagation(e);
+            finishExclusionPolygonDrawing();
+          }
+        });
       }
 
       if (!exclusionTempShape) {
@@ -6425,8 +6801,10 @@
           weight: 2,
           dashArray: '6, 6',
           fillColor: '#EF4444',
-          fillOpacity: 0.2
-        }).addTo(mapPoi);
+          fillOpacity: 0.2,
+          interactive: false,
+          className: 'drawing-temp-shape'
+        }).addTo(targetMap);
       } else {
         exclusionTempShape.setLatLngs([exclusionDrawPoints]);
       }
@@ -6572,13 +6950,14 @@
     function centerExclusionZoneOnMap(index) {
       if (!cityData.exclusion_zones || index < 0 || index >= cityData.exclusion_zones.length) return;
       const z = cityData.exclusion_zones[index];
-      if (!mapPoi) return;
+      const targetMap = (currentStep === 1 && mapBbox) ? mapBbox : ((currentStep === 5 && mapDemand) ? mapDemand : mapPoi);
+      if (!targetMap) return;
 
       if (z.coordinates && z.coordinates.length >= 3) {
         const bounds = L.latLngBounds(z.coordinates.map(c => [c[1], c[0]]));
-        mapPoi.fitBounds(bounds, { padding: [50, 50] });
+        targetMap.fitBounds(bounds, { padding: [50, 50] });
       } else if (z.bbox && z.bbox.length === 4) {
-        mapPoi.fitBounds([[z.bbox[1], z.bbox[0]], [z.bbox[3], z.bbox[2]]], { padding: [50, 50] });
+        targetMap.fitBounds([[z.bbox[1], z.bbox[0]], [z.bbox[3], z.bbox[2]]], { padding: [50, 50] });
       }
     }
 
@@ -6592,105 +6971,148 @@
       const container = document.getElementById('exclusionZoneListContainer');
       const badge = document.getElementById('exclusionZoneBadge');
       const countLabel = document.getElementById('exclusionZoneCountLabel');
+      const step1Container = document.getElementById('step1ExclusionListContainer');
+      const step1Badge = document.getElementById('step1ExclusionBadge');
       const zones = cityData.exclusion_zones || [];
 
       if (badge) badge.innerText = zones.length;
       if (countLabel) countLabel.innerText = `${zones.length} ${zones.length === 1 ? 'exclusión configurada' : 'exclusiones configuradas'}`;
-      if (!container) return;
+      if (step1Badge) step1Badge.innerText = `${zones.length} ${zones.length === 1 ? 'zona' : 'zonas'}`;
 
-      if (zones.length === 0) {
-        container.innerHTML = `
-          <div class="text-center py-8 text-stone-400 border border-dashed border-stone-300 rounded-xl space-y-2">
-            <i data-lucide="shield-alert" class="w-8 h-8 mx-auto text-rose-300"></i>
-            <p class="text-xs font-medium text-stone-600">No hay zonas de exclusión trazadas.</p>
-            <p class="text-[10px] text-stone-400 max-w-xs mx-auto">
-              Usa los botones de trazado para delimitar áreas protegidas, cuerpos de agua o islas donde no deseas que se proyecte población ni empleo.
-            </p>
-          </div>
-        `;
-        lucide.createIcons();
-        return;
-      }
-
-      container.innerHTML = zones.map((z, idx) => {
-        const isEnabled = z.enabled !== false;
-        const color = z.color || '#EF4444';
-        const reasonInfo = EXCLUSION_REASONS[z.reason] || { name: z.reason || "Sin Demanda", icon: "shield-alert" };
-
-        return `
-          <div class="p-3 bg-white border ${isEnabled ? 'border-stone-200' : 'border-stone-200 opacity-60 bg-stone-50'} rounded-xl shadow-xs hover:border-rose-300 transition space-y-2">
-            <div class="flex items-start justify-between">
-              <div class="flex items-start space-x-2">
-                <span class="w-3 h-3 rounded-full mt-0.5 shrink-0" style="background-color: ${color}"></span>
-                <div>
-                  <h4 class="text-xs font-bold text-stone-900 leading-tight">${escapeHtml(z.name || z.id)}</h4>
-                  <span class="text-[10px] font-mono text-stone-500">${escapeHtml(z.id)}</span>
+      // 1. Renderizado en Paso 1 (Sidebar compacto)
+      if (step1Container) {
+        if (zones.length === 0) {
+          step1Container.innerHTML = `
+            <div class="text-center py-2.5 text-stone-400 text-[11px] border border-dashed border-stone-200 rounded-lg">
+              Sin exclusiones definidas
+            </div>
+          `;
+        } else {
+          step1Container.innerHTML = zones.map((z, idx) => {
+            const isEnabled = z.enabled !== false;
+            const color = z.color || '#EF4444';
+            return `
+              <div class="p-2 bg-white border ${isEnabled ? 'border-stone-200' : 'border-dashed border-stone-200 opacity-60'} rounded-lg flex items-center justify-between text-xs hover:border-rose-300 transition">
+                <div class="flex items-center space-x-2 truncate">
+                  <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background-color: ${color}"></span>
+                  <span class="font-bold text-stone-800 text-[11px] truncate">${escapeHtml(z.name || z.id)}</span>
+                </div>
+                <div class="flex items-center space-x-1 shrink-0">
+                  <button onclick="toggleExclusionZone(${idx})" title="${isEnabled ? 'Desactivar' : 'Activar'}" class="p-1 rounded text-stone-400 hover:text-rose-600">
+                    <i data-lucide="${isEnabled ? 'eye' : 'eye-off'}" class="w-3.5 h-3.5"></i>
+                  </button>
+                  <button onclick="centerExclusionZoneOnMap(${idx})" title="Centrar en mapa" class="p-1 rounded text-stone-400 hover:text-stone-700">
+                    <i data-lucide="crosshair" class="w-3.5 h-3.5"></i>
+                  </button>
+                  <button onclick="openExclusionZoneModal(${idx})" title="Editar" class="p-1 rounded text-stone-400 hover:text-stone-700">
+                    <i data-lucide="edit-2" class="w-3.5 h-3.5"></i>
+                  </button>
+                  <button onclick="deleteExclusionZone(${idx})" title="Eliminar" class="p-1 rounded text-stone-400 hover:text-rose-600">
+                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                  </button>
                 </div>
               </div>
-              <div class="flex items-center space-x-1 shrink-0">
-                <button onclick="toggleExclusionZone(${idx})" title="${isEnabled ? 'Desactivar exclusión' : 'Activar exclusión'}" class="p-1 rounded hover:bg-stone-100 ${isEnabled ? 'text-rose-600' : 'text-stone-400'}">
-                  <i data-lucide="${isEnabled ? 'eye' : 'eye-off'}" class="w-3.5 h-3.5"></i>
-                </button>
-                <button onclick="centerExclusionZoneOnMap(${idx})" title="Centrar en mapa" class="p-1 rounded hover:bg-stone-100 text-stone-600">
-                  <i data-lucide="crosshair" class="w-3.5 h-3.5"></i>
-                </button>
-                <button onclick="openExclusionZoneModal(${idx})" title="Editar" class="p-1 rounded hover:bg-stone-100 text-stone-600">
-                  <i data-lucide="edit-2" class="w-3.5 h-3.5"></i>
-                </button>
-                <button onclick="deleteExclusionZone(${idx})" title="Eliminar" class="p-1 rounded hover:bg-stone-100 text-stone-400 hover:text-rose-600">
-                  <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-                </button>
-              </div>
-            </div>
+            `;
+          }).join('');
+        }
+      }
 
-            <div class="flex items-center justify-between text-[11px] pt-1 border-t border-stone-100">
-              <span class="text-[10px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-800 border border-rose-200 font-semibold flex items-center space-x-1">
-                <i data-lucide="shield-alert" class="w-3 h-3"></i>
-                <span>${escapeHtml(reasonInfo.name)}</span>
-              </span>
-              <span class="text-[10px] font-mono text-stone-400 uppercase">${z.type === 'bbox' ? 'Cuadro BBOX' : 'Polígono'}</span>
+      // 2. Renderizado en Paso 4 (Pestaña Exclusiones de POI Studio)
+      if (container) {
+        if (zones.length === 0) {
+          container.innerHTML = `
+            <div class="text-center py-8 text-stone-400 border border-dashed border-stone-300 rounded-xl space-y-2">
+              <i data-lucide="shield-alert" class="w-8 h-8 mx-auto text-rose-300"></i>
+              <p class="text-xs font-medium text-stone-600">No hay zonas de exclusión trazadas.</p>
+              <p class="text-[10px] text-stone-400 max-w-xs mx-auto">
+                Usa los botones de trazado para delimitar áreas protegidas, cuerpos de agua o islas donde no deseas que se proyecte población ni empleo.
+              </p>
             </div>
-          </div>
-        `;
-      }).join('');
+          `;
+        } else {
+          container.innerHTML = zones.map((z, idx) => {
+            const isEnabled = z.enabled !== false;
+            const color = z.color || '#EF4444';
+            const reasonInfo = EXCLUSION_REASONS[z.reason] || { name: z.reason || "Sin Demanda", icon: "shield-alert" };
+
+            return `
+              <div class="p-3 bg-white border ${isEnabled ? 'border-stone-200' : 'border-stone-200 opacity-60 bg-stone-50'} rounded-xl shadow-xs hover:border-rose-300 transition space-y-2">
+                <div class="flex items-start justify-between">
+                  <div class="flex items-start space-x-2">
+                    <span class="w-3 h-3 rounded-full mt-0.5 shrink-0" style="background-color: ${color}"></span>
+                    <div>
+                      <h4 class="text-xs font-bold text-stone-900 leading-tight">${escapeHtml(z.name || z.id)}</h4>
+                      <span class="text-[10px] font-mono text-stone-500">${escapeHtml(z.id)}</span>
+                    </div>
+                  </div>
+                  <div class="flex items-center space-x-1 shrink-0">
+                    <button onclick="toggleExclusionZone(${idx})" title="${isEnabled ? 'Desactivar exclusión' : 'Activar exclusión'}" class="p-1 rounded hover:bg-stone-100 ${isEnabled ? 'text-rose-600' : 'text-stone-400'}">
+                      <i data-lucide="${isEnabled ? 'eye' : 'eye-off'}" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <button onclick="centerExclusionZoneOnMap(${idx})" title="Centrar en mapa" class="p-1 rounded hover:bg-stone-100 text-stone-600">
+                      <i data-lucide="crosshair" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <button onclick="openExclusionZoneModal(${idx})" title="Editar" class="p-1 rounded hover:bg-stone-100 text-stone-600">
+                      <i data-lucide="edit-2" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <button onclick="deleteExclusionZone(${idx})" title="Eliminar" class="p-1 rounded hover:bg-stone-100 text-stone-400 hover:text-rose-600">
+                      <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="flex items-center justify-between text-[11px] pt-1 border-t border-stone-100">
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-800 border border-rose-200 font-semibold flex items-center space-x-1">
+                    <i data-lucide="shield-alert" class="w-3 h-3"></i>
+                    <span>${escapeHtml(reasonInfo.name)}</span>
+                  </span>
+                  <span class="text-[10px] font-mono text-stone-400 uppercase">${z.type === 'bbox' ? 'Cuadro BBOX' : 'Polígono'}</span>
+                </div>
+              </div>
+            `;
+          }).join('');
+        }
+      }
 
       lucide.createIcons();
     }
 
     function renderExclusionZonesOnMap() {
-      if (!exclusionZonesGroup) return;
-      exclusionZonesGroup.clearLayers();
+      const targetGroups = [exclusionZonesGroup, exclusionZonesBboxGroup].filter(Boolean);
+      targetGroups.forEach(g => g.clearLayers());
       const zones = cityData.exclusion_zones || [];
 
       zones.forEach(z => {
         if (!z.enabled && z.enabled !== undefined) return;
         const color = z.color || '#EF4444';
-        let layer = null;
 
-        if (z.coordinates && z.coordinates.length >= 3) {
-          const latlngs = z.coordinates.map(c => [c[1], c[0]]);
-          layer = L.polygon(latlngs, {
-            color: color,
-            weight: 2,
-            fillColor: color,
-            fillOpacity: 0.25,
-            dashArray: '6, 6'
-          });
-        } else if (z.bbox && z.bbox.length === 4) {
-          const bounds = [[z.bbox[1], z.bbox[0]], [z.bbox[3], z.bbox[2]]];
-          layer = L.rectangle(bounds, {
-            color: color,
-            weight: 2,
-            fillColor: color,
-            fillOpacity: 0.25,
-            dashArray: '6, 6'
-          });
-        }
+        targetGroups.forEach(group => {
+          let layer = null;
+          if (z.coordinates && z.coordinates.length >= 3) {
+            const latlngs = z.coordinates.map(c => [c[1], c[0]]);
+            layer = L.polygon(latlngs, {
+              color: color,
+              weight: 2,
+              fillColor: color,
+              fillOpacity: 0.25,
+              dashArray: '6, 6'
+            });
+          } else if (z.bbox && z.bbox.length === 4) {
+            const bounds = [[z.bbox[1], z.bbox[0]], [z.bbox[3], z.bbox[2]]];
+            layer = L.rectangle(bounds, {
+              color: color,
+              weight: 2,
+              fillColor: color,
+              fillOpacity: 0.25,
+              dashArray: '6, 6'
+            });
+          }
 
-        if (layer) {
-          layer.bindTooltip(`<strong>🚫 ${escapeHtml(z.name || z.id)}</strong><br><span class="text-[10px] text-rose-600 font-semibold">Exclusión: Cero Demanda</span>`, { sticky: true });
-          layer.addTo(exclusionZonesGroup);
-        }
+          if (layer) {
+            layer.bindTooltip(`<strong>🚫 ${escapeHtml(z.name || z.id)}</strong><br><span class="text-[10px] text-rose-600 font-semibold">Exclusión: Cero Demanda</span>`, { sticky: true });
+            layer.addTo(group);
+          }
+        });
       });
     }
 
@@ -6833,6 +7255,7 @@
       if (isolatedHandlesGroup) isolatedHandlesGroup.clearLayers();
       if (isolatedZonesDemandGroup) isolatedZonesDemandGroup.clearLayers();
       if (exclusionZonesGroup) exclusionZonesGroup.clearLayers();
+      if (exclusionZonesBboxGroup) exclusionZonesBboxGroup.clearLayers();
       if (exclusionZonesDemandGroup) exclusionZonesDemandGroup.clearLayers();
       if (zoomPreviewGroup) zoomPreviewGroup.clearLayers();
       const showPreviewChk = document.getElementById('cfg_show_zoom_preview');
@@ -6847,6 +7270,10 @@
       const metricPts = document.getElementById('metricDemandPoints');
       if (metricPea) metricPea.innerText = "0";
       if (metricPts) metricPts.innerText = "0";
+
+      window.conapoMetadata = null;
+      window.conapoYear = null;
+      window.conapoAvailableYears = null;
 
       activeEditingPoiIndex = -1;
       currentPoiFilter = 'ALL';
@@ -7293,6 +7720,25 @@
       toggleModalExperimentControls(modEn);
       updateModalSimulatorPreview();
       renderUrbanCorePolygon();
+
+      const projYr = m.projection_year || m.target_year;
+      const selYr = document.getElementById('conapoYearSelect');
+      if (projYr && selYr) {
+        let exists = false;
+        for (let i = 0; i < selYr.options.length; i++) {
+          if (parseInt(selYr.options[i].value) === parseInt(projYr)) {
+            exists = true;
+            break;
+          }
+        }
+        if (!exists) {
+          const opt = document.createElement('option');
+          opt.value = projYr;
+          opt.innerText = projYr;
+          selYr.appendChild(opt);
+        }
+        selYr.value = projYr;
+      }
 
       // Adjuntar listeners de auto-guardado a los campos de formulario
       const inputIds = [
@@ -8137,20 +8583,56 @@
     // -------------------------------------------------------------------------
     // PASO 3: TABLA DE PROYECCIONES CONAPO
     // -------------------------------------------------------------------------
-    async function autoCalculateConapo() {
+    function updateConapoYearSelect(availableYears, selectedYear) {
+      const select = document.getElementById('conapoYearSelect');
+      if (!select) return;
+      if (!availableYears || availableYears.length === 0) {
+        select.innerHTML = `<option value="${selectedYear || 2026}">${selectedYear || 2026}</option>`;
+        return;
+      }
+      select.innerHTML = '';
+      availableYears.forEach(y => {
+        const opt = document.createElement('option');
+        opt.value = y;
+        opt.innerText = y;
+        if (parseInt(y) === parseInt(selectedYear)) opt.selected = true;
+        select.appendChild(opt);
+      });
+      select.value = selectedYear;
+    }
+
+    async function onConapoYearSelectChange(newYear) {
+      if (!newYear) return;
+      await autoCalculateConapo(parseInt(newYear));
+    }
+
+    async function autoCalculateConapo(selectedYear = null) {
       const btn = document.getElementById('btnAutoConapo');
+      const select = document.getElementById('conapoYearSelect');
       if (btn) btn.disabled = true;
-      showToast("Consultando proyecciones oficiales de CONAPO...", "info");
+      if (select) select.disabled = true;
+
+      const reqYear = selectedYear || (select && select.value ? select.value : (cityData && cityData.macroeconomics && (cityData.macroeconomics.projection_year || cityData.macroeconomics.target_year)));
+      const url = reqYear
+        ? `/api/conapo/calculate?file=${encodeURIComponent(currentCityFile)}&year=${encodeURIComponent(reqYear)}`
+        : `/api/conapo/calculate?file=${encodeURIComponent(currentCityFile)}`;
+
+      showToast(`Consultando proyecciones oficiales de CONAPO (${reqYear || 'año objetivo'})...`, "info");
       try {
-        const res = await fetch(`/api/conapo/calculate?file=${encodeURIComponent(currentCityFile)}`);
+        const res = await fetch(url);
         const data = await res.json();
         if (data.status === 'ok') {
           window.conapoMetadata = window.conapoMetadata || {};
           window.conapoYear = data.projection_year;
+          window.conapoAvailableYears = data.available_years || [];
+
+          updateConapoYearSelect(data.available_years, data.projection_year);
+
           if (document.getElementById('conapoSubtitleLabel')) {
-            document.getElementById('conapoSubtitleLabel').innerText = `Factores de sincronización intercensal Pob_${data.projection_year || 2025} / Pob_2020 (${data.conapo_file || 'CONAPO'}).`;
+            document.getElementById('conapoSubtitleLabel').innerText = `Factores de sincronización intercensal Pob_${data.projection_year || 2026} / Pob_2020 (${data.conapo_file || 'CONAPO'}).`;
           }
           if (!cityData.macroeconomics) cityData.macroeconomics = {};
+          cityData.macroeconomics.projection_year = data.projection_year;
           cityData.macroeconomics.growth_factors = {};
 
           data.factors.forEach(f => {
@@ -8169,6 +8651,7 @@
         showToast(`Error al consultar CONAPO: ${e.message}`, "error");
       } finally {
         if (btn) btn.disabled = false;
+        if (select) select.disabled = false;
       }
     }
 
@@ -8194,7 +8677,7 @@
       entries.forEach(([code, val]) => {
         const meta = (window.conapoMetadata && window.conapoMetadata[code]) || {};
         const munName = meta.name || `Municipio ${code}`;
-        const anoStr = meta.ano || window.conapoYear || (window.conapoMetadata && window.conapoMetadata.projection_year) || 2024;
+        const anoStr = meta.ano || window.conapoYear || (cityData.macroeconomics && (cityData.macroeconomics.projection_year || cityData.macroeconomics.target_year)) || 2026;
         const pob2020Str = meta.pob_2020 ? Number(meta.pob_2020).toLocaleString() : "-";
         const pobProjStr = meta.pob_conapo ? Number(meta.pob_conapo).toLocaleString() : "-";
 

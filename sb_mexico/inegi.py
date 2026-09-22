@@ -424,7 +424,7 @@ def parse_ce2024_municipal(ce_path: str) -> Dict[str, Dict]:
 
 def parse_conapo_projections(
     conapo_path: str,
-    target_year: int = 2024,
+    target_year: int = 2026,
     as_growth_factors: bool = False
 ) -> Dict[str, float]:
     """
@@ -448,13 +448,29 @@ def parse_conapo_projections(
                 pob_candidates = [c for c in cols if 'POB_TOTAL' in c or 'POB_MIT_MUN' in c or 'POBTOT' in c or c.startswith('POB')]
                 col_pob = pob_candidates[0]
 
+                # Si el archivo tiene desglose por sexo y además contiene una fila TOTAL,
+                # filtramos por TOTAL para no duplicar sumas. Si solo tiene HOMBRES y MUJERES,
+                # se mantiene completo para que el groupby sume ambos sexos.
+                if 'SEXO' in cols:
+                    sex_vals = set(df['SEXO'].dropna().astype(str).str.strip().str.upper().unique())
+                    if 'TOTAL' in sex_vals:
+                        df = df[df['SEXO'].astype(str).str.strip().str.upper() == 'TOTAL']
+
                 df['cve_clean'] = pd.to_numeric(df['CLAVE'], errors='coerce').fillna(0).astype(int)
                 df = df[df['cve_clean'] > 0]
                 df['pob_clean'] = pd.to_numeric(df[col_pob].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
 
+                # Detectar columna de año normalizando posibles variantes
+                col_ano = None
+                for c in cols:
+                    c_norm = c.replace('Ñ', 'N').replace('Á', 'A').replace('Ó', 'O')
+                    if c_norm in ['ANO', 'ANIO', 'YEAR', 'AO']:
+                        col_ano = c
+                        break
+
                 # Filtrar año si el archivo contiene desglose temporal multianual
-                if 'ANO' in cols:
-                    df['ANO_num'] = pd.to_numeric(df['ANO'], errors='coerce')
+                if col_ano:
+                    df['ANO_num'] = pd.to_numeric(df[col_ano], errors='coerce')
                     available_years = df['ANO_num'].dropna().unique()
                     
                     if as_growth_factors and 2020 in available_years:
@@ -486,7 +502,7 @@ def parse_conapo_projections(
     return {}
 
 
-def parse_conapo_growth_factors(conapo_path: str, target_year: int = 2024) -> Dict[str, float]:
+def parse_conapo_growth_factors(conapo_path: str, target_year: int = 2026) -> Dict[str, float]:
     """Helper de conveniencia para derivar factores de crecimiento intercensal CONAPO (base 2020)."""
     return parse_conapo_projections(conapo_path, target_year=target_year, as_growth_factors=True)
 

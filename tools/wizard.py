@@ -334,6 +334,13 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         f'  furness_tol: {float(macro_cfg.get("furness_tol", 0.02))}',
     ])
 
+    proj_yr = macro_cfg.get("projection_year") or macro_cfg.get("target_year")
+    if proj_yr is not None:
+        try:
+            lines.append(f'  projection_year: {int(proj_yr)}')
+        except (ValueError, TypeError):
+            pass
+
     if "cohort_mode" in macro_cfg:
         lines.append(f'  cohort_mode: {_yaml_quote(macro_cfg.get("cohort_mode"))}')
     if "cohort_preset" in macro_cfg:
@@ -875,12 +882,13 @@ def delete_data_file(rel_or_abs_path: str) -> str:
     return rel_or_abs_path
 
 
-def calculate_conapo_factors(city_file: str) -> Dict[str, Any]:
+def calculate_conapo_factors(city_file: str, target_year: Optional[int] = None) -> Dict[str, Any]:
     """
     Calcula automáticamente los factores de sincronización intercensal CONAPO
     cruzando las proyecciones (data-*.csv, *conapo*.csv, *pobproy*.csv) con el Censo CPV 2020.
+    Permite escanear el rango multianual de proyecciones y seleccionar el año deseado.
     Retorna nombres legibles, poblaciones 2020, poblaciones proyectadas,
-    año de proyección y si el municipio intersecta el BBOX.
+    año de proyección, lista de años disponibles y si el municipio intersecta el BBOX.
     """
     import pandas as pd
     import numpy as np
@@ -894,6 +902,13 @@ def calculate_conapo_factors(city_file: str) -> Dict[str, Any]:
     city_code = city_cfg.get("code", "")
     city_name = city_cfg.get("name", "")
     bbox = city_cfg.get("bbox", [])
+    macro_cfg = cdata.get("macroeconomics", {})
+    configured_year = macro_cfg.get("projection_year") or macro_cfg.get("target_year")
+    if configured_year is not None:
+        try:
+            configured_year = int(configured_year)
+        except (ValueError, TypeError):
+            configured_year = None
 
     status = inspect_data_files(city_name=city_name, city_code=city_code, city_file=city_file)
     conapo_files = status.get("conapo", {}).get("files", [])
@@ -911,7 +926,8 @@ def calculate_conapo_factors(city_file: str) -> Dict[str, Any]:
 
     # 1. Parsear CONAPO de forma vectorizada de alto rendimiento
     conapo_dict = {}
-    proj_year = 2024
+    proj_year = 2026
+    available_years_list = []
     for enc in ['utf-8-sig', 'latin1', 'utf-8', 'cp1252']:
         try:
             df_con = pd.read_csv(conapo_path, encoding=enc, low_memory=False)
@@ -922,21 +938,50 @@ def calculate_conapo_factors(city_file: str) -> Dict[str, Any]:
                 pob_candidates = [c for c in cols if 'POB_TOTAL' in c or 'POB_MIT_MUN' in c or 'POBTOT' in c or c.startswith('POB')]
                 col_pob = pob_candidates[0]
                 has_nom = 'NOM_MUN' in cols
-                has_ano = 'ANO' in cols
 
-                if has_ano:
-                    df_con['ANO_num'] = pd.to_numeric(df_con['ANO'], errors='coerce')
-                    available_years = df_con['ANO_num'].dropna().unique()
-                    if len(available_years) > 0:
-                        chosen_year = 2024 if 2024 in available_years else (
-                            available_years[np.argmin(np.abs(available_years - 2024))]
-                        )
+                # Si el archivo tiene desglose por sexo y además contiene una fila TOTAL,
+                # filtramos por TOTAL para no duplicar sumas. Si solo tiene HOMBRES y MUJERES,
+                # se mantiene completo para que el groupby sume ambos sexos.
+                if 'SEXO' in cols:
+                    sex_vals = set(df_con['SEXO'].dropna().astype(str).str.strip().str.upper().unique())
+                    if 'TOTAL' in sex_vals:
+                        df_con = df_con[df_con['SEXO'].astype(str).str.strip().str.upper() == 'TOTAL']
+
+                # Detectar columna de año normalizando posibles variantes
+                col_ano = None
+                for c in cols:
+                    c_norm = c.replace('Ñ', 'N').replace('Á', 'A').replace('Ó', 'O')
+                    if c_norm in ['ANO', 'ANIO', 'YEAR', 'AO']:
+                        col_ano = c
+                        break
+
+                if col_ano:
+                    df_con['ANO_num'] = pd.to_numeric(df_con[col_ano], errors='coerce')
+                    raw_years = [int(y) for y in df_con['ANO_num'].dropna().unique()]
+                    # Filtrar años de planeación útiles (2020 a 2050), o todos si no hay en ese rango
+                    plan_years = sorted([y for y in raw_years if 2020 <= y <= 2050])
+                    available_years_list = plan_years if plan_years else sorted(raw_years)
+
+                    if available_years_list:
+                        if target_year is not None and target_year in available_years_list:
+                            chosen_year = target_year
+                        elif target_year is not None:
+                            chosen_year = int(available_years_list[np.argmin(np.abs(np.array(available_years_list) - target_year))])
+                        elif configured_year is not None and configured_year in available_years_list:
+                            chosen_year = configured_year
+                        elif 2026 in available_years_list:
+                            chosen_year = 2026
+                        elif 2024 in available_years_list:
+                            chosen_year = 2024
+                        else:
+                            chosen_year = int(available_years_list[np.argmin(np.abs(np.array(available_years_list) - 2026))])
+
                         proj_year = int(chosen_year)
                         df_con = df_con[df_con['ANO_num'] == chosen_year]
 
                 df_con['cve_clean'] = pd.to_numeric(df_con['CLAVE'], errors='coerce').fillna(0).astype(int)
                 df_con = df_con[df_con['cve_clean'] > 0]
-                df_con['pob_clean'] = pd.to_numeric(df_con[col_pob].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                df_con['pob_clean'] = pd.to_numeric(df_con[col_pob].astype(str).replace(',', ''), errors='coerce').fillna(0)
 
                 if has_nom:
                     grouped = df_con.groupby(['cve_clean', 'NOM_MUN'])['pob_clean'].sum().reset_index()
@@ -1078,6 +1123,7 @@ def calculate_conapo_factors(city_file: str) -> Dict[str, Any]:
         "status": "ok",
         "conapo_file": os.path.basename(conapo_path),
         "projection_year": proj_year,
+        "available_years": available_years_list,
         "factors": factors_list
     }
 
@@ -1661,10 +1707,17 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
             self.serve_json(status)
         elif path == "/api/conapo/calculate":
             city_file = query.get("file", [""])[0]
+            year_param = query.get("year", [""])[0]
+            target_year = None
+            if year_param:
+                try:
+                    target_year = int(year_param)
+                except ValueError:
+                    target_year = None
             if not city_file:
                 self.serve_error("Parámetro 'file' faltante", 400)
                 return
-            factors_res = calculate_conapo_factors(city_file)
+            factors_res = calculate_conapo_factors(city_file, target_year=target_year)
             self.serve_json(factors_res)
         elif path == "/api/macro/detect":
             city_file = query.get("file", [""])[0]

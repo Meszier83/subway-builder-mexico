@@ -104,13 +104,17 @@ class TestWizard(unittest.TestCase):
         self.assertTrue("cancun" in report["active_dir"])
 
     def test_calculate_conapo_factors(self):
-        res = calculate_conapo_factors("cities/cancun.yaml")
+        res = calculate_conapo_factors("cities/cancun_riviera_maya.yaml")
         self.assertIn(res["status"], ["ok", "missing_conapo"])
         if res["status"] == "ok":
             self.assertIn("factors", res)
             self.assertIn("projection_year", res)
+            self.assertIn("available_years", res)
             self.assertGreaterEqual(res["projection_year"], 2020)
             self.assertGreater(len(res["factors"]), 0)
+            self.assertIn(2024, res["available_years"])
+            self.assertIn(2026, res["available_years"])
+
             cves = [f["cve_mun"] for f in res["factors"]]
             self.assertIn("23005", cves)  # Benito Juárez / Cancún
             bjuarez = [f for f in res["factors"] if f["cve_mun"] == "23005"][0]
@@ -119,6 +123,16 @@ class TestWizard(unittest.TestCase):
             self.assertGreater(bjuarez["pob_conapo"], 900000)
             self.assertGreater(bjuarez["factor"], 1.0)
             self.assertTrue(bjuarez["in_bbox"])
+
+            # Probar selección de año objetivo (2024 vs 2026) y coherencia demográfica
+            res_24 = calculate_conapo_factors("cities/cancun_riviera_maya.yaml", target_year=2024)
+            res_26 = calculate_conapo_factors("cities/cancun_riviera_maya.yaml", target_year=2026)
+            self.assertEqual(res_24["projection_year"], 2024)
+            self.assertEqual(res_26["projection_year"], 2026)
+            bj_24 = [f for f in res_24["factors"] if f["cve_mun"] == "23005"][0]
+            bj_26 = [f for f in res_26["factors"] if f["cve_mun"] == "23005"][0]
+            self.assertGreater(bj_26["pob_conapo"], bj_24["pob_conapo"])
+            self.assertGreaterEqual(bj_26["factor"], bj_24["factor"])
 
     def test_exclude_and_relink_data_file_non_destructive(self):
         # Crear un proyecto temporal para probar exclusión no destructiva
