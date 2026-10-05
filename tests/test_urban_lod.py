@@ -46,7 +46,10 @@ class TestUrbanCoreLOD(unittest.TestCase):
                 mock_proc.wait.return_value = 0
                 mock_popen.return_value = mock_proc
 
-                res = build_city_map(
+                # Exercise the WSL command path on either host OS; do not run native MapGen.
+                import inspect
+                self.assertIn("urban_core_polygon", inspect.signature(build_city_map).parameters)
+                res = build_city_map_wsl(
                     city_code="TEST",
                     bbox=[-87.0, 21.0, -86.7, 21.3],
                     osm_pbf_path=dummy_pbf,
@@ -96,14 +99,14 @@ class TestUrbanCoreLOD(unittest.TestCase):
     def test_building_filter_spatial_intersection(self):
         """Verifica la lógica espacial vectorial de filtrado de centroides de edificios."""
         poly_geom = shapely.Polygon(self.sample_polygon)
-        
+
         # Puntos: uno adentro y uno afuera
         inside_pt = shapely.Point(-86.85, 21.15)
         outside_pt = shapely.Point(-86.95, 21.25)
-        
+
         pts = shapely.points([inside_pt.x, outside_pt.x], [inside_pt.y, outside_pt.y])
         mask = shapely.intersects(poly_geom, pts)
-        
+
         self.assertTrue(mask[0])
         self.assertFalse(mask[1])
 
@@ -211,6 +214,33 @@ class TestUrbanCoreLOD(unittest.TestCase):
         self.assertIn("core_highways", src)
         self.assertIn("wr/natural=*", src)
         self.assertIn("wr/leisure=*", src)
+
+    def test_auto_urban_polygon_reach_calibration(self):
+        """Verifica que /api/auto-urban-polygon admita reach_km y dimensione la mancha urbana dinámicamente."""
+        from tools.wizard import WizardRequestHandler
+        import unittest.mock as mock
+
+        handler_compact = WizardRequestHandler.__new__(WizardRequestHandler)
+        handler_compact.serve_json = mock.MagicMock()
+        handler_compact.path = "/api/auto-urban-polygon?file=cities/merida.yaml&reach_km=8"
+        handler_compact.do_GET()
+        res_compact = handler_compact.serve_json.call_args[0][0]
+
+        self.assertEqual(res_compact["status"], "ok")
+        self.assertIn("polygon", res_compact)
+        self.assertIn("center", res_compact)
+        self.assertEqual(res_compact["reach_km"], 8.0)
+        self.assertGreaterEqual(len(res_compact["polygon"]), 3)
+
+        handler_wide = WizardRequestHandler.__new__(WizardRequestHandler)
+        handler_wide.serve_json = mock.MagicMock()
+        handler_wide.path = "/api/auto-urban-polygon?file=cities/merida.yaml&reach_km=25"
+        handler_wide.do_GET()
+        res_wide = handler_wide.serve_json.call_args[0][0]
+
+        self.assertEqual(res_wide["status"], "ok")
+        self.assertEqual(res_wide["reach_km"], 25.0)
+        self.assertGreater(res_wide["points_count"], res_compact["points_count"])
 
 
 if __name__ == "__main__":

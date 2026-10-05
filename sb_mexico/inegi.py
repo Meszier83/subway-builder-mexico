@@ -9,8 +9,10 @@ import os
 import csv
 import glob
 import math
+import re
 import numpy as np
 import pandas as pd
+from sb_mexico.source_identity import RecordIdentityLedger
 from typing import Dict, List, Tuple, Optional, Union, Any
 
 # Estratos de personal ocupado en el DENUE y sus medias geométricas
@@ -318,7 +320,7 @@ def calculate_cpv_pea_rate(cpv_path: str, target_cve_muns: Optional[List[str]] =
 
 
 
-def parse_ce2024_municipal(ce_path: str) -> Dict[str, Dict]:
+def parse_ce2024_municipal(ce_path: str, reference_year: Optional[int] = None) -> Dict[str, Dict]:
     """
     Parsea el tabulado de los Censos Económicos 2024 (SAIC o Microdatos tr_ce).
     Extrae el personal ocupado total (H001A) por municipio.
@@ -377,55 +379,41 @@ def parse_ce2024_municipal(ce_path: str) -> Dict[str, Dict]:
                 continue
         return benchmarks
 
-    # Formato B: Consulta Exportada de SAIC
-    col_mun = [c for c in df.columns if 'Municipio' in c or 'municipio' in c][0]
-    col_h001a = [c for c in df.columns if 'H001A' in c or 'Personal' in c][0]
-    col_ent = ([c for c in df.columns if 'Entidad' in c or 'entidad' in c] + [None])[0]
-    col_estrato = ([c for c in df.columns if 'Estrato' in c or 'estrato' in c] + [None])[0]
-    col_anio = ([c for c in df.columns if any(k in c.lower() for k in ['año', 'a\ufffdo', 'anio', 'censal', 'year'])] + [None])[0]
-
-    df_filtered = df
-    if col_anio:
-        years = [int(str(y).strip()) for y in df[col_anio].dropna().unique() if str(y).strip().isdigit()]
-        if years:
-            latest_year = str(max(years))
-            df_filtered = df_filtered[df_filtered[col_anio].str.strip() == latest_year]
-
-    if col_estrato:
-        df_filtered = df_filtered[df_filtered[col_estrato].astype(str).str.contains('Suma|Total', case=False, na=False)]
-
-    for _, row in df_filtered.iterrows():
-        mun_str = str(row[col_mun]).strip()
-        if not mun_str or mun_str.lower() == 'nan' or "total" in mun_str.lower():
-            continue
-        
-        # Extraer cve_mun de la cadena (ej. "001 Cozumel" -> "001")
-        tokens = mun_str.split(' ', 1)
-        cve_mun_raw = tokens[0]
-        nom_mun = tokens[1] if len(tokens) > 1 else mun_str
-
-        # Extraer cve_ent si está disponible
-        ent_str = str(row[col_ent]).strip() if col_ent else "00"
-        cve_ent_raw = ent_str.split(' ', 1)[0]
-
-        cve_5 = format_cve_mun(cve_mun_raw, cve_ent_raw)
-        try:
-            h001a_val = float(str(row[col_h001a]).replace(',', '').strip())
-            if cve_5 != "-1" and h001a_val > 0:
-                benchmarks[cve_5] = {
-                    "nombre": nom_mun,
-                    "empleos_ce": h001a_val
-                }
-        except ValueError:
-            continue
-
+    # SAIC: sector rows must never overwrite an all-industry municipal total.
+    from sb_mexico.ce_controls import read_saic_controls
+    controls = read_saic_controls([ce_path], reference_year)
+    if reference_year is None and controls:
+        reference_year = max(r['reference_year'] for r in controls.values())
+    for row in controls.values():
+        if (row['reference_year'] == reference_year
+                and row['geography_level'] == 'municipality'
+                and row['activity_code'] == '' and row['stratum'] == 'TOTAL'
+                and row['employment'] is not None):
+            benchmarks[row['geography']] = dict(nombre=row['name'].split(' ', 1)[-1],
+                                                empleos_ce=float(row['employment']))
     return benchmarks
+
+
+def resolve_projection_year(macro):
+    """Shared Wizard/build precedence, with the existing 2026 default."""
+    value = macro.get('projection_year')
+    if value is None:
+        value = macro.get('target_year', 2026)
+    try:
+        year = int(value)
+        if isinstance(value, bool) or float(value) != year or not 1900 <= year <= 2200:
+            raise ValueError()
+    except (ValueError, TypeError, OverflowError):
+        raise ValueError(f'Invalid population projection year: {value!r}')
+    return year
 
 
 def parse_conapo_projections(
     conapo_path: str,
     target_year: int = 2026,
-    as_growth_factors: bool = False
+    as_growth_factors: bool = False,
+    diagnostics: Optional[Dict] = None,
+    source_year: Optional[int] = None
 ) -> Dict[str, float]:
     """
     Parsea las proyecciones oficiales de población municipal de CONAPO:
@@ -437,6 +425,11 @@ def parse_conapo_projections(
     """
     if not os.path.exists(conapo_path):
         return {}
+    if diagnostics is not None:
+        diagnostics.clear()
+        diagnostics.update(requested_year=int(target_year), effective_year=source_year,
+                           year_basis='confirmed_source_year' if source_year else 'unverified',
+                           available_years=[], value_kind='population')
 
     for enc in ['utf-8-sig', 'latin1', 'utf-8', 'cp1252']:
         try:
@@ -459,6 +452,10 @@ def parse_conapo_projections(
                 df['cve_clean'] = pd.to_numeric(df['CLAVE'], errors='coerce').fillna(0).astype(int)
                 df = df[df['cve_clean'] > 0]
                 df['pob_clean'] = pd.to_numeric(df[col_pob].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                if diagnostics is not None and 'NOM_MUN' in df:
+                    diagnostics['municipality_names'] = {
+                        f'{int(key):05d}': str(value).strip()
+                        for key, value in df.groupby('cve_clean')['NOM_MUN'].first().items()}
 
                 # Detectar columna de año normalizando posibles variantes
                 col_ano = None
@@ -471,7 +468,9 @@ def parse_conapo_projections(
                 # Filtrar año si el archivo contiene desglose temporal multianual
                 if col_ano:
                     df['ANO_num'] = pd.to_numeric(df[col_ano], errors='coerce')
-                    available_years = df['ANO_num'].dropna().unique()
+                    available_years = np.sort(df['ANO_num'].dropna().unique())
+                    if diagnostics is not None:
+                        diagnostics['available_years'] = [int(y) for y in available_years]
                     
                     if as_growth_factors and 2020 in available_years:
                         chosen_year = target_year if target_year in available_years else (
@@ -485,6 +484,11 @@ def parse_conapo_projections(
                             if val_base > 0 and val_target > 0:
                                 ratios[f"{cve:05d}"] = round(float(val_target / val_base), 4)
                         if ratios:
+                            if diagnostics is not None:
+                                diagnostics.update(effective_year=int(chosen_year),
+                                    year_basis='exact' if chosen_year == target_year else 'nearest_available',
+                                    value_kind='growth_factor', base_year=2020,
+                                    denominator='CONAPO population 2020')
                             return ratios
 
                     if len(available_years) > 0:
@@ -492,6 +496,9 @@ def parse_conapo_projections(
                             available_years[np.argmin(np.abs(available_years - target_year))]
                         )
                         df = df[df['ANO_num'] == chosen_year]
+                        if diagnostics is not None:
+                            diagnostics.update(effective_year=int(chosen_year),
+                                year_basis='exact' if chosen_year == target_year else 'nearest_available')
 
                 grouped = df.groupby('cve_clean')['pob_clean'].sum()
                 projections = {f"{cve:05d}": float(val) for cve, val in grouped.items() if val > 0}
@@ -578,13 +585,15 @@ def _parse_denue_strata_series(series: pd.Series) -> Tuple[pd.Series, pd.Series]
     return jobs, micro
 
 
-def load_denue(denue_paths: Union[str, List[str]], bbox: Dict[str, float]) -> pd.DataFrame:
+def load_denue(denue_paths: Union[str, List[str]], bbox: Dict[str, float], *, full_scope=False) -> pd.DataFrame:
     """
     Carga e inicializa los registros del DENUE dentro del BBOX (soporta múltiples archivos para zonas multi-estado).
     Calcula empleos formales base por estrato y normaliza las claves espaciales.
     Almacena en df_denue.attrs['mun_totals_global'] la suma global de empleos por municipio
     antes del recorte BBOX para permitir calibración proporcional exacta.
     Optimizado para bajo consumo de memoria mediante lectura por chunks y filtrado temprano de BBOX.
+    full_scope=True retains unlocated/outside records and fingerprints raw size
+    bands and SCIAN for bounded workplace fitting before spatial clipping.
     """
     if isinstance(denue_paths, str):
         paths = [denue_paths]
@@ -609,6 +618,8 @@ def load_denue(denue_paths: Union[str, List[str]], bbox: Dict[str, float]) -> pd
 
     filtered_chunks = []
     mun_totals_global: Dict[str, float] = {}
+    identities = RecordIdentityLedger('DENUE')
+    from sb_mexico.residential import geo_code
 
     for path in clean_paths:
         try:
@@ -661,6 +672,31 @@ def load_denue(denue_paths: Union[str, List[str]], bbox: Dict[str, float]) -> pd
             jobs, micro = _parse_denue_strata_series(per_s)
             chunk["jobs_formal"] = jobs
             chunk["is_micro_small"] = micro
+            if full_scope:
+                chunk['workplace_band'] = per_s
+                chunk['workplace_industry'] = chunk.get('codigo_act', pd.Series('', index=chunk.index)).fillna('').astype(str).str.strip()
+
+            # Official IDs distinguish businesses that share coordinates. Dedup
+            # before the municipal totals, including records outside the BBOX.
+            keep = []
+            identity_columns = [c for c in ('clee','id','cve_mun_clean','jobs_formal','is_micro_small',
+                                           'lat','lon','cve_loc','ageb','manzana') if c in chunk]
+            for row_index, values in zip(chunk.index, chunk[identity_columns].itertuples(index=False, name=None)):
+                row = dict(zip(identity_columns, values))
+                aliases = [(name, identities.clean(row.get(name))) for name in ('clee', 'id')
+                           if identities.clean(row.get(name))]
+                payload = (row['cve_mun_clean'], row['jobs_formal'], bool(row['is_micro_small']),
+                           identities.clean(row.get('lat')), identities.clean(row.get('lon')),
+                           geo_code(row.get('cve_loc'), 4), geo_code(row.get('ageb'), 4),
+                           geo_code(row.get('manzana'), 3))
+                if full_scope:
+                    payload += (str(chunk.loc[row_index, 'workplace_band']), str(chunk.loc[row_index, 'workplace_industry']))
+                try:
+                    keep.append(identities.keep(aliases, payload))
+                except ValueError:
+                    reader.close()
+                    raise
+            chunk = chunk.loc[keep]
 
             # Totales globales de empleo formal por municipio (antes del recorte BBOX)
             valid_mun = chunk[chunk["cve_mun_clean"] != "-1"]
@@ -675,7 +711,7 @@ def load_denue(denue_paths: Union[str, List[str]], bbox: Dict[str, float]) -> pd
                 (chunk["lat"] >= min_lat) & (chunk["lat"] <= max_lat) &
                 chunk["lat"].notna() & chunk["lon"].notna()
             )
-            filtered = chunk[in_bbox].copy()
+            filtered = chunk.copy() if full_scope else chunk[in_bbox].copy()
             if not filtered.empty:
                 filtered_chunks.append(filtered)
 
@@ -684,10 +720,12 @@ def load_denue(denue_paths: Union[str, List[str]], bbox: Dict[str, float]) -> pd
             "lat", "lon", "cve_mun_clean", "jobs_formal", "is_micro_small", "ageb_clean", "mza_clean"
         ])
         df_empty.attrs["mun_totals_global"] = mun_totals_global
+        df_empty.attrs['source_identity'] = identities.report
         return df_empty
 
     df_denue = pd.concat(filtered_chunks, ignore_index=True)
     df_denue.attrs["mun_totals_global"] = mun_totals_global
+    df_denue.attrs['source_identity'] = identities.report
 
     # Normalizar AGEB y Manzana con fallbacks seguros
     if "ageb" in df_denue.columns:
@@ -806,12 +844,19 @@ def calibrate_denue_employment(
 
 
 def load_marco_geoestadistico_coords(
-    marco_paths: Union[str, List[str]]
+    marco_paths: Union[str, List[str]],
+    placement_mode: str = "legacy"
 ) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     """
     Carga capas vectoriales del Marco Geoestadístico de INEGI (Shapefile, GeoJSON, GeoPackage)
     y extrae centroides oficiales exactos para Manzanas y AGEBs.
     """
+    from sb_mexico.residential import validate_placement_mode, load_official_layers
+    validate_placement_mode(placement_mode)
+    if placement_mode == "official_blocks":
+        paths = [str(marco_paths)] if isinstance(marco_paths, (str, bytes)) else marco_paths
+        blocks, areas, _ = load_official_layers(paths)
+        return blocks, areas
     if isinstance(marco_paths, (str, bytes)):
         paths = [str(marco_paths)]
     else:
@@ -908,7 +953,10 @@ def load_cpv_demography(
     growth_factors: Optional[Dict[str, float]] = None,
     conapo_projections: Optional[Dict[str, float]] = None,
     default_growth: float = 1.0,
-    marco_paths: Optional[Union[str, List[str]]] = None
+    marco_paths: Optional[Union[str, List[str]]] = None,
+    placement_mode: str = "legacy",
+    employment_mode: str = "legacy",
+    projection_year: Optional[int] = None
 ) -> pd.DataFrame:
     """
     Carga e imputa georreferenciación de población (CPV 2020) por manzana.
@@ -926,6 +974,25 @@ def load_cpv_demography(
     Optimizado con lectura por chunks, filtrado municipal temprano, tolerancia a esquemas
     heterogéneos y georreferenciación atómica.
     """
+    from sb_mexico.residential import validate_placement_mode, geo_code, load_official_layers, place_census
+    from sb_mexico.residential_employment import (validate_employment_mode, load_employed_census,
+                                                 record_projection, record_placement)
+    validate_placement_mode(placement_mode)
+    validate_employment_mode(employment_mode)
+    official_blocks = placement_mode == "official_blocks"
+    blocks = areas = None
+    layer_diagnostics = []
+    if official_blocks:
+        geometry_paths = [str(marco_paths)] if isinstance(marco_paths, (str, bytes)) else marco_paths
+        blocks, areas, layer_diagnostics = load_official_layers(geometry_paths)
+        if not geometry_paths:
+            print("[WARN] No official residential layers found; reporting DENUE fallback coverage.")
+        for outcome in layer_diagnostics:
+            if outcome["status"] != "loaded":
+                print(f"[WARN] Residential geometry unavailable: {outcome['path']}: {outcome['reason']}")
+            elif outcome['invalid_geometry'] or outcome['invalid_identity']:
+                print(f"[WARN] Residential geometry rows rejected: {outcome['path']}: "
+                      f"{outcome['invalid_geometry']} geometries, {outcome['invalid_identity']} identities")
     if isinstance(cpv_paths, (str, bytes)):
         paths = [str(cpv_paths)]
     else:
@@ -951,8 +1018,13 @@ def load_cpv_demography(
         target_muns = {m for m in valid_m if m and m != "-1"}
 
     valid_chunks = []
+    employment_report = None
+    if employment_mode == 'census_employed':
+        census, employment_report = load_employed_census(
+            unique_paths, target_muns if not official_blocks else None)
+        valid_chunks.append(census)
 
-    for path in unique_paths:
+    for path in (unique_paths if employment_mode == 'legacy' else []):
         is_excel = path.lower().endswith(('.xlsx', '.xls'))
         if is_excel:
             try:
@@ -1022,7 +1094,7 @@ def load_cpv_demography(
                     chunk['cve_mun_clean'] = cve_mun_clean
 
                     # Filtrado municipal temprano para evitar saturación de memoria en estados masivos
-                    if target_muns:
+                    if target_muns and not official_blocks:
                         chunk = chunk[chunk['cve_mun_clean'].isin(target_muns)].copy()
                         if chunk.empty:
                             continue
@@ -1069,6 +1141,18 @@ def load_cpv_demography(
                         'cve_mun_clean', 'ageb_clean', 'mza_clean',
                         'pobtot_num', 'pob15_num'
                     ]
+                    col_loc = next((c for c in ('LOC', 'CVE_LOC') if c in chunk), None)
+                    chunk['loc_clean'] = chunk[col_loc].map(lambda v: geo_code(v, 4)) if col_loc else None
+                    chunk['_full_identity'] = chunk['CVEGEO'].astype(str).str.strip().str.upper() if 'CVEGEO' in chunk else ''
+                    cols_to_keep.append('_full_identity')
+                    if official_blocks:
+                        if 'CVEGEO' in chunk:
+                            full = chunk['CVEGEO'].astype(str).str.strip().str.upper()
+                            full_valid = full.str.fullmatch(r'\d{9}[0-9A-Z]{4}\d{3}')
+                            for col, start, end in [('cve_mun_clean', 0, 5), ('loc_clean', 5, 9),
+                                                    ('ageb_clean', 9, 13), ('mza_clean', 13, 16)]:
+                                chunk[col] = chunk[col].where(~full_valid, full.str.slice(start, end))
+                    cols_to_keep.append('loc_clean')
                     file_chunks.append(chunk[cols_to_keep])
 
                 if not file_has_error:
@@ -1091,6 +1175,30 @@ def load_cpv_demography(
         raise ValueError("No se pudo cargar ningún archivo censal válido.")
 
     df_censo = pd.concat(valid_chunks, ignore_index=True)
+    identities = RecordIdentityLedger('CPV census')
+    keep = []
+    for values in df_censo.itertuples(index=False, name=None):
+        row = dict(zip(df_censo.columns, values))
+        loc = geo_code(row['loc_clean'], 4)
+        key = (row['cve_mun_clean'], loc, row['ageb_clean'], geo_code(row['mza_clean'], 3))
+        full = row['_full_identity']
+        if re.fullmatch(r'\d{9}[0-9A-Z]{4}\d{3}', full):
+            key = (full[:5], full[5:9], full[9:13], full[13:16])
+            loc = key[1]
+        complete = (loc is not None and row['cve_mun_clean'] != '-1'
+                    and row['ageb_clean'] not in ('0000', 'NAN') and key[-1] is not None)
+        keep.append(identities.keep([key] if complete else [],
+                                    (row['pobtot_num'], row['pob15_num'])))
+    df_censo = df_censo.loc[keep].copy()
+    df_censo = df_censo.drop(columns='_full_identity')
+    identity_report = employment_report['source_identity'] if employment_report is not None else identities.report
+    df_censo.attrs['source_identity'] = identity_report
+    if not official_blocks and employment_mode == 'legacy':
+        df_censo = df_censo.drop(columns='loc_clean')
+    elif not official_blocks:
+        # Legacy placement joins use unpadded block codes. Census identity and
+        # reconstruction already used the full locality-aware official key.
+        df_censo['mza_clean'] = df_censo['mza_num'].astype(str)
 
     # Factores de proyección poblacional (integración de CONAPO)
     growth_dict = dict(growth_factors or {})
@@ -1108,7 +1216,15 @@ def load_cpv_demography(
     df_censo['growth'] = df_censo['cve_mun_clean'].map(growth_dict).fillna(default_growth)
     df_censo['pobtot_adj'] = df_censo['pobtot_num'] * df_censo['growth']
     df_censo['pob15_adj'] = df_censo['pob15_num'] * df_censo['growth']
-    df_censo['pea_real'] = df_censo['pob15_adj'] * tasa_pea
+    if employment_report is None:
+        df_censo['pea_real'] = df_censo['pob15_adj'] * tasa_pea
+    else:
+        df_censo['pea_real'] = df_censo['employed_2020'] * df_censo['growth']
+        record_projection(employment_report, df_censo, projection_year)
+        df_censo.attrs['residential_employment'] = employment_report
+
+    if official_blocks:
+        return place_census(df_censo, df_denue, blocks, areas, bbox, layer_diagnostics)
 
     # =========================================================================
     # Georreferenciación Jerárquica Vía Marco Geoestadístico / DENUE
@@ -1192,11 +1308,17 @@ def load_cpv_demography(
 
     # Filtro espacial estricto dentro de BBOX y descarte de registros fuera del área
     # Cumplimiento estricto con Estándar #2: Cero Imputación a Centro de BBOX
+    before_spatial_filters = df_geo if employment_report is not None else None
     df_geo = df_geo.dropna(subset=['lon', 'lat']).copy()
     df_geo = df_geo[
         (df_geo['lon'] >= bbox["min_lon"]) & (df_geo['lon'] <= bbox["max_lon"]) &
         (df_geo['lat'] >= bbox["min_lat"]) & (df_geo['lat'] <= bbox["max_lat"])
     ].copy()
 
+    df_geo.attrs['source_identity'] = identity_report
+    if employment_report is not None:
+        unlocated = before_spatial_filters.lon.isna() | before_spatial_filters.lat.isna()
+        inside = (before_spatial_filters.lon.between(bbox['min_lon'], bbox['max_lon']) &
+                  before_spatial_filters.lat.between(bbox['min_lat'], bbox['max_lat']))
+        record_placement(employment_report, before_spatial_filters, df_geo, unlocated, ~unlocated & ~inside)
     return df_geo
-

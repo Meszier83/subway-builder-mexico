@@ -28,6 +28,10 @@ import threading
 import subprocess
 import webbrowser
 import unicodedata
+import hashlib
+import mimetypes
+import socket
+import uuid
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from typing import Dict, Any, List, Optional
@@ -38,6 +42,78 @@ CITIES_DIR = os.path.join(ROOT_DIR, "cities")
 DATA_DIR = os.path.join(ROOT_DIR, "data")
 DIST_DIR = os.path.join(ROOT_DIR, "dist")
 TEMPLATE_HTML_PATH = os.path.join(os.path.dirname(__file__), "templates", "wizard.html")
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static", "wizard")
+INSTANCE_STARTED_AT = time.time()
+INSTANCE_ID = uuid.uuid4().hex
+with open(__file__, 'rb') as _wizard_source:
+    INSTANCE_CODE_SHA256 = hashlib.sha256(_wizard_source.read()).hexdigest()
+system_health_lock = threading.Lock()
+system_health_cache = None
+system_health_running = False
+
+
+def probe_system_health():
+    """Bounded read-only preflight; opening a page must not restart WSL."""
+    result = {'status': 'ok', 'platform': sys.platform, 'wsl_ready': False,
+              'distro': '', 'tools': {}, 'checked_at': time.time()}
+    if sys.platform != 'win32':
+        result.update(wsl_ready=True, distro='native',
+                      tools={'tippecanoe': bool(shutil.which('tippecanoe')), 'depot': True})
+        return result
+    script = ('import json, shutil\n'
+              'try:\n import depot\n has_depot = True\n'
+              'except Exception:\n has_depot = False\n'
+              'print(json.dumps({"tippecanoe": bool(shutil.which("tippecanoe")), "depot": has_depot}))')
+    try:
+        checked = subprocess.run(['wsl.exe', '-d', 'Ubuntu', '-e', 'python3', '-c', script],
+                                 capture_output=True, text=True, timeout=10)
+        if checked.returncode != 0:
+            raise RuntimeError('WSL Ubuntu no disponible para la comprobación')
+        tools = json.loads(checked.stdout.strip().splitlines()[-1])
+        tools['wsl'] = True
+        result.update(distro='Ubuntu', tools=tools,
+                      wsl_ready=bool(tools.get('tippecanoe') and tools.get('depot')))
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError, RuntimeError) as error:
+        result['check_error'] = str(error)
+    return result
+
+
+def get_system_health():
+    global system_health_running
+    def update():
+        global system_health_cache, system_health_running
+        try:
+            result = probe_system_health()
+        except Exception as error:
+            result = {'status': 'ok', 'platform': sys.platform, 'wsl_ready': False,
+                      'distro': '', 'tools': {}, 'checked_at': time.time(), 'check_error': str(error)}
+        with system_health_lock:
+            system_health_cache = result
+            system_health_running = False
+    with system_health_lock:
+        if system_health_cache and time.time() - system_health_cache['checked_at'] < 300:
+            return dict(system_health_cache)
+        if not system_health_running:
+            system_health_running = True
+            threading.Thread(target=update, daemon=True).start()
+        return {'status': 'checking', 'platform': sys.platform, 'wsl_ready': None,
+                'distro': '', 'tools': {}}
+
+
+class WizardHTTPServer(ThreadingHTTPServer):
+    """One exclusive listener; abandoned persistent clients cannot hold threads forever."""
+    allow_reuse_address = False
+    daemon_threads = True
+
+    def server_bind(self):
+        if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+    def handle_error(self, request, client_address):
+        if isinstance(sys.exc_info()[1], ConnectionError):
+            return
+        super().handle_error(request, client_address)
 
 # Asegurar UTF-8 en consolas Windows
 if sys.platform == "win32":
@@ -167,6 +243,8 @@ def load_city_data(rel_or_abs_path: str) -> Dict[str, Any]:
     if not isinstance(data.get("exclusion_zones"), list):
         data["exclusion_zones"] = []
 
+    from sb_mexico.config_defaults import apply_demand_defaults
+    apply_demand_defaults(data)
     # Valores por defecto para ciudad y macroeconomía si faltan
     city = data["city"]
     if "min_residents" not in city:
@@ -224,6 +302,8 @@ def _yaml_quote(val: Any) -> str:
 
 def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
     """Guarda la configuración completa de la ciudad respetando el esquema oficial."""
+    from sb_mexico.config_defaults import apply_demand_defaults
+    apply_demand_defaults(data)
     fpath = _resolve_city_path(rel_or_abs_path)
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
 
@@ -298,6 +378,10 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         lines.append(f'  urban_core_polygon: {json.dumps(city_cfg.get("urban_core_polygon"))}')
     if city_cfg.get("restrict_demand_to_urban_core") is not None:
         lines.append(f'  restrict_demand_to_urban_core: {"true" if city_cfg.get("restrict_demand_to_urban_core") else "false"}')
+    if "residential_placement" in city_cfg:
+        from sb_mexico.residential import validate_placement_mode
+        placement_mode = validate_placement_mode(city_cfg["residential_placement"])
+        lines.append(f'  residential_placement: {_yaml_quote(placement_mode)}')
     if city_cfg.get("lod_peripheral_roads"):
         lines.append(f'  lod_peripheral_roads: {_yaml_quote(city_cfg.get("lod_peripheral_roads", "standard"))}')
     if city_cfg.get("include_pedestrian_paths") is not None:
@@ -334,12 +418,40 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         f'  furness_tol: {float(macro_cfg.get("furness_tol", 0.02))}',
     ])
 
+    if 'residential_employment' in macro_cfg:
+        from sb_mexico.residential_employment import validate_employment_mode
+        employment_mode = validate_employment_mode(macro_cfg['residential_employment'])
+        lines.append(f'  residential_employment: {_yaml_quote(employment_mode)}')
+    if 'workplace_employment' in macro_cfg:
+        from sb_mexico.workplace_employment import validate_workplace_mode
+        lines.append(f'  workplace_employment: {_yaml_quote(validate_workplace_mode(macro_cfg["workplace_employment"]))}')
+    if 'workplace_control_contract' in macro_cfg:
+        from sb_mexico.historical_benchmark import validate_historical_contract
+        validate_historical_contract(macro_cfg['workplace_control_contract'])
+        # JSON is valid inline YAML and preserves source hashes/group identities.
+        lines.append('  workplace_control_contract: ' + json.dumps(macro_cfg['workplace_control_contract'], ensure_ascii=False))
+
+    if 'historical_workplace_benchmark' in macro_cfg:
+        from sb_mexico.historical_benchmark import validate_historical_contract
+        if validate_historical_contract(macro_cfg['historical_workplace_benchmark']) is None:
+            raise ValueError('Expected historical_benchmark role')
+        lines.append('  historical_workplace_benchmark: ' + json.dumps(macro_cfg['historical_workplace_benchmark'], ensure_ascii=False))
+
+    if 'historical_workplace_transfer' in macro_cfg or macro_cfg.get('workplace_employment') == 'historical_transfer':
+        from sb_mexico.historical_transfer import validate_transfer_contract
+        validate_transfer_contract(macro_cfg.get('historical_workplace_transfer'))
+        lines.append('  historical_workplace_transfer: ' + json.dumps(macro_cfg['historical_workplace_transfer'], ensure_ascii=False))
+
     proj_yr = macro_cfg.get("projection_year") or macro_cfg.get("target_year")
     if proj_yr is not None:
         try:
             lines.append(f'  projection_year: {int(proj_yr)}')
         except (ValueError, TypeError):
             pass
+    if macro_cfg.get('conapo_source_year') is not None:
+        from sb_mexico.inegi import resolve_projection_year
+        confirmed_year = resolve_projection_year({'projection_year':macro_cfg['conapo_source_year']})
+        lines.append(f'  conapo_source_year: {confirmed_year}')
 
     if "cohort_mode" in macro_cfg:
         lines.append(f'  cohort_mode: {_yaml_quote(macro_cfg.get("cohort_mode"))}')
@@ -364,6 +476,11 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         for k, v in growth_factors.items():
             lines.append(f'    {_yaml_quote(k)}: {float(v)}')
         lines.append("")
+
+    factor_sources = macro_cfg.get('growth_factor_sources', {})
+    if isinstance(factor_sources, dict) and factor_sources:
+        lines.append('  growth_factor_sources: ' + json.dumps(factor_sources, ensure_ascii=False, allow_nan=False))
+        lines.append('')
 
     # Bloque de Zonas Aisladas
     if isolated_zones_cfg and isinstance(isolated_zones_cfg, list):
@@ -527,8 +644,22 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         lines.append("")
 
     content = "\n".join(lines).rstrip() + "\n"
-    with open(fpath, "w", encoding="utf-8", newline="\n") as f:
-        f.write(content)
+    # Publish a complete configuration, including projection year and provenance,
+    # in one operation. A failed write must preserve the previous configuration.
+    import tempfile
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', newline='\n',
+                                         dir=os.path.dirname(fpath), prefix='.wizard-',
+                                         suffix='.tmp', delete=False) as stream:
+            temporary_path = stream.name
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, fpath)
+    finally:
+        if temporary_path and os.path.exists(temporary_path):
+            os.remove(temporary_path)
 
     return fpath
 
@@ -882,250 +1013,155 @@ def delete_data_file(rel_or_abs_path: str) -> str:
     return rel_or_abs_path
 
 
-def calculate_conapo_factors(city_file: str, target_year: Optional[int] = None) -> Dict[str, Any]:
-    """
-    Calcula automáticamente los factores de sincronización intercensal CONAPO
-    cruzando las proyecciones (data-*.csv, *conapo*.csv, *pobproy*.csv) con el Censo CPV 2020.
-    Permite escanear el rango multianual de proyecciones y seleccionar el año deseado.
-    Retorna nombres legibles, poblaciones 2020, poblaciones proyectadas,
-    año de proyección, lista de años disponibles y si el municipio intersecta el BBOX.
-    """
-    import pandas as pd
-    import numpy as np
+def automatic_workplace_status(city_file):
+    from pathlib import Path
+    from sb_mexico.demand_sources import select_sources
+    from sb_mexico.automatic_workplace import resolve_automatic_workplace
+    config = load_city_data(city_file)
+    project = os.path.join(ROOT_DIR, config.get('data_dir') or 'data/' + Path(city_file).stem)
+    exclusions = config.get('data_exclusions', [])
+    macro, notice = resolve_automatic_workplace(
+        select_sources(project, DATA_DIR, 'denue', exclusions),
+        select_sources(project, DATA_DIR, 'ce', exclusions), config['macroeconomics'], ROOT_DIR)
+    if macro['workplace_employment'] == 'historical_transfer':
+        from sb_mexico.historical_transfer import checked_sources
+        checked_sources(select_sources(project, DATA_DIR, 'denue', exclusions), macro, ROOT_DIR)
+    return dict(mode=macro['workplace_employment'], requested_mode=config['macroeconomics']['workplace_employment'], automatic_selection=notice,
+                reference_year=(macro.get('historical_workplace_transfer') or {}).get('reference_year'))
 
+
+def inspect_workplace_benchmark(city_file, contract):
+    """Read explicitly selected CE files; never register sources or save a city."""
+    from pathlib import Path
+    from sb_mexico.demand_sources import select_sources
+    from sb_mexico.historical_benchmark import inspect_historical_benchmark
+    root = Path(ROOT_DIR).resolve()
+    cdata = load_city_data(city_file)
+    project = root / cdata.get('data_dir', 'data/' + Path(city_file).stem)
+    denue = select_sources(project, root / 'data', 'denue', cdata.get('data_exclusions', []))
+    sources = []
+    for value in contract.get('ce_sources', []):
+        path = (root / value).resolve()
+        if not path.is_relative_to(root) or path.suffix.lower() != '.csv' or not path.is_file():
+            raise ValueError('La fuente CE debe ser un CSV dentro del proyecto')
+        sources.append(str(path))
+    report = inspect_historical_benchmark(denue, sources, contract)
+    bound = dict(contract)
+    # First inspection may bind a draft. A stale binding is never refreshed silently.
+    if bound.get('source_sha256') is None:
+        bound['source_sha256'] = report['source_sha256']
+    if report['source_binding'] != 'mismatch':
+        from sb_mexico.historical_transfer import SUPPORTED, FORMULA_VERSION, load_historical_workplaces
+        groups = [dict(municipality=g['municipality'], scian_prefixes=g['scian_prefixes'],
+                       reporting_unit='establishment', reporting_unit_evidence='Conditional preflight only; analyst must supply reporting-unit evidence before activation')
+                  for g in report['groups'] if g['activity_code'] in SUPPORTED]
+        if groups:
+            draft = {**bound, 'role': 'historical_transfer', 'enabled': True,
+                     'formula_version': FORMULA_VERSION, 'strength': 1, 'groups': groups}
+            bbox = dict(zip(('min_lon', 'min_lat', 'max_lon', 'max_lat'), cdata['city']['bbox']))
+            _, _, preflight = load_historical_workplaces(denue, bbox,
+                {**cdata.get('macroeconomics', {}), 'historical_workplace_transfer': draft}, root)
+            report['transfer_preflight'] = preflight
+    return dict(status='ok', report=report, contract=bound)
+
+
+def inspect_conapo_years(city_file: str, source_year: Optional[str] = None) -> Dict[str, Any]:
+    """Inspect the selected source without loading census or business records."""
     try:
+        import pandas as pd
+        from sb_mexico.demand_sources import select_sources
+        from sb_mexico.inegi import resolve_projection_year
         cdata = load_city_data(city_file)
-    except Exception as e:
-        return {"status": "error", "message": f"No se pudo cargar la ciudad: {e}", "factors": []}
-
-    city_cfg = cdata.get("city", {})
-    city_code = city_cfg.get("code", "")
-    city_name = city_cfg.get("name", "")
-    bbox = city_cfg.get("bbox", [])
-    macro_cfg = cdata.get("macroeconomics", {})
-    configured_year = macro_cfg.get("projection_year") or macro_cfg.get("target_year")
-    if configured_year is not None:
-        try:
-            configured_year = int(configured_year)
-        except (ValueError, TypeError):
-            configured_year = None
-
-    status = inspect_data_files(city_name=city_name, city_code=city_code, city_file=city_file)
-    conapo_files = status.get("conapo", {}).get("files", [])
-    cpv_files = status.get("cpv", {}).get("files", [])
-    denue_files = status.get("denue", {}).get("files", [])
-
-    if not conapo_files:
-        return {
-            "status": "missing_conapo",
-            "message": "No se detectó ningún archivo de proyecciones CONAPO en data/.",
-            "factors": []
-        }
-
-    conapo_path = os.path.join(ROOT_DIR, conapo_files[0]["path"])
-
-    # 1. Parsear CONAPO de forma vectorizada de alto rendimiento
-    conapo_dict = {}
-    proj_year = 2026
-    available_years_list = []
-    for enc in ['utf-8-sig', 'latin1', 'utf-8', 'cp1252']:
-        try:
-            df_con = pd.read_csv(conapo_path, encoding=enc, low_memory=False)
-            cols = [str(c).strip().upper() for c in df_con.columns]
-            df_con.columns = cols
-
-            if 'CLAVE' in cols and any('POB' in c for c in cols):
-                pob_candidates = [c for c in cols if 'POB_TOTAL' in c or 'POB_MIT_MUN' in c or 'POBTOT' in c or c.startswith('POB')]
-                col_pob = pob_candidates[0]
-                has_nom = 'NOM_MUN' in cols
-
-                # Si el archivo tiene desglose por sexo y además contiene una fila TOTAL,
-                # filtramos por TOTAL para no duplicar sumas. Si solo tiene HOMBRES y MUJERES,
-                # se mantiene completo para que el groupby sume ambos sexos.
-                if 'SEXO' in cols:
-                    sex_vals = set(df_con['SEXO'].dropna().astype(str).str.strip().str.upper().unique())
-                    if 'TOTAL' in sex_vals:
-                        df_con = df_con[df_con['SEXO'].astype(str).str.strip().str.upper() == 'TOTAL']
-
-                # Detectar columna de año normalizando posibles variantes
-                col_ano = None
-                for c in cols:
-                    c_norm = c.replace('Ñ', 'N').replace('Á', 'A').replace('Ó', 'O')
-                    if c_norm in ['ANO', 'ANIO', 'YEAR', 'AO']:
-                        col_ano = c
-                        break
-
-                if col_ano:
-                    df_con['ANO_num'] = pd.to_numeric(df_con[col_ano], errors='coerce')
-                    raw_years = [int(y) for y in df_con['ANO_num'].dropna().unique()]
-                    # Filtrar años de planeación útiles (2020 a 2050), o todos si no hay en ese rango
-                    plan_years = sorted([y for y in raw_years if 2020 <= y <= 2050])
-                    available_years_list = plan_years if plan_years else sorted(raw_years)
-
-                    if available_years_list:
-                        if target_year is not None and target_year in available_years_list:
-                            chosen_year = target_year
-                        elif target_year is not None:
-                            chosen_year = int(available_years_list[np.argmin(np.abs(np.array(available_years_list) - target_year))])
-                        elif configured_year is not None and configured_year in available_years_list:
-                            chosen_year = configured_year
-                        elif 2026 in available_years_list:
-                            chosen_year = 2026
-                        elif 2024 in available_years_list:
-                            chosen_year = 2024
-                        else:
-                            chosen_year = int(available_years_list[np.argmin(np.abs(np.array(available_years_list) - 2026))])
-
-                        proj_year = int(chosen_year)
-                        df_con = df_con[df_con['ANO_num'] == chosen_year]
-
-                df_con['cve_clean'] = pd.to_numeric(df_con['CLAVE'], errors='coerce').fillna(0).astype(int)
-                df_con = df_con[df_con['cve_clean'] > 0]
-                df_con['pob_clean'] = pd.to_numeric(df_con[col_pob].astype(str).replace(',', ''), errors='coerce').fillna(0)
-
-                if has_nom:
-                    grouped = df_con.groupby(['cve_clean', 'NOM_MUN'])['pob_clean'].sum().reset_index()
-                    for _, r in grouped.iterrows():
-                        cve_5 = f"{int(r['cve_clean']):05d}"
-                        pob_val = float(r['pob_clean'])
-                        nom_mun = str(r['NOM_MUN']).strip()
-                        if pob_val > 0:
-                            conapo_dict[cve_5] = {
-                                "pob_conapo": pob_val,
-                                "name": nom_mun
-                            }
-                else:
-                    grouped = df_con.groupby('cve_clean')['pob_clean'].sum()
-                    for cve_num, pob_val in grouped.items():
-                        cve_5 = f"{int(cve_num):05d}"
-                        if pob_val > 0:
-                            conapo_dict[cve_5] = {
-                                "pob_conapo": float(pob_val),
-                                "name": f"Municipio {cve_5}"
-                            }
-
-                if conapo_dict:
-                    break
-        except Exception:
-            continue
-
-    if not conapo_dict:
-        return {
-            "status": "error",
-            "message": f"No se pudieron leer proyecciones válidas en {os.path.basename(conapo_path)}",
-            "factors": []
-        }
-
-    # 2. Parsear Censo CPV 2020 por municipio
-    cpv_totals = {}
-    if cpv_files:
-        for finfo in cpv_files:
-            cpv_path = os.path.join(ROOT_DIR, finfo["path"])
-            for enc in ['utf-8-sig', 'latin1', 'utf-8']:
-                try:
-                    df_cen = pd.read_csv(cpv_path, encoding=enc, low_memory=False, dtype=str)
-                    df_cen.columns = [c.strip().upper() for c in df_cen.columns]
-                    if 'ENTIDAD' in df_cen.columns and 'MUN' in df_cen.columns and 'POBTOT' in df_cen.columns:
-                        # Prioridad 1: Registros de totales municipales oficiales de INEGI (LOC == 0000, AGEB == 0000)
-                        tot_mun = df_cen[(df_cen.get('LOC', '') == '0000') & (df_cen['MUN'] != '000') & (df_cen.get('AGEB', '') == '0000')]
-                        if not tot_mun.empty:
-                            for _, r in tot_mun.iterrows():
-                                try:
-                                    cve_mun = f"{int(str(r['ENTIDAD']).strip()):02d}{int(str(r['MUN']).strip()):03d}"
-                                    p_val = float(str(r['POBTOT']).replace(',', '').strip())
-                                    if p_val > 0:
-                                        cpv_totals[cve_mun] = p_val
-                                except Exception:
-                                    continue
-                        else:
-                            # Prioridad 2: Suma de manzanas urbanas habitadas
-                            mza_col = pd.to_numeric(df_cen.get('MZA', '1'), errors='coerce').fillna(0)
-                            pob_col = pd.to_numeric(df_cen['POBTOT'].replace('*', '1.5'), errors='coerce').fillna(0)
-                            df_sub = df_cen[(mza_col > 0) & (pob_col > 0)]
-                            for ent, mun, p in zip(df_sub['ENTIDAD'], df_sub['MUN'], pob_col[df_sub.index]):
-                                try:
-                                    cve_mun = f"{int(str(ent).strip()):02d}{int(str(mun).strip()):03d}"
-                                    cpv_totals[cve_mun] = cpv_totals.get(cve_mun, 0.0) + float(p)
-                                except Exception:
-                                    continue
-                        if cpv_totals:
-                            break
-                except Exception:
-                    continue
-
-    # 3. Detectar municipios que intersectan estrictamente el BBOX vía DENUE
-    bbox_muns = set()
-    if denue_files and bbox and len(bbox) == 4:
-        min_lon = min(float(bbox[0]), float(bbox[2]))
-        max_lon = max(float(bbox[0]), float(bbox[2]))
-        min_lat = min(float(bbox[1]), float(bbox[3]))
-        max_lat = max(float(bbox[1]), float(bbox[3]))
-        for finfo in denue_files:
-            denue_path = os.path.join(ROOT_DIR, finfo["path"])
-            for enc in ['utf-8-sig', 'latin1', 'utf-8']:
-                try:
-                    df_den = pd.read_csv(denue_path, encoding=enc, low_memory=False, dtype=str)
-                    df_den.columns = [c.strip().lower() for c in df_den.columns]
-                    if 'longitud' in df_den.columns and 'latitud' in df_den.columns:
-                        lons = pd.to_numeric(df_den['longitud'], errors='coerce')
-                        lats = pd.to_numeric(df_den['latitud'], errors='coerce')
-                        mask = (lons >= min_lon) & (lons <= max_lon) & (lats >= min_lat) & (lats <= max_lat)
-                        df_in_bbox = df_den[mask]
-                        if 'cve_ent' in df_den.columns and 'cve_mun' in df_den.columns:
-                            for ent, mun in zip(df_in_bbox['cve_ent'].dropna(), df_in_bbox['cve_mun'].dropna()):
-                                try:
-                                    bbox_muns.add(f"{int(str(ent).strip()):02d}{int(str(mun).strip()):03d}")
-                                except Exception:
-                                    pass
-                        elif 'cve_mun' in df_den.columns:
-                            for m in df_in_bbox['cve_mun'].dropna().unique():
-                                try:
-                                    m_str = str(m).strip()
-                                    if len(m_str) >= 5:
-                                        bbox_muns.add(f"{int(m_str):05d}")
-                                    elif cpv_totals:
-                                        ent_cand = list(cpv_totals.keys())[0][:2]
-                                        bbox_muns.add(f"{ent_cand}{int(m_str):03d}")
-                                except Exception:
-                                    pass
-                        if bbox_muns:
-                            break
-                except Exception:
-                    continue
-
-    # 4. Formar lista de resultados (filtrando estrictamente por municipios dentro del BBOX)
-    factors_list = []
-    target_muns = sorted(bbox_muns) if bbox_muns else sorted(cpv_totals.keys() if cpv_totals else conapo_dict.keys())
-
-    for cve_5 in target_muns:
-        c_info = conapo_dict.get(cve_5)
-        pob_2020 = cpv_totals.get(cve_5, 0.0)
-        pob_proj = c_info["pob_conapo"] if c_info else pob_2020
-        nom_mun = c_info["name"] if c_info else f"Municipio {cve_5}"
-
-        if pob_2020 > 0 and pob_proj > 0:
-            ratio = float(np.clip(pob_proj / pob_2020, 0.90, 1.60))
-            calc_factor = round(ratio, 2)
+        project_dir = cdata.get('data_dir') or os.path.join(DATA_DIR, os.path.splitext(os.path.basename(_resolve_city_path(city_file)))[0].lower())
+        if not os.path.isabs(project_dir):
+            project_dir = os.path.join(ROOT_DIR, project_dir)
+        files = select_sources(project_dir, DATA_DIR, 'conapo', cdata.get('data_exclusions', []))
+        if not files:
+            return dict(status='missing_conapo', message='No se detectó archivo CONAPO.', available_years=[])
+        source = files[0]
+        for encoding in ('utf-8-sig', 'latin1'):
+            try:
+                header = pd.read_csv(source, encoding=encoding, nrows=0)
+                break
+            except UnicodeDecodeError:
+                continue
         else:
-            calc_factor = 1.05
+            raise ValueError('No se pudo leer el archivo CONAPO.')
+        normalized = {str(c).strip().upper(): c for c in header.columns}
+        if 'CLAVE' not in normalized or not any(c.startswith('POB') for c in normalized):
+            raise ValueError('El archivo CONAPO no contiene CLAVE y población municipal.')
+        year_column = next((original for name, original in normalized.items()
+                            if name.replace('Ñ', 'N').replace('Á', 'A').replace('Ó', 'O') in ('ANO', 'ANIO', 'YEAR', 'AO')), None)
+        macro = cdata.get('macroeconomics', {})
+        result = dict(conapo_file=os.path.basename(source), requested_year=resolve_projection_year(macro))
+        if year_column is None:
+            confirmed = macro.get('conapo_source_year') if source_year is None else (source_year or None)
+            if confirmed is None:
+                return dict(result, status='needs_source_year', available_years=[],
+                            message='Completa el campo Año confirmado del archivo CONAPO; la fuente no incluye columna de año.')
+            year = resolve_projection_year({'projection_year': confirmed})
+            return dict(result, status='ok', available_years=[year], year_basis='confirmed_source_year')
+        try:
+            frame = pd.read_csv(source, encoding=encoding, usecols=[year_column])
+        except UnicodeDecodeError:
+            frame = pd.read_csv(source, encoding='latin1', usecols=[year_column])
+        values = pd.to_numeric(frame[year_column], errors='coerce')
+        if values.isna().any() or (values % 1 != 0).any() or (~values.between(1900, 2100)).any() or frame.empty:
+            raise ValueError('La columna de año CONAPO contiene valores vacíos o inválidos.')
+        return dict(result, status='ok', available_years=sorted(int(y) for y in values.unique()), year_basis='source_column')
+    except Exception as error:
+        return dict(status='error', message=str(error), available_years=[])
 
-        factors_list.append({
-            "cve_mun": cve_5,
-            "name": nom_mun,
-            "ano": proj_year,
-            "pob_2020": int(pob_2020) if pob_2020 > 0 else None,
-            "pob_conapo": int(pob_proj) if pob_proj > 0 else None,
-            "factor": calc_factor,
-            "in_bbox": True
-        })
 
-    return {
-        "status": "ok",
-        "conapo_file": os.path.basename(conapo_path),
-        "projection_year": proj_year,
-        "available_years": available_years_list,
-        "factors": factors_list
-    }
+def calculate_conapo_factors(city_file: str, target_year: Optional[int] = None, automatic: bool = False) -> Dict[str, Any]:
+    """Return the same population factors and denominator policy used by builds."""
+    try:
+        from sb_mexico.population_projection import resolve_population_factors
+        from sb_mexico.inegi import load_denue, resolve_projection_year
+        cdata = load_city_data(city_file)
+        city = cdata.get('city', {})
+        macro = dict(cdata.get('macroeconomics', {}))
+        if automatic:
+            macro['growth_factors'] = {}
+        if target_year is not None:
+            macro['projection_year'] = resolve_projection_year({'projection_year': target_year})
+        from sb_mexico.demand_sources import select_sources
+        project_dir = cdata.get('data_dir') or os.path.join(DATA_DIR, os.path.splitext(os.path.basename(_resolve_city_path(city_file)))[0].lower())
+        if not os.path.isabs(project_dir):
+            project_dir = os.path.join(ROOT_DIR, project_dir)
+        files = [{'path': source} for source in select_sources(project_dir, DATA_DIR, 'conapo', cdata.get('data_exclusions', []))]
+        if not files:
+            return dict(status='missing_conapo', message='No se detectó archivo CONAPO.', factors=[])
+        cpv = select_sources(project_dir, DATA_DIR, 'cpv', cdata.get('data_exclusions', []))
+        inspection = inspect_conapo_years(city_file)
+        if inspection['status'] != 'ok':
+            return dict(inspection, factors=[])
+        report = {}
+        factors = resolve_population_factors(os.path.join(ROOT_DIR, files[0]['path']), cpv, macro, report)
+        if report.get('year_basis') == 'unverified':
+            return dict(status='needs_source_year', message='Confirma el año del archivo CONAPO sin columna de año.',
+                        factors=[], diagnostics={'year_basis': 'unverified'})
+        if not factors:
+            return dict(status='error', message='No se pudieron leer proyecciones CONAPO.', factors=[])
+        municipalities = set(factors)
+        denue = select_sources(project_dir, DATA_DIR, 'denue', cdata.get('data_exclusions', []))
+        bbox = city.get('bbox')
+        if denue and bbox:
+            frame = load_denue(denue, dict(zip(('min_lon', 'min_lat', 'max_lon', 'max_lat'), bbox)))
+            municipalities = set(frame['cve_mun_clean']) & set(factors)
+        rows = []
+        for key in sorted(municipalities):
+            detail = report['municipalities'][key]
+            rows.append(dict(cve_mun=key, name=report.get('municipality_names', {}).get(key, f'Municipio {key}'), ano=report.get('effective_year'),
+                             pob_2020=detail['census_population_2020'],
+                             pob_conapo=detail['projected_population'], factor=factors[key],
+                             denominator=detail['denominator'], in_bbox=True))
+        compact_report = {key: report[key] for key in ('requested_year', 'effective_year', 'year_basis', 'factor_policy') if key in report}
+        return dict(status='ok', conapo_file=os.path.basename(files[0]['path']),
+                    requested_year=report['requested_year'], projection_year=report.get('effective_year'),
+                    available_years=report['available_years'] or inspection['available_years'], factors=rows, diagnostics=compact_report)
+    except Exception as error:
+        return dict(status='error', message=str(error), factors=[])
 
 
 def detect_macro_parameters(city_file: str) -> Dict[str, Any]:
@@ -1487,7 +1523,7 @@ def validate_city_configuration(city_file: str) -> Dict[str, Any]:
                 f"El prefijo 'UNI_' es necesario para activar el algoritmo de flujo estudiantil escalonado."
             )
 
-        if p_mode not in ["MAX", "BOOST", "ADDITIVE", "REPLACE"]:
+        if p_mode not in ["MAX", "BOOST", "ADDITIVE", "REPLACE", "SUM"]:
             warnings.append(f"POI '{p_id}': Modo '{p_mode}' no estándar. Usar 'MAX', 'BOOST', 'ADDITIVE' o 'REPLACE'.")
 
         if p_jobs is None or int(p_jobs) <= 0:
@@ -1526,6 +1562,7 @@ def broadcast_log(line: str, progress: Optional[int] = None, step_name: Optional
         "line": line
     }
     with build_lock:
+        msg['file'] = active_build.get('config_file')
         if progress is not None:
             active_build["progress"] = progress
             msg["progress"] = progress
@@ -1574,15 +1611,17 @@ def run_pipeline_task(config_file: str, skip_map: bool = False):
     """Ejecuta el pipeline de compilación de Subway Builder México en un hilo en segundo plano."""
     global active_build
     try:
-        from sb_mexico.pipeline import execute_pipeline
+        from sb_mexico.build_delivery import execute_wizard_build
 
         with build_lock:
             active_build["running"] = True
+            active_build['config_file'] = config_file
             active_build["status"] = "running"
             active_build["progress"] = 5
             active_build["step_name"] = "Iniciando Pipeline"
             active_build["logs"].clear()
             active_build["error"] = None
+            active_build["result"] = None
 
         broadcast_log(f"🚀 Iniciando compilación para '{config_file}'...", progress=10, step_name="Cargando Configuración")
 
@@ -1609,22 +1648,24 @@ def run_pipeline_task(config_file: str, skip_map: bool = False):
                 broadcast_log("🗺️ Ejecutando compilación cartográfica 3D (MapGen vía WSL 2)...", progress=15, step_name="Cartografía 3D")
             else:
                 broadcast_log("📊 Procesando fuentes de datos INEGI y Modelo Gravitatorio...", progress=30, step_name="Ingesta INEGI")
-            city_base = os.path.splitext(os.path.basename(config_file))[0].lower()
+            city_base = os.path.splitext(os.path.basename(_resolve_city_path(config_file)))[0].lower()
             city_out_dir = os.path.join(DIST_DIR, city_base)
             os.makedirs(city_out_dir, exist_ok=True)
             resolved_config = _resolve_city_path(config_file)
-            execute_pipeline(
-                config_path=resolved_config,
-                skip_map=skip_map,
-                output_dir=city_out_dir,
-                data_dir=effective_data_dir
-            )
-            broadcast_log("✨ ¡Compilación y empaquetado final completados con éxito!", progress=100, step_name="Finalizado")
+            result = execute_wizard_build(resolved_config, city_out_dir,
+                                          effective_data_dir, skip_map=skip_map)
             with build_lock:
                 active_build["running"] = False
-                active_build["status"] = "success"
+                active_build["status"] = result['status']
+                active_build['result'] = result
                 active_build["progress"] = 100
                 active_build["step_name"] = "Completado"
+            if result['status'] == 'success':
+                broadcast_log("✨ ¡Paquete ZIP validado y listo para descargar!", progress=100, step_name="Finalizado")
+            else:
+                broadcast_log("Demanda generada; falta cartografía para el ZIP: " +
+                              ', '.join(result['missing_map_files']), progress=100,
+                              step_name="Solo demanda")
         finally:
             sys.stdout = old_stdout
 
@@ -1648,6 +1689,21 @@ def run_pipeline_task(config_file: str, skip_map: bool = False):
 # =============================================================================
 
 class WizardRequestHandler(BaseHTTPRequestHandler):
+    # Closing a large response immediately reproducibly truncates filtered Windows
+    # loopback traffic. HTTP/1.1 framing permits normal persistent browser delivery.
+    protocol_version = 'HTTP/1.1'
+
+    def setup(self):
+        super().setup()
+        # Keep idle browser sockets beyond Chromium's own idle-pool lifetime.
+        # Early server-side closes are unreliable through Windows loopback filters.
+        # Requests remain bounded by frontend deadlines; idle threads are daemons.
+        self.connection.settimeout(300)
+
+    def end_headers(self):
+        self.send_header('X-Wizard-Instance', INSTANCE_ID)
+        super().end_headers()
+
     def log_message(self, format, *args):
         pass
 
@@ -1663,6 +1719,7 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         self.send_response(200)
+        self.send_header('Content-Length', '0')
         self.send_header("Access-Control-Allow-Origin", self._get_allowed_origin())
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
@@ -1672,22 +1729,23 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
-        query = parse_qs(parsed.query)
+        query = parse_qs(parsed.query, keep_blank_values=True)
 
         if path in ["/", "/index.html"]:
             self.serve_html()
+        elif path == '/api/instance':
+            with open(TEMPLATE_HTML_PATH, 'rb') as source:
+                template_hash = hashlib.sha256(source.read()).hexdigest()
+            self.serve_json({'instance_id': INSTANCE_ID, 'pid': os.getpid(),
+                             'started_at': INSTANCE_STARTED_AT, 'port': self.server.server_port,
+                             'project_root': ROOT_DIR, 'code_sha256': INSTANCE_CODE_SHA256,
+                             'template_sha256': template_hash})
+        elif path.startswith('/static/wizard/'):
+            self.serve_static(path)
         elif path in ["/api/cities", "/api/projects"]:
             self.serve_json({"cities": get_available_cities()})
         elif path == "/api/system-check":
-            from sb_mexico.cartography import is_wsl_available
-            wsl_ok, distro, tools = is_wsl_available()
-            self.serve_json({
-                "status": "ok",
-                "platform": sys.platform,
-                "wsl_ready": wsl_ok,
-                "distro": distro,
-                "tools": tools
-            })
+            self.serve_json(get_system_health())
         elif path == "/api/city":
             city_file = query.get("file", [""])[0]
             if not city_file:
@@ -1705,19 +1763,56 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
             data_dir = query.get("data_dir", [""])[0]
             status = inspect_data_files(city_name=city_name, city_code=city_code, city_file=city_file, data_dir_override=data_dir)
             self.serve_json(status)
+        elif path == "/api/conapo/years":
+            city_file = query.get('file', [''])[0]
+            if not city_file:
+                self.serve_error("Parámetro 'file' faltante", 400)
+                return
+            self.serve_json(inspect_conapo_years(city_file, source_year=query.get('source_year', [None])[0]))
         elif path == "/api/conapo/calculate":
             city_file = query.get("file", [""])[0]
             year_param = query.get("year", [""])[0]
             target_year = None
             if year_param:
                 try:
-                    target_year = int(year_param)
+                    from sb_mexico.inegi import resolve_projection_year
+                    target_year = resolve_projection_year({'projection_year': year_param})
                 except ValueError:
-                    target_year = None
+                    self.serve_error('Año de proyección inválido', 400)
+                    return
             if not city_file:
                 self.serve_error("Parámetro 'file' faltante", 400)
                 return
-            factors_res = calculate_conapo_factors(city_file, target_year=target_year)
+            try:
+                cursor = int(query.get('cursor', ['0'])[0])
+                if cursor < 0:
+                    raise ValueError()
+            except ValueError:
+                self.serve_error('Página CONAPO inválida', 400)
+                return
+            factors_res = calculate_conapo_factors(city_file, target_year=target_year,
+                                                  automatic=query.get('mode', [''])[0] == 'automatic')
+            if factors_res.get('status') == 'ok':
+                token = hashlib.sha256(json.dumps(factors_res, sort_keys=True, ensure_ascii=False, default=str).encode('utf-8')).hexdigest()
+                expected_token = query.get('result_token', [''])[0]
+                if expected_token and token != expected_token:
+                    self.serve_error('La fuente o configuración cambió durante la consulta; vuelve a sincronizar.', 409)
+                    return
+                rows = factors_res['factors']
+                if cursor > len(rows):
+                    self.serve_error('Página CONAPO fuera de rango', 400)
+                    return
+                factors_res = dict(factors_res, factors=[], total_factor_count=len(rows),
+                                   result_token=token, next_cursor=None)
+                for index in range(cursor, len(rows)):
+                    candidate = dict(factors_res, factors=factors_res['factors'] + [rows[index]], next_cursor=index + 1)
+                    if len(json.dumps(candidate, ensure_ascii=False, default=str).encode('utf-8')) > 24000:
+                        if not factors_res['factors']:
+                            self.serve_error('Un registro CONAPO excede el tamaño permitido.', 422)
+                            return
+                        factors_res['next_cursor'] = index
+                        break
+                    factors_res['factors'].append(rows[index])
             self.serve_json(factors_res)
         elif path == "/api/macro/detect":
             city_file = query.get("file", [""])[0]
@@ -1743,26 +1838,67 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                     bbox = cdata.get("city", {}).get("bbox")
                 except Exception:
                     pass
-            points = load_demand_sample(bbox, city_file=city_file)
-            self.serve_json({"points": points})
+            try:
+                diagnostics = {}
+                points = load_demand_sample(bbox, city_file=city_file, diagnostics=diagnostics)
+                self.serve_json({"points": points, "diagnostics": diagnostics})
+            except ValueError as error:
+                self.serve_error(str(error), 422)
         elif path == "/api/auto-urban-polygon":
             city_file = query.get("file", [""])[0]
+            reach_str = query.get("reach_km", query.get("reach", ["15"]))[0]
             try:
+                reach_km = float(reach_str)
+            except (ValueError, TypeError):
+                reach_km = 15.0
+
+            try:
+                import math
+                import shapely
                 from tools.poi_studio import load_demand_sample, load_city_data as l_city
                 cdata = l_city(city_file) if city_file else {}
                 bbox = cdata.get("city", {}).get("bbox")
-                pts = load_demand_sample(bbox, city_file=city_file)
-                populated_coords = [p["location"] for p in pts if (p.get("residents", 0) > 0 or p.get("jobs", 0) > 0)]
+                # Ensure we load all points without clipping to any previous urban core
+                pts = load_demand_sample(bbox, city_file=city_file, ignore_urban_core=True)
+                populated_pts = [
+                    p for p in pts
+                    if (p.get("residents", 0) > 0 or p.get("jobs", 0) > 0)
+                    and p.get("location") and len(p["location"]) == 2
+                ]
 
-                if not populated_coords or len(populated_coords) < 3:
+                if not populated_pts or len(populated_pts) < 3:
                     self.serve_json({"status": "error", "message": "No se encontraron suficientes puntos de población o empleo para calcular el núcleo urbano."})
                     return
 
-                import shapely
-                points = [shapely.Point(c[0], c[1]) for c in populated_coords]
+                # Calculate weighted mass barycenter of active population & jobs
+                tot_weight = sum(max(1.0, p.get("residents", 0) + 1.5 * p.get("jobs", 0)) for p in populated_pts)
+                center_lon = sum(p["location"][0] * max(1.0, p.get("residents", 0) + 1.5 * p.get("jobs", 0)) for p in populated_pts) / tot_weight
+                center_lat = sum(p["location"][1] * max(1.0, p.get("residents", 0) + 1.5 * p.get("jobs", 0)) for p in populated_pts) / tot_weight
+
+                # Filter by reach distance from barycenter if reach_km > 0
+                if reach_km > 0:
+                    cos_lat = math.cos(math.radians(center_lat))
+                    selected_pts = [
+                        p["location"] for p in populated_pts
+                        if math.hypot(
+                            (p["location"][0] - center_lon) * cos_lat * 111.0,
+                            (p["location"][1] - center_lat) * 111.0
+                        ) <= reach_km
+                    ]
+                    # If very few points fall in reach, fallback to all points
+                    if len(selected_pts) < 3:
+                        selected_pts = [p["location"] for p in populated_pts]
+
+                    ratio = min(0.38, max(0.18, 0.18 + (reach_km - 5.0) * 0.006))
+                    buf_deg = min(2.5, max(0.8, reach_km * 0.08)) / 111.0
+                else:
+                    selected_pts = [p["location"] for p in populated_pts]
+                    ratio = 0.25
+                    buf_deg = 0.015
+
+                points = [shapely.Point(c[0], c[1]) for c in selected_pts]
                 mp = shapely.MultiPoint(points)
-                # Concave hull with 25% ratio and 0.015 deg (~1.5 km) expansion buffer
-                hull = shapely.concave_hull(mp, ratio=0.25).buffer(0.015).simplify(0.002, preserve_topology=True)
+                hull = shapely.concave_hull(mp, ratio=ratio).buffer(buf_deg).simplify(0.002, preserve_topology=True)
 
                 if hull.geom_type == "Polygon":
                     coords = [[round(c[0], 5), round(c[1], 5)] for c in hull.exterior.coords]
@@ -1775,7 +1911,9 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 self.serve_json({
                     "status": "ok",
                     "polygon": coords,
-                    "points_count": len(populated_coords)
+                    "points_count": len(selected_pts),
+                    "reach_km": reach_km,
+                    "center": [round(center_lon, 5), round(center_lat, 5)]
                 })
             except Exception as e:
                 self.serve_json({"status": "error", "message": str(e)})
@@ -1821,9 +1959,25 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
         elif path == "/api/demand-preview":
             city_file = query.get("file", [""])[0]
             city_base = os.path.splitext(os.path.basename(city_file))[0].lower() if city_file else ""
+            package_available = False
 
             # Buscar demand_data.json EXCLUSIVAMENTE dentro de dist/<city_base>/
             target_path = os.path.join(DIST_DIR, city_base, "demand_data.json") if city_base else ""
+            try:
+                resolved = _resolve_city_path(city_file)
+                city_base = os.path.splitext(os.path.basename(resolved))[0].lower()
+                from sb_mexico.build_delivery import config_hash
+                manifest_path = os.path.join(DIST_DIR, city_base, 'wizard-build.json')
+                if os.path.exists(manifest_path):
+                    with open(manifest_path, encoding='utf-8') as stream:
+                        result = json.load(stream)
+                    target_path = (result.get('demand_path', '')
+                                   if result['status'] in ('success', 'demand_only')
+                                   and result['config_hash'] == config_hash(resolved) else '')
+                    package_available = bool(target_path and result['status'] == 'success')
+            except (ValueError, OSError, KeyError):
+                target_path = ''
+
             if target_path and os.path.exists(target_path):
                 try:
                     with open(target_path, "r", encoding="utf-8") as f:
@@ -1832,6 +1986,7 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                     pops = demand_json.get("pops", [])
                     points = demand_json.get("points", [])
                     demand_json["distance_distribution"] = calculate_commute_distance_distribution(pops, points)
+                    demand_json.setdefault('metadata', {})['package_available'] = package_available
                     self.serve_json(demand_json)
                 except Exception as e:
                     self.serve_error(f"Error al leer demand_data.json de {city_base}: {e}", 500)
@@ -1848,43 +2003,31 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                     "status": active_build["status"],
                     "error": active_build["error"],
                     "city_code": active_build["city_code"],
+                    "result": active_build.get("result"),
                     "logs": list(active_build["logs"][-100:])
                 }
             self.serve_json(status_copy)
         elif path == "/api/download":
+            from sb_mexico.build_delivery import resolve_download
             city_file = query.get("file", [""])[0]
-            city_base = os.path.splitext(os.path.basename(city_file))[0].lower() if city_file else ""
-            city_code = ""
-            if city_file:
-                try:
-                    cdata = load_city_data(city_file)
-                    city_code = cdata.get("city", {}).get("code", "").upper()
-                except Exception:
-                    pass
-
-            zip_candidates = []
-            if city_base:
-                zip_candidates.extend(glob.glob(os.path.join(DIST_DIR, city_base, "*.zip")))
-                zip_candidates.extend(glob.glob(os.path.join(DIST_DIR, f"*{city_base}*.zip")))
-            if city_code:
-                zip_candidates.extend(glob.glob(os.path.join(DIST_DIR, f"{city_code}.zip")))
-                zip_candidates.extend(glob.glob(os.path.join(DIST_DIR, city_base, f"{city_code}.zip")))
-
-            # Deduplicar preservando orden
-            valid_zips = [z for z in dict.fromkeys(zip_candidates) if os.path.isfile(z)]
-
-            if valid_zips:
-                target_zip = valid_zips[0]
-                with open(target_zip, "rb") as zf:
-                    data = zf.read()
+            try:
+                resolved = _resolve_city_path(city_file)
+                city_base = os.path.splitext(os.path.basename(resolved))[0].lower()
+                target_zip, result = resolve_download(resolved, os.path.join(DIST_DIR, city_base))
+                with build_lock:
+                    if active_build['running']:
+                        raise ValueError('Hay una compilación en progreso; espera a que termine.')
+                data = target_zip.read_bytes()
+                if hashlib.sha256(data).hexdigest() != result['package_hash']:
+                    raise ValueError('El ZIP cambió durante la descarga; recompila.')
                 self.send_response(200)
                 self.send_header("Content-Type", "application/zip")
                 self.send_header("Content-Disposition", f'attachment; filename="{os.path.basename(target_zip)}"')
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
-            else:
-                self.serve_error(f"No se encontró ningún paquete .zip compilado para '{city_base or 'este proyecto'}'. Debes compilarlo primero.", 404)
+            except (ValueError, OSError, KeyError) as error:
+                self.serve_error(f"ZIP no disponible: {error}", 409)
         else:
             self.serve_error("Ruta no encontrada", 404)
 
@@ -2003,6 +2146,28 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 from sb_mexico.toponymy_homogenizer import resolve_duplicate_groups
                 result = resolve_duplicate_groups(places, resolutions)
                 self.serve_json(result)
+            except Exception as e:
+                self.serve_error(str(e), 500)
+
+        elif path == "/api/workplace/status":
+            try:
+                content_len = int(self.headers.get('Content-Length', 0))
+                if not 0 < content_len <= 262144:
+                    raise ValueError('Solicitud de inspección fuera de tamaño permitido')
+                req_data = json.loads(self.rfile.read(content_len).decode('utf-8'))
+                self.serve_json(automatic_workplace_status(req_data['file']))
+            except Exception as e:
+                self.serve_error(str(e), 400)
+
+        elif path == "/api/workplace/inspect":
+            try:
+                content_len = int(self.headers.get('Content-Length', 0))
+                if not 0 < content_len <= 262144:
+                    raise ValueError('Solicitud de inspección fuera de tamaño permitido')
+                req_data = json.loads(self.rfile.read(content_len).decode('utf-8'))
+                self.serve_json(inspect_workplace_benchmark(req_data['file'], req_data['contract']))
+            except (ValueError, KeyError, PermissionError) as e:
+                self.serve_error(str(e), 400)
             except Exception as e:
                 self.serve_error(str(e), 500)
 
@@ -2320,6 +2485,7 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                     active_build["step_name"] = "Iniciando Pipeline"
                     active_build["logs"].clear()
                     active_build["error"] = None
+                    active_build["result"] = None
 
                 thread = threading.Thread(
                     target=run_pipeline_task,
@@ -2341,9 +2507,14 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "keep-alive")
+        self.send_header('Transfer-Encoding', 'chunked')
         self.send_header("Access-Control-Allow-Origin", self._get_allowed_origin())
         self.send_header("Vary", "Origin")
         self.end_headers()
+
+        def write_event(body):
+            self.wfile.write(f'{len(body):x}\r\n'.encode('ascii') + body + b'\r\n')
+            self.wfile.flush()
 
         log_q = queue.Queue(maxsize=500)
         with queue_lock:
@@ -2354,17 +2525,17 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 recent_logs = list(active_build["logs"][-50:])
             for past_log in recent_logs:
                 data_str = json.dumps(past_log, ensure_ascii=False)
-                self.wfile.write(f"data: {data_str}\n\n".encode('utf-8'))
+                write_event(f"data: {data_str}\n\n".encode('utf-8'))
             self.wfile.flush()
 
             while True:
                 try:
                     msg = log_q.get(timeout=15.0)
                     data_str = json.dumps(msg, ensure_ascii=False)
-                    self.wfile.write(f"data: {data_str}\n\n".encode('utf-8'))
+                    write_event(f"data: {data_str}\n\n".encode('utf-8'))
                     self.wfile.flush()
                 except queue.Empty:
-                    self.wfile.write(b": heartbeat\n\n")
+                    write_event(b": heartbeat\n\n")
                     self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, ConnectionError, OSError):
             pass
@@ -2381,12 +2552,49 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
         with open(TEMPLATE_HTML_PATH, "r", encoding="utf-8") as f:
             content = f.read()
 
+        def version_asset(match):
+            path = match.group(1)
+            target = os.path.join(STATIC_DIR, path[len('/static/wizard/'):])
+            if not os.path.isfile(target):
+                return path
+            with open(target, 'rb') as asset:
+                version = hashlib.sha256(asset.read()).hexdigest()[:12]
+            return path + '?v=' + version
+        content = re.sub(r'(/static/wizard/[a-zA-Z0-9_./-]+\.(?:js|css))', version_asset, content)
+
         body = content.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header('Connection', 'close' if self.close_connection else 'keep-alive')
+        self.send_header('Cache-Control', 'no-store')
         self.send_header("Access-Control-Allow-Origin", self._get_allowed_origin())
         self.send_header("Vary", "Origin")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def serve_static(self, path):
+        from urllib.parse import unquote
+        relative = unquote(path[len('/static/wizard/'):])
+        root = os.path.realpath(STATIC_DIR)
+        try:
+            target = os.path.realpath(os.path.join(STATIC_DIR, relative))
+            valid = os.path.commonpath([root, target]) == root and os.path.isfile(target)
+        except ValueError:
+            valid = False
+        if not valid:
+            self.serve_error('Archivo no encontrado', 404)
+            return
+        with open(target, 'rb') as source:
+            body = source.read()
+        content_type = mimetypes.guess_type(target)[0] or 'application/octet-stream'
+        if target.endswith('.js'):
+            content_type = 'application/javascript'
+        self.send_response(200)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('X-Content-Type-Options', 'nosniff')
         self.end_headers()
         self.wfile.write(body)
 
@@ -2399,6 +2607,7 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header('Connection', 'close' if self.close_connection else 'keep-alive')
         self.send_header("Access-Control-Allow-Origin", self._get_allowed_origin())
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
@@ -2408,22 +2617,23 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def serve_error(self, message: str, status: int = 400):
+        # Rejected POSTs may have an unread body. Never parse it as a new request.
+        if getattr(self, 'command', None) == 'POST':
+            self.close_connection = True
         self.serve_json({"error": message}, status=status)
 
 
 def run_server(port: int = 8080, initial_city: str = None, open_browser: bool = True, host: str = "127.0.0.1"):
     server_address = (host, port)
 
-    for attempt in range(5):
-        try:
-            httpd = ThreadingHTTPServer(server_address, WizardRequestHandler)
-            break
-        except OSError:
-            port += 1
-            server_address = (host, port)
-    else:
-        print(f"[ERROR] No se pudo vincular el servidor en los puertos 8080-8085.")
+    try:
+        httpd = WizardHTTPServer(server_address, WizardRequestHandler)
+    except OSError as error:
+        print(f'[ERROR] No se pudo iniciar {host}:{port}: {error}. '
+              'Comprueba la instancia existente o elige --port explícitamente.')
         sys.exit(1)
+
+    port = httpd.server_port
 
     url = f"http://{host}:{port}/"
     if initial_city:
@@ -2435,6 +2645,7 @@ def run_server(port: int = 8080, initial_city: str = None, open_browser: bool = 
     print("=" * 65)
     print(f" Servidor iniciado en: {url}")
     print(f" Raíz del proyecto:    {ROOT_DIR}")
+    print(f' Instancia:            {INSTANCE_ID} (PID {os.getpid()})')
     print(f" Presiona Ctrl+C para detener el servidor.")
     print("=" * 65)
 

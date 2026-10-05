@@ -58,7 +58,7 @@ class TestPoiStudio(unittest.TestCase):
             self.assertEqual(reloaded["pois"][0]["id"], "AIR_Test_Airport")
             self.assertEqual(reloaded["pois"][0]["jobs"], 35000)
             self.assertEqual(reloaded["pois"][1]["id"], "MED_Test_Hospital")
-            self.assertTrue(reloaded["city"]["code"] in ("CUN", "CUR"))
+            self.assertEqual(reloaded["city"]["code"], data["city"]["code"])
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
@@ -200,29 +200,36 @@ class TestPoiStudio(unittest.TestCase):
                 os.remove(tmp_path)
 
     def test_load_demand_sample_applies_economic_calibration(self):
-        """Verifica que load_demand_sample aplique calibración económica (TIL1/CE2024) y preserve raw_jobs."""
-        from tools.poi_studio import load_demand_sample
+        """Use isolated source data: no mutable local city or stale density cache."""
+        from pathlib import Path
+        from unittest.mock import patch
         import json
+        import pandas as pd
+        from tools import poi_studio
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            data = root / 'data' / 'fixture'
+            data.mkdir(parents=True)
+            config = root / 'fixture.yaml'
+            config.write_text(yaml.safe_dump(dict(
+                city=dict(code='TST', name='Test', bbox=[-87, 20, -86, 22], residential_placement='legacy'),
+                data_dir=str(data), macroeconomics=dict(til_1_state=.455, residential_employment='legacy', workplace_employment='legacy'))))
+            pd.DataFrame([dict(id=index, cve_ent=23, cve_mun=5, ageb='001A', manzana=1,
+                               longitud=-86.8, latitud=21.1, per_ocu='51 a 100 personas')
+                          for index in range(10)]).to_csv(data / 'denue.csv', index=False)
+            with patch.object(poi_studio, 'ROOT_DIR', str(root)):
+                points = poi_studio.load_demand_sample(city_file=str(config))
+            total_calibrated = sum(point['jobs'] for point in points)
+            total_raw = sum(point['raw_jobs'] for point in points)
+            # Canonical DENUE estimate is 71.41 jobs for this stratum.
+            self.assertEqual(total_raw, 714)
+            self.assertEqual(total_calibrated, 1039)
+            self.assertAlmostEqual(total_calibrated / total_raw, 1.455, delta=.002)
+            cache = json.loads((data / '.density_cache.json').read_text())
+            self.assertEqual(cache['version'], 3)
+            self.assertEqual(len(cache['key']), 64)
+            self.assertIn('raw_jobs', cache['points'][0])
 
-        pts = load_demand_sample(city_file="cities/cancun.yaml")
-        self.assertGreater(len(pts), 0)
-
-        total_calibrated = sum(p["jobs"] for p in pts)
-        total_raw = sum(p.get("raw_jobs", p["jobs"]) for p in pts)
-
-        # Con til_1_state: 0.455 en Quintana Roo, el empleo calibrado debe ser ~1.45x del estrato crudo
-        self.assertGreater(total_calibrated, total_raw)
-        ratio = total_calibrated / total_raw
-        self.assertAlmostEqual(ratio, 1.455, delta=0.05)
-
-        # Verificar que el cache se haya guardado con version 2
-        cache_path = os.path.join(os.path.dirname(__file__), "..", "data", "cancun", ".density_cache.json")
-        if os.path.exists(cache_path):
-            with open(cache_path, "r", encoding="utf-8") as f:
-                cdata = json.load(f)
-            self.assertEqual(cdata.get("version"), 2)
-            self.assertIn("raw_jobs", cdata["points"][0])
 
 if __name__ == "__main__":
     unittest.main()
-

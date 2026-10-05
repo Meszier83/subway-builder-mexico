@@ -23,6 +23,7 @@ class TestWizardPersistence(unittest.TestCase):
                     "creator": "Tester",
                     "bbox": [-87.10, 21.05, -86.75, 21.35],
                     "grid_size": 0.0022,
+                    "residential_placement": "official_blocks",
                     "initial_zoom": 12.5,
                     "include_ocean": True,
                     "min_residents": 15,
@@ -37,6 +38,7 @@ class TestWizardPersistence(unittest.TestCase):
                 "data_dir": "data/prs_test",
                 "data_exclusions": ["archivo_desvinculado.csv"],
                 "macroeconomics": {
+                    "conapo_source_year": 2026,
                     "tasa_pea": 0.645,
                     "til_1_state": 0.485,
                     "gravity_beta": 0.135,
@@ -107,6 +109,7 @@ class TestWizardPersistence(unittest.TestCase):
 
             c = reloaded["city"]
             self.assertEqual(c["code"], "PRS")
+            self.assertEqual(c["residential_placement"], "official_blocks")
             self.assertEqual(c["min_residents"], 15)
             self.assertEqual(c["min_jobs"], 7)
             self.assertEqual(c["building_filter_size"], 22.5)
@@ -117,6 +120,7 @@ class TestWizardPersistence(unittest.TestCase):
 
 
             m = reloaded["macroeconomics"]
+            self.assertEqual(m["conapo_source_year"], 2026)
             self.assertEqual(m["min_pop_size"], 35)
             self.assertEqual(m["target_pop_size"], 160)
             self.assertEqual(m["max_pop_size"], 220)
@@ -202,8 +206,11 @@ class TestWizardPersistence(unittest.TestCase):
             self.assertEqual(m.get("min_pop_size"), 25)
             self.assertEqual(m.get("target_pop_size"), 150)
             self.assertEqual(m.get("max_pop_size"), 200)
+            self.assertEqual(m['residential_employment'], 'census_employed')
+            self.assertEqual(m['workplace_employment'], 'auto')
 
             c = data.get("city", {})
+            self.assertEqual(c['residential_placement'], 'official_blocks')
             self.assertEqual(c.get("min_residents"), 10)
             self.assertEqual(c.get("min_jobs"), 3)
             self.assertFalse(c.get("urban_parks_only", True))

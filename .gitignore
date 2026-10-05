@@ -17,6 +17,7 @@ __pycache__/
 .pytest_cache/
 venv/
 .env/
+node_modules/
 
 # Build temporales y datos locales
 build/
@@ -28,3 +29,8 @@ data/
 # Proyectos de ciudades locales (el repositorio publico solo incluye _template.yaml)
 cities/*.yaml
 !cities/_template.yaml
+
+# Evidencia generada y apuntes locales; conservar fuera del historial
+/reports/
+/plans/
+/test_labels.py

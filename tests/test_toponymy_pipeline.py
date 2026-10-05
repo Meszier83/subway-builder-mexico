@@ -51,11 +51,27 @@ class TestToponymyPipeline(unittest.TestCase):
 
     def test_cancun_catalog_single_city_node(self):
         """Verifica que el catálogo escaneado de Cancún solo tenga 1 nodo de ciudad Cancún."""
-        cancun_yaml = "cities/cancun_riviera_maya.yaml"
-        if not os.path.exists(cancun_yaml):
-            self.skipTest("cancun_riviera_maya.yaml no disponible")
-
-        cat = scan_city_settlements_catalog(cancun_yaml, min_count=8)
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        import yaml
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root/'fixture.yaml'
+            config.write_text(yaml.safe_dump(dict(city=dict(code='TST', name='Test',
+                bbox=[-87,20,-86,22]), places=[])), encoding='utf-8')
+            output = root/'dist'/'fixture'
+            output.mkdir(parents=True)
+            def feature(lon, lat, **properties):
+                return dict(type='Feature', properties=dict(name='Cancún', place='city', **properties),
+                    geometry=dict(type='Point', coordinates=[lon,lat]))
+            geojson = dict(type='FeatureCollection', features=[
+                feature(-86.8,21.10,boundary='administrative'),
+                feature(-86.84258,21.15275), feature(-86.79,21.16)])
+            (output/'osm_places.geojson').write_text(json.dumps(geojson), encoding='utf-8')
+            with patch('sb_mexico.toponymy.__file__',str(root/'sb_mexico'/'toponymy.py')):
+                cat = scan_city_settlements_catalog(str(config), min_count=8)
         self.assertGreater(cat["total"], 0)
 
         # Buscar nodos de ciudad con nombre 'Cancún'

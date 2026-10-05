@@ -36,7 +36,7 @@ class TestWizard(unittest.TestCase):
         self.assertTrue("CUN" in codes or "CUR" in codes)
 
     def test_load_city_data(self):
-        data = load_city_data("cities/cancun.yaml")
+        data = load_city_data("cities/cancun_riviera_maya.yaml")
         self.assertIn("city", data)
         self.assertIn("macroeconomics", data)
         self.assertIn("pois", data)
@@ -200,8 +200,8 @@ class TestWizard(unittest.TestCase):
 
         try:
             # 1. POI Studio / api/density no debe cargar puntos de Cancún ni de otro proyecto
-            points = load_demand_sample(bbox=[-87.0, 21.0, -86.5, 21.5], city_file=proj_file)
-            self.assertEqual(points, [], "El proyecto no compilado cargó puntos de demanda de otro proyecto!")
+            with self.assertRaisesRegex(ValueError, 'requires DENUE sources'):
+                load_demand_sample(bbox=[-87.0, 21.0, -86.5, 21.5], city_file=proj_file)
 
             # 2. Demand Preview no debe encontrar demand_data.json en dist/bub
             city_base = "bub"
@@ -365,11 +365,11 @@ class TestWizard(unittest.TestCase):
                 os.remove(tmp_city)
 
     def test_validate_city_configuration_valid(self):
-        res = validate_city_configuration("cities/cancun.yaml")
+        res = validate_city_configuration("cities/cancun_riviera_maya.yaml")
         self.assertTrue(res["valid"])
         self.assertEqual(len(res["errors"]), 0)
         self.assertIn("summary", res)
-        self.assertEqual(res["summary"].get("isolated_zones_count"), 0)
+        self.assertEqual(res["summary"].get("isolated_zones_count"), 1)
 
     def test_validate_city_configuration_anomalies(self):
         tmp_city = os.path.join(os.path.dirname(__file__), "tmp_test_anomalies.yaml")
@@ -423,7 +423,20 @@ class TestWizard(unittest.TestCase):
         """Verifica la detección y restablecimiento de parámetros macroeconómicos oficiales (niveles 1, 2 y 4)."""
         from tools.wizard import detect_macro_parameters
         # Cancún: Detecta Nivel 1 (si existe archivo ENOE en data/cancun) o Nivel 2 (Censo CPV + Catálogo Estatal QRoo)
-        res_cun = detect_macro_parameters("cities/cancun.yaml")
+        # Explicit ENOE fixture; installed local microdata may lack these rows.
+        from pathlib import Path
+        import tempfile
+        with tempfile.TemporaryDirectory(dir=os.path.dirname(__file__)) as temporary:
+            root = Path(temporary)
+            (root / 'enoe.csv').write_text(
+                'Indicador,Valor\nTasa de participación,66.5\nTasa de informalidad laboral 1,45.0\n',
+                encoding='utf-8')
+            fixture = root / 'city.yaml'
+            fixture.write_text(yaml.safe_dump(dict(
+                city=dict(code='TST', name='Test', bbox=[-87, 20, -86, 22]),
+                data_dir=str(root.resolve()),
+                macroeconomics=dict(growth_factors={'23005': 1.1}))), encoding='utf-8')
+            res_cun = detect_macro_parameters(str(fixture))
         self.assertEqual(res_cun["status"], "ok")
         self.assertIn(res_cun["method"], ["census_hybrid", "enoe_file"])
         self.assertEqual(res_cun["cve_ent"], "23")
@@ -437,9 +450,18 @@ class TestWizard(unittest.TestCase):
         self.assertEqual(p_cun["target_pop_size"], 150)
         self.assertEqual(p_cun["max_pop_size"], 200)
 
-        # Nivel 1: Mérida (con archivo ENOE real en data/merida)
-        if os.path.exists("cities/merida.yaml"):
-            res_mid = detect_macro_parameters("cities/merida.yaml")
+        # A second explicit ENOE fixture verifies decimal participation/informality.
+        with tempfile.TemporaryDirectory(dir=os.path.dirname(__file__)) as temporary:
+            root = Path(temporary)
+            (root / 'enoe.csv').write_text(
+                'Indicador,Valor\nTasa de participación,64.14\nTasa de informalidad laboral 1,59.14\n',
+                encoding='utf-8')
+            fixture = root / 'city.yaml'
+            fixture.write_text(yaml.safe_dump(dict(
+                city=dict(code='TST', name='Test', bbox=[-90, 20, -89, 22]),
+                data_dir=str(root.resolve()),
+                macroeconomics=dict(growth_factors={'31050': 1.1}))), encoding='utf-8')
+            res_mid = detect_macro_parameters(str(fixture))
             self.assertEqual(res_mid["status"], "ok")
             self.assertEqual(res_mid["method"], "enoe_file")
             self.assertTrue(res_mid["has_enoe_file"])
@@ -470,10 +492,11 @@ class TestWizard(unittest.TestCase):
         scriptMatches.forEach((m, idx) => {
             new Function(m[1]);
         });
+        new Function(fs.readFileSync('tools/static/wizard/app.js', 'utf8'));
+        new Function(fs.readFileSync('tools/static/wizard/bootstrap.js', 'utf8'));
         """
         proc = subprocess.run([node_bin, "-e", script], capture_output=True, text=True, cwd=os.path.dirname(os.path.dirname(__file__)))
         self.assertEqual(proc.returncode, 0, f"Error de sintaxis JS en wizard.html: {proc.stderr}")
 
 if __name__ == '__main__':
     unittest.main()
-

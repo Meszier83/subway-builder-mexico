@@ -315,6 +315,7 @@ exclusion_zones:
 
         try:
             handler = WizardRequestHandler.__new__(WizardRequestHandler)
+            handler.close_connection = False
             handler.path = "/api/build/status"
             handler.headers = {}
             handler.server = None

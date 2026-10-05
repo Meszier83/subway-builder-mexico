@@ -101,7 +101,8 @@ def load_city_data(rel_or_abs_path: str) -> Dict[str, Any]:
     if not isinstance(data.get("affluence_zones"), list):
         data["affluence_zones"] = []
 
-    return data
+    from sb_mexico.config_defaults import apply_demand_defaults
+    return apply_demand_defaults(data)
 
 
 def _format_affluence_zones_yaml(zones: List[Dict[str, Any]]) -> str:
@@ -336,7 +337,8 @@ def save_city_pois(rel_or_abs_path: str, new_pois: List[Dict[str, Any]]) -> None
     save_city_data(rel_or_abs_path, new_pois=new_pois)
 
 
-def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Dict[str, Any]]:
+def load_demand_sample(bbox: List[float] = None, city_file: str = "", ignore_urban_core: bool = False,
+                       diagnostics: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """
     Carga puntos de demanda de referencia espacial EXCLUSIVAMENTE derivados de las fuentes oficiales
     de datos (DENUE y Censo CPV RESAGEBURB) en la carpeta del proyecto (target_data_dir).
@@ -346,13 +348,14 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
        estadios, universidades creadas en el YAML o 'is_special: True') puede aparecer en la
        capa de referencia de empleo o población.
     2. CERO fallbacks cruzados a otras ciudades: Se limita estrictamente a los datos del proyecto activo.
-    3. Caché de alto rendimiento: Si existe '.density_cache.json' en la carpeta de datos y sus
-       mtimes coinciden con los archivos fuente, se carga de inmediato.
+    3. Caché con identidad de configuración, fuentes, geometría y etapa de vista.
     4. Si no hay archivos fuente en la carpeta de datos pero existe demand_data.json compilado
        (ej. entornos de test o proyectos heredados), se purgan estrictamente todos los POIs
        y puntos especiales antes de retornarlo.
     """
     city_base = ""
+    if diagnostics is None:
+        diagnostics = {}
     target_data_dir = None
     poi_ids = set()
     poi_prefixes = ("AIR_", "UNI_", "TOU_", "MED_", "SPO_", "TRA_")
@@ -390,7 +393,7 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
     urban_core_polygon = city_dict.get("urban_core_polygon") or (cdata.get("urban_core_polygon") if cdata else None)
     restrict_demand_core = city_dict.get("restrict_demand_to_urban_core", True)
     prep_core = None
-    if urban_core_polygon and restrict_demand_core:
+    if not ignore_urban_core and urban_core_polygon and restrict_demand_core:
         try:
             from sb_mexico.gravity import prepare_polygon_geom
             prep_core = prepare_polygon_geom(urban_core_polygon)
@@ -431,10 +434,12 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
             raw_j = p.get("raw_jobs")
             clean_pts.append({
                 "id": p_id,
-                "location": [round(float(loc[0]), 5), round(float(loc[1]), 5)],
+                "location": [float(loc[0]), float(loc[1])],
                 "jobs": int(round(p.get("jobs", 0))),
                 "raw_jobs": int(round(raw_j)) if raw_j is not None else int(round(p.get("jobs", 0))),
-                "residents": int(round(p.get("residents", 0)))
+                "residents": float(p.get("residents", 0)),
+                **({'employed_residents': float(p['employed_residents'])}
+                   if 'employed_residents' in p else {})
             })
         return clean_pts
 
@@ -453,27 +458,59 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
         )
         cpv_files = sorted(list(dict.fromkeys(os.path.normpath(f) for f in raw_cpv if os.path.isfile(f))))
 
+    from sb_mexico.demand_sources import select_sources
+    if target_data_dir:
+        national_dir = os.path.join(ROOT_DIR, 'data')
+        exclusions = (cdata or {}).get('data_exclusions', [])
+        denue_files = select_sources(target_data_dir, national_dir, 'denue', exclusions)
+        cpv_files = select_sources(target_data_dir, national_dir, 'cpv', exclusions)
+    if diagnostics is not None:
+        diagnostics.update(stage='census_before_road_snapping',
+                           placement_mode=city_dict.get('residential_placement', 'legacy'))
+    from sb_mexico.residential_employment import validate_employment_mode, attach_source_context
+    employment_mode = validate_employment_mode((cdata or {}).get('macroeconomics', {}).get('residential_employment', 'legacy'))
+    diagnostics['employment_mode'] = employment_mode
+    from sb_mexico.workplace_employment import validate_workplace_mode, load_workplaces
+    workplace_mode = validate_workplace_mode((cdata or {}).get('macroeconomics', {}).get('workplace_employment', 'legacy'))
+    diagnostics['workplace_mode'] = workplace_mode
+    if workplace_mode != 'legacy' and not denue_files:
+        raise ValueError(workplace_mode + ' requires DENUE sources for the demand preview')
+    if employment_mode == 'census_employed' and not cpv_files:
+        raise ValueError('census_employed requires CPV sources for the demand preview')
     # Si hay fuentes oficiales disponibles en target_data_dir
     if (denue_files or cpv_files) and bbox and len(bbox) == 4:
-        cache_path = os.path.join(target_data_dir, ".density_cache.json")
-        src_files = denue_files + cpv_files
-        src_mtimes = {os.path.basename(f): os.path.getmtime(f) for f in src_files}
-
-        # 1. Verificar si existe caché válido (versión 2 con calibración económica)
-        if os.path.exists(cache_path):
-            try:
-                with open(cache_path, "r", encoding="utf-8") as f:
-                    cached_data = json.load(f)
-                if (
-                    cached_data.get("version") == 2 and
-                    cached_data.get("mtimes") == src_mtimes and
-                    cached_data.get("bbox") == bbox and
-                    isinstance(cached_data.get("points"), list)
-                ):
-                    return _clean_and_filter(cached_data["points"], bbox)
-            except Exception:
-                pass
-
+        import hashlib
+        from pathlib import Path
+        signature_files = sorted(set(path for path in list(Path(target_data_dir).rglob('*')) + list(Path(national_dir).glob('*'))
+                                 if path.is_file() and path.suffix.lower() in
+                                 {'.csv', '.xlsx', '.shp', '.dbf', '.shx', '.prj', '.cpg', '.geojson', '.gpkg'}))
+        signature = dict(config=cdata, bbox=bbox, ignore_urban_core=ignore_urban_core,
+                         files=[(str(path), path.stat().st_size, path.stat().st_mtime_ns)
+                                for path in signature_files], version=3,
+                         code=[hashlib.sha256((Path(ROOT_DIR) / source).read_bytes()).hexdigest()
+                               for source in ('sb_mexico/inegi.py', 'sb_mexico/residential.py',
+                                              'sb_mexico/residential_employment.py', 'sb_mexico/source_identity.py', 'sb_mexico/config_defaults.py',
+                                              'sb_mexico/workplace_employment.py',
+                                              'sb_mexico/ce_controls.py', 'sb_mexico/historical_benchmark.py', 'sb_mexico/historical_transfer.py', 'sb_mexico/automatic_workplace.py',
+                                              'sb_mexico/population_projection.py', 'tools/poi_studio.py')
+                               if (Path(ROOT_DIR) / source).exists()])
+        if workplace_mode != 'legacy':
+            from sb_mexico.residential_employment import file_sha256
+            workplace_sources = sorted(set(denue_files + select_sources(target_data_dir, national_dir, 'ce', exclusions)))
+            if workplace_mode == 'historical_transfer':
+                from sb_mexico.historical_transfer import selected_ce_sources
+                workplace_sources = sorted(set(denue_files + selected_ce_sources(cdata['macroeconomics'], ROOT_DIR)))
+            signature['workplace_source_sha256'] = [(str(path), file_sha256(path)) for path in workplace_sources]
+        cache_key = hashlib.sha256(json.dumps(signature, sort_keys=True).encode()).hexdigest()
+        cache_path = Path(target_data_dir) / '.density_cache.json'
+        try:
+            cached = json.loads(cache_path.read_text(encoding='utf-8'))
+            if cached.get('key') == cache_key:
+                if diagnostics is not None:
+                    diagnostics.update(cached.get('diagnostics', {}))
+                return _clean_and_filter(cached['points'], bbox)
+        except (OSError, ValueError, KeyError):
+            pass
         # 2. Generar muestras de densidad a partir de archivos oficiales en tiempo real
         try:
             import numpy as np
@@ -491,7 +528,7 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
             macro = cdata.get("macroeconomics", {}) if cdata else {}
             til_1 = macro.get("til_1_state")
             if til_1 is None:
-                enoe_files = glob.glob(os.path.join(target_data_dir, "*enoe*.csv")) + glob.glob(os.path.join(target_data_dir, "*enoe*.xls*"))
+                enoe_files = select_sources(target_data_dir, national_dir, 'enoe', exclusions)
                 if enoe_files:
                     try:
                         enoe_res = parse_enoe_indicators(enoe_files[0])
@@ -502,8 +539,9 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
                     til_1 = 0.45
 
             ce_benchmarks = macro.get("ce_2024_benchmarks", {})
+            ce_files = select_sources(target_data_dir, national_dir, 'ce', exclusions)
             if not ce_benchmarks:
-                ce_files = glob.glob(os.path.join(target_data_dir, "*ce*.csv")) + glob.glob(os.path.join(target_data_dir, "*CE*.csv"))
+                ce_files = select_sources(target_data_dir, national_dir, 'ce', exclusions)
                 for cf in ce_files:
                     try:
                         parsed = parse_ce2024_municipal(cf)
@@ -524,144 +562,101 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "") -> List[Di
                     "max_lon": bbox[2],
                     "max_lat": bbox[3]
                 }
-                df_denue_raw = load_denue(denue_files, bbox_dict)
-                df_denue, audit_calib = calibrate_denue_employment(
-                    df_denue=df_denue_raw,
-                    ce_benchmarks=ce_benchmarks,
-                    til_1=float(til_1),
-                    min_sample_threshold=int(macro.get("sample_threshold", 500))
-                )
+                df_denue, audit_calib, workplace_report = load_workplaces(
+                    denue_files, bbox_dict, {**macro, 'til_1_state':float(til_1)}, ce_benchmarks, ce_files, source_root=ROOT_DIR)
+                diagnostics['workplace_employment'] = workplace_report
 
-                valid_mza = df_denue[df_denue['mza_clean'] != '-1']
-                if len(valid_mza) > 0:
-                    mza_coords = valid_mza.groupby(['cve_mun_clean', 'ageb_clean', 'mza_clean'])[['lon', 'lat']].mean().reset_index()
-                ageb_coords = df_denue.groupby(['cve_mun_clean', 'ageb_clean'])[['lon', 'lat']].mean().reset_index()
-
-            # Procesar Censo CPV
+            # Production census placement, identities, and population factors.
             df_cpv = None
-            if cpv_files and (mza_coords is not None or ageb_coords is not None):
-                dfs_c = []
-                for cpv_path in cpv_files:
-                    for enc in ['utf-8-sig', 'latin1', 'utf-8', 'cp1252']:
-                        try:
-                            t_df = pd.read_csv(cpv_path, encoding=enc, low_memory=False, dtype=str)
-                            t_df.columns = [c.strip().replace('\ufeff', '').replace('ï»¿', '').upper() for c in t_df.columns]
-                            dfs_c.append(t_df)
-                            break
-                        except Exception:
-                            continue
-                if dfs_c:
-                    raw_cpv_df = pd.concat(dfs_c, ignore_index=True)
-                    req = ['ENTIDAD', 'MUN', 'AGEB', 'MZA', 'POBTOT']
-                    if all(c in raw_cpv_df.columns for c in req):
-                        raw_cpv_df['mza_num'] = pd.to_numeric(raw_cpv_df['MZA'].replace('*', '1'), errors='coerce').fillna(0)
-                        raw_cpv_df['pobtot_num'] = pd.to_numeric(raw_cpv_df['POBTOT'].replace('*', '1.5'), errors='coerce').fillna(0)
-                        raw_cpv_df = raw_cpv_df[(raw_cpv_df['mza_num'] > 0) & (raw_cpv_df['pobtot_num'] > 0)].copy()
-
-                        raw_cpv_df['cve_mun_clean'] = [format_cve_mun(m, e) for m, e in zip(raw_cpv_df['MUN'], raw_cpv_df['ENTIDAD'])]
-                        raw_cpv_df['ageb_clean'] = raw_cpv_df['AGEB'].astype(str).str.strip().str.upper().str.replace('-', '').str.zfill(4)
-                        raw_cpv_df['mza_clean'] = raw_cpv_df['mza_num'].astype(int).astype(str)
-
-                        matched_parts = []
-                        if mza_coords is not None and len(mza_coords) > 0:
-                            merged_mza = pd.merge(raw_cpv_df, mza_coords, on=['cve_mun_clean', 'ageb_clean', 'mza_clean'], how='inner')
-                            matched_parts.append(merged_mza)
-                            key_mza = raw_cpv_df['cve_mun_clean'] + "_" + raw_cpv_df['ageb_clean'] + "_" + raw_cpv_df['mza_clean']
-                            key_matched = merged_mza['cve_mun_clean'] + "_" + merged_mza['ageb_clean'] + "_" + merged_mza['mza_clean']
-                            unmatched = raw_cpv_df[~key_mza.isin(key_matched)]
-                        else:
-                            unmatched = raw_cpv_df
-
-                        if ageb_coords is not None and len(ageb_coords) > 0 and len(unmatched) > 0:
-                            merged_ageb = pd.merge(unmatched, ageb_coords, on=['cve_mun_clean', 'ageb_clean'], how='inner')
-                            matched_parts.append(merged_ageb)
-
-                        if matched_parts:
-                            df_cpv = pd.concat(matched_parts, ignore_index=True)
-                            df_cpv = df_cpv[
-                                (df_cpv['lon'] >= bbox[0]) & (df_cpv['lon'] <= bbox[2]) &
-                                (df_cpv['lat'] >= bbox[1]) & (df_cpv['lat'] <= bbox[3])
-                            ].dropna(subset=['lat', 'lon']).copy()
+            if cpv_files:
+                from sb_mexico.inegi import load_cpv_demography, resolve_projection_year
+                from sb_mexico.residential import discover_marco_layers
+                from sb_mexico.population_projection import resolve_population_factors
+                projections = None
+                projection_report = {}
+                patterns = ('*pobproy*.csv', '*quinq*.csv', '*pob_proy*.csv',
+                            '*conapo*.csv', 'data-*.csv', '*proyeccion*.csv')
+                projection_files = select_sources(target_data_dir, national_dir, 'conapo', exclusions)
+                if projection_files:
+                    projections = resolve_population_factors(projection_files[0], cpv_files, macro, projection_report)
+                df_cpv = load_cpv_demography(
+                    cpv_files, df_denue if df_denue is not None else pd.DataFrame(),
+                    dict(zip(('min_lon', 'min_lat', 'max_lon', 'max_lat'), bbox)),
+                    tasa_pea=macro.get('tasa_pea', .62),
+                    growth_factors={**(projections or {}), **macro.get('growth_factors', {})},
+                    conapo_projections=None,
+                    default_growth=macro.get('default_growth_factor', 1.0),
+                    marco_paths=(discover_marco_layers(target_data_dir)
+                                 if city_dict.get('residential_placement', 'legacy') == 'official_blocks'
+                                 else select_sources(target_data_dir, national_dir, 'marco', exclusions)),
+                    placement_mode=city_dict.get('residential_placement', 'legacy'),
+                    employment_mode=employment_mode, projection_year=resolve_projection_year(macro))
+                if diagnostics is not None:
+                    diagnostics['residential_placement'] = df_cpv.attrs.get('residential_placement')
+                    diagnostics['population_projection'] = projection_report
+                    diagnostics['residential_employment'] = df_cpv.attrs.get('residential_employment')
+                    attach_source_context(diagnostics['residential_employment'], city_file,
+                                          projection_report, projection_files[:1])
+                if projection_report.get('year_basis') == 'unverified':
+                    automatic = set(df_cpv.cve_mun_clean) & set(projections or {}) - set(macro.get('growth_factors', {}))
+                    if automatic:
+                        raise ValueError('Confirma el año del archivo CONAPO antes de previsualizar población.')
 
             # Agregación espacial en cuadrícula
             grp_d = None
             if df_denue is not None and len(df_denue) > 0:
+                from sb_mexico.gravity import assign_zones
+                df_denue['zone'] = assign_zones(df_denue[['lon', 'lat']].to_numpy(),
+                                               (cdata or {}).get('isolated_zones'))
                 df_denue['gx'] = np.floor(df_denue['lon'] / grid_size).astype(int)
                 df_denue['gy'] = np.floor(df_denue['lat'] / grid_size).astype(int)
-                grp_d = df_denue.groupby(['gx', 'gy']).agg(
+                grp_d = df_denue.groupby(['gx', 'gy', 'zone']).agg(
                     jobs=('calibrated_jobs', 'sum'),
                     raw_jobs=('jobs_formal', 'sum'),
                     lon=('lon', 'mean'),
                     lat=('lat', 'mean')
                 ).reset_index()
 
-            grp_c = None
-            if df_cpv is not None and len(df_cpv) > 0:
-                df_cpv['gx'] = np.floor(df_cpv['lon'] / grid_size).astype(int)
-                df_cpv['gy'] = np.floor(df_cpv['lat'] / grid_size).astype(int)
-                grp_c = df_cpv.groupby(['gx', 'gy']).agg(
-                    residents=('pobtot_num', 'sum'),
-                    lon=('lon', 'mean'),
-                    lat=('lat', 'mean')
-                ).reset_index()
-
-            if grp_d is not None and grp_c is not None:
-                merged_grid = pd.merge(grp_d, grp_c, on=['gx', 'gy'], how='outer', suffixes=('_d', '_c'))
-                merged_grid['jobs'] = merged_grid['jobs'].fillna(0).round().astype(int)
-                merged_grid['raw_jobs'] = merged_grid['raw_jobs'].fillna(0).round().astype(int)
-                merged_grid['residents'] = merged_grid['residents'].fillna(0).round().astype(int)
-                merged_grid['lon'] = merged_grid['lon_d'].fillna(merged_grid['lon_c']).round(5)
-                merged_grid['lat'] = merged_grid['lat_d'].fillna(merged_grid['lat_c']).round(5)
-            elif grp_d is not None:
-                merged_grid = grp_d
-                merged_grid['jobs'] = merged_grid['jobs'].round().astype(int)
-                merged_grid['raw_jobs'] = merged_grid['raw_jobs'].round().astype(int)
-                merged_grid['residents'] = 0
-                merged_grid['lon'] = merged_grid['lon'].round(5)
-                merged_grid['lat'] = merged_grid['lat'].round(5)
-            elif grp_c is not None:
-                merged_grid = grp_c
-                merged_grid['jobs'] = 0
-                merged_grid['raw_jobs'] = 0
-                merged_grid['residents'] = merged_grid['residents'].round().astype(int)
-                merged_grid['lon'] = merged_grid['lon'].round(5)
-                merged_grid['lat'] = merged_grid['lat'].round(5)
-            else:
-                merged_grid = None
-
-            if merged_grid is not None and len(merged_grid) > 0:
-                raw_points = []
-                for i, r in merged_grid.iterrows():
-                    raw_points.append({
-                        'id': f"ref_{i+1:04d}",
-                        'location': [float(r['lon']), float(r['lat'])],
-                        'jobs': int(r['jobs']),
-                        'raw_jobs': int(r.get('raw_jobs', r['jobs'])),
-                        'residents': int(r['residents'])
-                    })
-
-                # Guardar caché atómicamente
-                try:
-                    cache_payload = {
-                        "version": 2,
-                        "bbox": bbox,
-                        "mtimes": src_mtimes,
-                        "points": raw_points
-                    }
-                    with open(cache_path, "w", encoding="utf-8") as cf:
-                        json.dump(cache_payload, cf)
-                except Exception:
-                    pass
-
-                return _clean_and_filter(raw_points, bbox)
+            # Display residential source placements separately from job grids.
+            # Joining on a job centroid would relocate the residential preview.
+            raw_points = []
+            if grp_d is not None:
+                for i, row in grp_d.iterrows():
+                    raw_points.append(dict(id=f'ref_jobs_{i}', location=[float(row.lon), float(row.lat)],
+                                           jobs=int(round(row.jobs)), raw_jobs=int(round(row.raw_jobs)), residents=0))
+            if df_cpv is not None:
+                for i, row in df_cpv.reset_index(drop=True).iterrows():
+                    raw_points.append(dict(id=f'ref_residential_{i}', location=[float(row.lon), float(row.lat)],
+                                           jobs=0, raw_jobs=0, residents=float(row.pobtot_adj),
+                                           **({'employed_residents': float(row.pea_real)}
+                                              if employment_mode == 'census_employed' else {})))
+            try:
+                import uuid
+                temporary = cache_path.with_name(cache_path.name + '.' + uuid.uuid4().hex + '.tmp')
+                temporary.write_text(json.dumps(dict(version=3, key=cache_key, points=raw_points,
+                                                     diagnostics=diagnostics or {})), encoding='utf-8')
+                os.replace(temporary, cache_path)
+            except OSError:
+                pass
+            return _clean_and_filter(raw_points, bbox)
 
         except Exception as e:
-            print(f"[WARN] Error al procesar datos brutos para {city_base}: {e}")
+            raise ValueError(f"No se pudo generar la referencia de demanda para {city_base}: {e}") from e
 
     # Fallback estricto: Si NO hay archivos fuente brutos en data/, pero existe demand_data.json
     # compilado (ej. para tests o proyectos heredados), cargar pero PURGANDO estrictamente cualquier POI manual o especial
     if city_base:
         city_demand_path = os.path.join(ROOT_DIR, "dist", city_base, "demand_data.json")
+        manifest = os.path.join(ROOT_DIR, 'dist', city_base, 'wizard-build.json')
+        if os.path.exists(manifest):
+            from sb_mexico.build_delivery import config_hash
+            with open(manifest, encoding='utf-8') as stream:
+                result = json.load(stream)
+            if result['status'] not in ('success', 'demand_only') or result['config_hash'] != config_hash(_resolve_city_path(city_file)):
+                return []
+            city_demand_path = result.get('demand_path', '')
+        if diagnostics is not None:
+            diagnostics['stage'] = 'compiled_reference'
         if os.path.exists(city_demand_path):
             try:
                 with open(city_demand_path, "r", encoding="utf-8") as f:
@@ -751,8 +746,12 @@ class PoiStudioRequestHandler(BaseHTTPRequestHandler):
                     bbox = cdata.get("city", {}).get("bbox")
                 except Exception:
                     pass
-            points = load_demand_sample(bbox, city_file=city_file)
-            self.serve_json({"points": points})
+            try:
+                diagnostics = {}
+                points = load_demand_sample(bbox, city_file=city_file, diagnostics=diagnostics)
+                self.serve_json({"points": points, "diagnostics": diagnostics})
+            except ValueError as error:
+                self.serve_error(str(error), 422)
         else:
             self.serve_error("Ruta no encontrada", 404)
 

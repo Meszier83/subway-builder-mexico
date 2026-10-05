@@ -1,0 +1,16 @@
+{
+  "dependencies": {
+    "leaflet": "1.9.4",
+    "lucide": "0.468.0",
+    "tailwindcss": "3.4.19"
+  },
+  "files": {
+    "app.js": "ada04fc1a335b71388f278ce1d0e9789e72738ef6bee8d7dd2ec97f990d6c0b3",
+    "app.css": "08d2092ac8b87b545939a8ee45905caf49afc928258ff2ac99eb2b1de14e6b51",
+    "bootstrap.js": "9b2b13c90715ae18884759505829b27ad11b7011f0eb1dfc3ed9015cfacb6b60",
+    "tailwind.css": "a0fef78ac908fa6a1b8c005a5bfa32ada268eb82a6bed3fd881fb5c5ad43d3bf",
+    "vendor/leaflet.js": "db49d009c841f5ca34a888c96511ae936fd9f5533e90d8b2c4d57596f4e5641a",
+    "vendor/leaflet.css": "337bfca5cabd03b39815b2700febe2b3b7edf55921c59cd49f88ecb328212303",
+    "vendor/lucide.min.js": "3411692820cb8d47543f69496aa25fd603a358f4498046f41c508a5a3342210e"
+  }
+}

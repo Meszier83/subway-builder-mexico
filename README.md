@@ -8,7 +8,7 @@
 [![Engine](https://img.shields.io/badge/Engine-Furness%20IPFP%20%7C%20OSRM-purple.svg?style=flat-square)](METHODOLOGY.md)
 [![UI Theme](https://img.shields.io/badge/UI-Metro%20CDMX%20%2F%20Lance%20Wyman-E53935.svg?style=flat-square)](tools/wizard.py)
 [![Standards](https://img.shields.io/badge/Standards-S--Tier%20Strict-059669.svg?style=flat-square)](.agents/rules/subway_builder_standards.md)
-[![Tests](https://img.shields.io/badge/Tests-162%20Passed-10B981.svg?style=flat-square)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-367%20Passed-10B981.svg?style=flat-square)](tests/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
 
 **Pipeline integral, declarativo y matematicamente riguroso para transformar microdatos abiertos del INEGI (CPV 2020, DENUE, CE 2024, ENOE) y CONAPO en mapas metropolitanos de alta fidelidad, perfectamente compatibles con Subway Builder y Subway Builder Modded.**
@@ -18,6 +18,8 @@
 </div>
 
 ---
+
+Para los métodos predeterminados, compatibilidad y diagnósticos actuales, consulta [Demanda y Wizard](docs/demand-wizard.md). Esta guía actualiza las descripciones históricas siguientes.
 
 ## Vision del Proyecto
 

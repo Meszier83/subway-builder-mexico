@@ -10,6 +10,7 @@ Implementa:
 """
 
 import math
+import logging
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -205,7 +206,10 @@ def build_demand_grid(
     affluence_zones: Optional[List[Dict]] = None,
     exclusion_zones: Optional[List[Dict]] = None,
     urban_core_polygon: Optional[Any] = None,
-    restrict_demand_to_urban_core: bool = True
+    restrict_demand_to_urban_core: bool = True,
+    isolated_zones: Optional[List[Dict]] = None,
+    max_merge_distance_m: float = 500.0,
+    merge_diagnostics: Optional[Dict] = None
 ) -> Tuple[List[Dict], List[Dict]]:
     """
     Agrega datos de población y empleo en celdas espaciales,
@@ -259,7 +263,8 @@ def build_demand_grid(
     # 2. Asignar DENUE a POIs Especiales o a la Malla Regular
     grid: Dict[str, Dict] = {}
     def get_grid_key(lon: float, lat: float) -> str:
-        return f"{int(math.floor(lon / grid_size))}_{int(math.floor(lat / grid_size))}"
+        zone = int(assign_zones(np.array([[lon, lat]]), isolated_zones)[0]) if isolated_zones else 0
+        return f"{int(math.floor(lon / grid_size))}_{int(math.floor(lat / grid_size))}_{zone}"
 
     denue_records = (
         df_denue[['lon', 'lat', 'calibrated_jobs']].to_dict('records')
@@ -417,16 +422,49 @@ def build_demand_grid(
             )
             for k, c in subthreshold_cells
         ]
-        nearest_valid_indices = cell_tree.query_nearest(sub_pts, all_matches=False)[1]
-        for sub_idx, v_idx in enumerate(nearest_valid_indices):
-            target_cell = valid_cells[int(v_idx)][1]
+        footprints = [[(pt.x, pt.y)] for pt in valid_pts_for_consolidation]
+        retained, movement = [], []
+        for sub_idx, sub_pt in enumerate(sub_pts):
             sub_cell = subthreshold_cells[sub_idx][1]
+            source = (sub_pt.x, sub_pt.y)
+            radius_deg = max_merge_distance_m / (110000 * max(.01, math.cos(math.radians(sub_pt.y))))
+            candidates = cell_tree.query(sub_pt.buffer(radius_deg))
+            eligible = sorted(map(int, candidates), key=lambda i: (distance_metres(source, footprints[i][0]), i))
+            selected = None
+            for v_idx in eligible:
+                target_key, target_cell = valid_cells[v_idx]
+                if distance_metres(source, footprints[v_idx][0]) > max_merge_distance_m:
+                    continue
+                if target_key.split('_')[2] != subthreshold_cells[sub_idx][0].split('_')[2]:
+                    continue
+                weight = target_cell['weight'] + sub_cell['weight']
+                candidate = ((target_cell['sum_lon_w'] + sub_cell['sum_lon_w'])/weight,
+                             (target_cell['sum_lat_w'] + sub_cell['sum_lat_w'])/weight)
+                members = footprints[v_idx] + [source]
+                if not all(distance_metres(p, candidate) <= max_merge_distance_m for p in members):
+                    continue
+                if not location_is_allowed(candidate, int(target_key.split('_')[2]), isolated_zones,
+                                           exclusion_zones, core_poly_prep):
+                    continue
+                selected = v_idx
+                footprints[v_idx] = members
+                movement.append(distance_metres(source, candidate))
+                break
+            if selected is None:
+                retained.append(subthreshold_cells[sub_idx])
+                continue
+            target_cell = valid_cells[selected][1]
             target_cell["jobs"] += sub_cell["jobs"]
             target_cell["residents"] += sub_cell["residents"]
             target_cell["pea"] += sub_cell["pea"]
             target_cell["sum_lon_w"] += sub_cell["sum_lon_w"]
             target_cell["sum_lat_w"] += sub_cell["sum_lat_w"]
             target_cell["weight"] += sub_cell["weight"]
+        valid_cells.extend(retained)
+        if merge_diagnostics is not None:
+            merge_diagnostics.update(retained_small_cells=len(retained), merged_small_cells=len(movement),
+                                     max_merge_distance_m=max_merge_distance_m,
+                                     absorbed_source_displacement_m=movement)
     elif not valid_cells and subthreshold_cells:
         valid_cells = subthreshold_cells
 
@@ -459,8 +497,14 @@ def build_demand_grid(
             dist_m = math.hypot(dx_m, dy_m)
 
             # Snapping vial acotado en rango 5m a 300m
-            if MIN_SNAP_METERS <= dist_m <= MAX_SNAP_METERS:
+            if MIN_SNAP_METERS <= dist_m <= MAX_SNAP_METERS and location_is_allowed(
+                    (proj_candidate.x, proj_candidate.y), int(k.split('_')[2]),
+                    isolated_zones, exclusion_zones, core_poly_prep):
                 lon, lat = proj_candidate.x, proj_candidate.y
+
+        if not location_is_allowed((lon, lat), int(k.split('_')[2]), isolated_zones,
+                                   exclusion_zones, core_poly_prep):
+            raise ValueError(f'Grid centroid falls outside its permitted zone/core or inside an exclusion: {k}')
 
         demand_points.append({
             "id": f"dp_{idx+1:04d}",
@@ -482,7 +526,7 @@ def build_demand_grid(
             if mode == "MAX":
                 final_jobs = max(manual, absorbed)
                 status = "Piso DENUE" if absorbed > manual else "Valor Manual"
-            elif mode in ["BOOST", "ADDITIVE"]:
+            elif mode in ["BOOST", "ADDITIVE", "SUM"]:
                 final_jobs = manual + absorbed
                 status = "Suma (Exógena + DENUE)"
             elif mode == "REPLACE":
@@ -806,6 +850,8 @@ def assign_zones(coords: np.ndarray, isolated_zones: Optional[List[Dict]] = None
     lons = coords[:, 0]
     lats = coords[:, 1]
     for idx, z in enumerate(isolated_zones, start=1):
+        if not z.get('enabled', True):
+            continue
         if "bbox" in z:
             b = z["bbox"]  # [min_lon, min_lat, max_lon, max_lat]
             mask = (lons >= b[0]) & (lons <= b[2]) & (lats >= b[1]) & (lats <= b[3])
@@ -821,6 +867,18 @@ def assign_zones(coords: np.ndarray, isolated_zones: Optional[List[Dict]] = None
     return zones
 
 
+def distance_metres(a, b):
+    cos_lat = math.cos(math.radians((a[1] + b[1])/2))
+    return math.hypot((a[0]-b[0])*111320*cos_lat, (a[1]-b[1])*110574)
+
+
+def location_is_allowed(location, zone, isolated_zones=None, exclusion_zones=None, core=None):
+    if isolated_zones and int(assign_zones(np.array([location]), isolated_zones)[0]) != zone:
+        return False
+    return (not is_point_in_exclusion_zone(*location, exclusion_zones)
+            and (core is None or is_point_in_prepared_polygon(*location, core)))
+
+
 def furness_ipfp_balance(
     orig_pea: np.ndarray,
     dest_jobs: np.ndarray,
@@ -829,13 +887,18 @@ def furness_ipfp_balance(
     beta: float = 0.12,
     max_distance_km: float = 55.0,
     max_iter: int = 15,
-    tol: float = 0.02
+    tol: float = 0.02,
+    diagnostics: Optional[Dict] = None,
+    correct_destination_targets: bool = True
 ) -> np.ndarray:
     """
     Ejecuta el Algoritmo de Furness / IPFP (Iterative Proportional Fitting Procedure)
     para un Modelo Gravitatorio Doblemente Acotado (Doubly-Constrained).
 
-    Garantiza que la matriz de flujos converja simultáneamente hacia:
+    Corrige objetivos incompatibles solo ante un corte OD con déficit probado;
+    conserva pesos relativos por grupo y presupuestos de origen. Registra objetivos
+    solicitados y efectivos; no agrega soporte ni promete marginales exportados exactos.
+    Aproxima simultáneamente los siguientes marginales; informa si agota iteraciones:
     1. Totales por fila: Sum_j T_ij = O_i (PEA residencial por origen).
     2. Totales por columna: Sum_i T_ij proporcional a D_j (Capacidad de puestos de trabajo).
     3. Fricción espacial modulada: f(d_ij) = exp(-beta_j * d_ij) con bono de alcance y piso de retención local.
@@ -845,6 +908,8 @@ def furness_ipfp_balance(
     """
     n_orig = len(orig_pea)
     n_dest = len(dest_jobs)
+    if diagnostics is not None:
+        diagnostics.clear()
     if n_orig == 0 or n_dest == 0:
         return np.zeros((n_orig, n_dest), dtype=np.float64)
 
@@ -879,7 +944,10 @@ def furness_ipfp_balance(
     row_sums = t_mat.sum(axis=1)
     zero_rows = np.where(row_sums == 0)[0]
     for i in zero_rows:
-        closest = np.argsort(dist_km_mat[i])[:min(5, n_dest)]
+        if o_target[i] <= 0:
+            continue
+        eligible = np.flatnonzero(d_target > 0)
+        closest = eligible[np.argsort(dist_km_mat[i, eligible])[:min(5, len(eligible))]]
         t_mat[i, closest] = o_target[i] * d_target[closest] * np.exp(-beta * dist_km_mat[i, closest])
         if t_mat[i].sum() == 0:
             t_mat[i, closest] = 1.0
@@ -887,46 +955,172 @@ def furness_ipfp_balance(
     col_sums = t_mat.sum(axis=0)
     zero_cols = np.where(col_sums == 0)[0]
     for j in zero_cols:
-        closest = np.argsort(dist_km_mat[:, j])[:min(5, n_orig)]
+        if d_target[j] <= 0:
+            continue
+        eligible = np.flatnonzero(o_target > 0)
+        closest = eligible[np.argsort(dist_km_mat[eligible, j])[:min(5, len(eligible))]]
         t_mat[closest, j] = o_target[closest] * d_target[j] * np.exp(-beta * dist_km_mat[closest, j])
         if t_mat[:, j].sum() == 0:
             t_mat[closest, j] = 1.0
 
+    requested_target = d_target.copy()
+    initial_support = t_mat > 0
+    target_adjustments = []
+    flow_rebalanced = False
+    support_report = []
+    if diagnostics is not None:
+        from scipy.sparse import csr_matrix, bmat
+        from scipy.sparse.csgraph import connected_components
+        support = csr_matrix(initial_support)
+        graph = bmat([[None, support], [support.T, None]], format='csr')
+        count, labels = connected_components(graph, directed=False)
+        del graph
+        for component in range(count):
+            rows = np.flatnonzero(labels[:n_orig] == component)
+            cols = np.flatnonzero(labels[n_orig:] == component)
+            origin_mass = float(o_target[rows].sum(dtype=np.float64))
+            target_mass = float(d_target[cols].sum(dtype=np.float64))
+            if origin_mass or target_mass:
+                support_report.append(dict(origin_indices=rows.tolist(), destination_indices=cols.tolist(),
+                    origin_budget=origin_mass, destination_target=target_mass,
+                    unavoidable_mass_difference=target_mass-origin_mass))
+
     # 4. Iteraciones de Furness / IPFP
     eps = 1e-12
-    for _ in range(max_iter):
-        # Paso A: Ajuste a Filas (Orígenes / PEA)
+    active_rows = o_target > eps
+    active_cols = d_target > eps
+    converged = False
+    iterations = 0
+    total_iterations = 0
+    repair_blocks = [(np.ones(n_orig, dtype=bool), np.ones(n_dest, dtype=bool))]
+    for repair_round in range(17):
+        for iteration in range(max_iter):
+            # Paso A: Ajuste a Filas (Orígenes / PEA)
+            r_sum = t_mat.sum(axis=1)
+            r_scale = np.where(r_sum > eps, o_target / (r_sum + eps), 1.0)
+            t_mat *= r_scale[:, np.newaxis]
+
+            # Paso B: Ajuste a Columnas (Destinos / Empleo)
+            c_sum = t_mat.sum(axis=0)
+            c_scale = np.where(c_sum > eps, d_target / (c_sum + eps), 1.0)
+            t_mat *= c_scale[np.newaxis, :]
+
+            # Check the allocation that will be returned, after restoring origins.
+            r_sum = t_mat.sum(axis=1)
+            t_mat *= np.divide(o_target, r_sum, out=np.zeros_like(o_target),
+                               where=r_sum > eps)[:, np.newaxis]
+            iterations = iteration + 1
+            c_current = t_mat.sum(axis=0)
+            r_current = t_mat.sum(axis=1)
+            col_error = float(np.max(np.abs(c_current[active_cols] - d_target[active_cols]) / d_target[active_cols]))
+            row_error = float(np.max(np.abs(r_current[active_rows] - o_target[active_rows]) / o_target[active_rows]))
+            if max(row_error, col_error) <= tol:
+                converged = True
+                break
+
+        # 5. Ajuste final a las filas de orígenes para preservar exactamente O_i
         r_sum = t_mat.sum(axis=1)
         r_scale = np.where(r_sum > eps, o_target / (r_sum + eps), 1.0)
         t_mat *= r_scale[:, np.newaxis]
 
-        # Paso B: Ajuste a Columnas (Destinos / Empleo)
-        c_sum = t_mat.sum(axis=0)
-        c_scale = np.where(c_sum > eps, d_target / (c_sum + eps), 1.0)
-        t_mat *= c_scale[np.newaxis, :]
+        # 6. Matriz Estocástica de Probabilidades (P_ij = T_ij / O_i)
+        row_t_sum = t_mat.sum(axis=1, keepdims=True)
+        row_t_sum[row_t_sum == 0] = 1.0
+        p_mat = t_mat / row_t_sum
 
-        # Verificación de convergencia marginal en destinos
-        c_current = t_mat.sum(axis=0)
-        active_cols = d_target > eps
-        if np.any(active_cols):
-            max_rel_err = np.max(np.abs(c_current[active_cols] - d_target[active_cols]) / d_target[active_cols])
-            if max_rel_err < tol:
+        # Normalización estricta por fila para compensar precisión flotante
+        p_sums = p_mat.sum(axis=1, keepdims=True)
+        p_sums[p_sums == 0] = 1.0
+        p_mat /= p_sums
+
+        total_iterations += iterations
+        final_columns = np.einsum('i,ij->j', o_target, p_mat, dtype=np.float64, optimize=False)
+        final_error = float(np.max(np.abs(final_columns[active_cols] - d_target[active_cols]) / d_target[active_cols]))
+        if max(final_error, float(np.max(np.abs(p_mat[active_rows].sum(axis=1)-1.0)))) <= tol:
+            converged = True
+            break
+        converged = False
+        if repair_round == 16 or not correct_destination_targets:
+            break
+        # Split only within a previously balanced block. Later corrections cannot
+        # change budgets already committed by an earlier tight cut.
+        correction = None
+        for block_index, (block_rows, block_cols) in enumerate(repair_blocks):
+            deficient = ((d_target - final_columns) > tol * d_target) & block_cols
+            reachable = initial_support[:, deficient].any(axis=1) & block_rows
+            available = float(o_target[reachable].sum(dtype=np.float64))
+            required = float(d_target[deficient].sum(dtype=np.float64))
+            total = float(o_target[block_rows].sum(dtype=np.float64))
+            other_cols = block_cols & ~deficient
+            other_required = float(d_target[other_cols].sum(dtype=np.float64))
+            numerical_slack = max(1e-5, total * 1e-7)
+            if (required > available + numerical_slack and available > 0
+                    and total-available > numerical_slack and other_required > numerical_slack):
+                correction = (block_index, block_rows, block_cols, deficient, reachable, other_cols,
+                              available, required, total, other_required)
                 break
+        if correction is None:
+            break
+        (block_index, block_rows, block_cols, deficient, reachable, other_cols,
+         available, required, total, other_required) = correction
+        d_target[deficient] *= available / required
+        d_target[other_cols] *= (total-available) / other_required
+        repair_blocks.pop(block_index)
+        repair_blocks.extend([(reachable.copy(), deficient.copy()),
+                              (block_rows & ~reachable, other_cols.copy())])
+        target_adjustments.append(dict(destination_indices=np.flatnonzero(deficient).tolist(),
+            origin_indices=np.flatnonzero(reachable).tolist(), original_group_target=required,
+            reachable_origin_budget=available, redistributed_mass=required-available))
+        # Targets were corrected from the support budget, not fitted arrivals.
+        # Keep the existing probabilities if they already satisfy those targets:
+        # unnecessary numerical refits can cascade through multinomial RNG draws.
+        adjusted_error = float(np.max(np.abs(final_columns[active_cols]-d_target[active_cols]) / d_target[active_cols]))
+        if adjusted_error <= tol and float(np.max(np.abs(p_mat[active_rows].sum(axis=1)-1.0))) <= tol:
+            converged = True
+            break
+        flow_rebalanced = True
+        # A tight group consumes the entire reachable origin budget. Outgoing
+        # edges from those origins to its complement must therefore be zero.
+        t_mat[np.ix_(reachable, other_cols)] = 0
+        initial_support[np.ix_(reachable, other_cols)] = False
+        # Destination scaling changes attraction totals, never the commuter
+        # budget, distances, friction, special POIs, or allowed travel edges.
+        converged = False
+        iterations = 0
 
-    # 5. Ajuste final a las filas de orígenes para preservar exactamente O_i
-    r_sum = t_mat.sum(axis=1)
-    r_scale = np.where(r_sum > eps, o_target / (r_sum + eps), 1.0)
-    t_mat *= r_scale[:, np.newaxis]
-
-    # 6. Matriz Estocástica de Probabilidades (P_ij = T_ij / O_i)
-    row_t_sum = t_mat.sum(axis=1, keepdims=True)
-    row_t_sum[row_t_sum == 0] = 1.0
-    p_mat = t_mat / row_t_sum
-
-    # Normalización estricta por fila para compensar precisión flotante
-    p_sums = p_mat.sum(axis=1, keepdims=True)
-    p_sums[p_sums == 0] = 1.0
-    p_mat /= p_sums
+    # Report residuals of final probabilities, not an intermediate column scale.
+    final_columns = np.einsum('i,ij->j', o_target, p_mat, dtype=np.float64, optimize=False)
+    col_error = float(np.max(np.abs(final_columns[active_cols] - d_target[active_cols]) / d_target[active_cols]))
+    row_error = float(np.max(np.abs(p_mat[active_rows].sum(axis=1) - 1.0)))
+    converged = converged and max(row_error, col_error) <= tol
+    report = dict(status='converged' if converged else 'iteration_limit',
+                  iterations=total_iterations, row_relative_error=row_error,
+                  column_relative_error=col_error, tolerance=float(tol))
+    if diagnostics is not None:
+        diagnostics.update(report)
+        diagnostics['target_policy'] = 'reachable_budget_correction' if correct_destination_targets else 'legacy_global_normalization'
+        diagnostics['target_adjustments'] = target_adjustments
+        diagnostics['target_adjusted'] = bool(target_adjustments)
+        diagnostics['flow_rebalanced'] = flow_rebalanced
+        diagnostics['target_adjustment_half_l1'] = float(np.abs(d_target.astype(np.float64)-requested_target).sum()/2)
+        diagnostics['semantics'] = 'Expected regular flows before cohort sampling; adjusted attraction targets are not observed workplace counts'
+        diagnostics['support_components_basis'] = 'requested_targets_before_correction'
+        diagnostics['requested_destination_targets'] = requested_target.astype(float).tolist()
+        diagnostics['effective_destination_targets'] = d_target.astype(float).tolist()
+        diagnostics['requested_column_relative_error'] = float(np.max(
+            np.abs(final_columns[active_cols]-requested_target[active_cols]) / requested_target[active_cols]))
+        diagnostics["support_components"] = support_report
+        deficient = (d_target - final_columns) > tol * d_target
+        reachable = np.asarray(support[:, deficient].getnnz(axis=1)).ravel() > 0
+        available = float(o_target[reachable].sum(dtype=np.float64))
+        required = float(d_target[deficient].sum(dtype=np.float64))
+        diagnostics['deficient_subset_support'] = dict(destinations=int(deficient.sum()),
+            reachable_origins=int(reachable.sum()), reachable_origin_budget=available,
+            destination_target=required, unavoidable_deficit=max(0.0, required-available))
+    if not converged:
+        logging.getLogger(__name__).warning(
+            'Employment balancing iteration limit (%d): final destination residual %.4g; '
+            'origin commuter budget preserved', total_iterations, col_error)
 
     return p_mat
 
@@ -943,7 +1137,8 @@ def simulate_gravity_demand(
     affluence_zones: Optional[List[Dict]] = None,
     furness_iterations: int = 15,
     furness_tol: float = 0.02,
-    road_index: Optional["ArterialRoadIndex"] = None
+    road_index: Optional["ArterialRoadIndex"] = None,
+    balancing_diagnostics: Optional[List[Dict]] = None
 ) -> List[Dict]:
     """
     Ejecuta el Modelo de Demanda en Dos Capas:
@@ -1096,6 +1291,8 @@ def simulate_gravity_demand(
     # =========================================================================
     # CAPA 2: ASIGNACIÓN GRAVITATORIA DE EMPLEO REGULAR (FURNESS / IPFP)
     # =========================================================================
+    if np.any(orig_pea > 0) and not regular_dests:
+        raise ValueError('No eligible local regular jobs remain for residential commuter demand')
     if regular_dests and np.any(orig_pea > 0):
         dest_coords_deg = np.array([d["location"] for d in regular_dests], dtype=np.float64)
         dest_coords = np.radians(dest_coords_deg)
@@ -1160,6 +1357,7 @@ def simulate_gravity_demand(
                                 if len(match) > 0:
                                     sub_dist[si, match[0]] = 1e6
 
+                balance_report = {}
                 sub_prob = furness_ipfp_balance(
                     orig_pea=sub_pea,
                     dest_jobs=sub_jobs,
@@ -1168,14 +1366,17 @@ def simulate_gravity_demand(
                     beta=beta,
                     max_distance_km=max_distance_km,
                     max_iter=furness_iterations,
-                    tol=furness_tol
+                    tol=furness_tol,
+                    diagnostics=balance_report
                 )
+                if balancing_diagnostics is not None:
+                    balancing_diagnostics.append(dict(zone=int(z),
+                        origin_ids=[origins[int(i)]['id'] for i in orig_indices],
+                        destination_ids=[regular_dests[int(i)]['id'] for i in dest_indices], **balance_report))
                 prob_matrix[np.ix_(orig_indices, dest_indices)] = sub_prob
             else:
-                # Zona huérfana (residentes en zona sin empleos locales)
-                for o_idx in orig_indices:
-                    closest = np.argsort(dist_km_mat[o_idx])[:min(5, len(regular_dests))]
-                    prob_matrix[o_idx, closest] = 1.0 / len(closest)
+                affected = [origins[i]['id'] for i in orig_indices]
+                raise ValueError(f'No eligible local jobs in zone {int(z)} for remaining commuters: {affected[:10]}')
 
         # Normalizar probabilidades y asegurar consistencia
         for i in range(len(origins)):
@@ -1184,7 +1385,10 @@ def simulate_gravity_demand(
                 if row_sum > 0:
                     prob_matrix[i] /= row_sum
                 else:
-                    closest = np.argsort(dist_km_mat[i])[:min(5, len(regular_dests))]
+                    eligible = np.flatnonzero((dest_zones == orig_zones[i]) & (dest_jobs > 0))
+                    if not len(eligible):
+                        raise ValueError(f'No eligible local jobs in zone {int(orig_zones[i])}')
+                    closest = eligible[np.argsort(dist_km_mat[i, eligible])[:min(5, len(eligible))]]
                     prob_matrix[i, closest] = 1.0 / len(closest)
 
         effective_target = max(1, target_pop_size) if target_pop_size > 0 else max_pop_size
@@ -1327,7 +1531,10 @@ def consolidate_small_pops(
     min_pop_size: int = 25,
     max_pop_size: int = 200,
     consolidate_max_sizes: Optional[List[int]] = None,
-    consolidate_distances: Optional[List[float]] = None
+    consolidate_distances: Optional[List[float]] = None,
+    max_merge_distance_m: float = 2000.0,
+    isolated_zones: Optional[List[Dict]] = None,
+    merge_diagnostics: Optional[Dict] = None
 ) -> Tuple[List[Dict], List[Dict]]:
     """
     Consolida micro-flujos residuales por debajo de umbrales en cohortes más grandes
@@ -1353,6 +1560,27 @@ def consolidate_small_pops(
     special_ids = {p["id"] for p in demand_points if p.get("is_special", False)}
 
     current_pops = [dict(p) for p in pops]
+    zones = dict(zip(coords_by_id, assign_zones(np.array(list(coords_by_id.values())), isolated_zones)))
+    residence_members = [{p['residenceId']} for p in current_pops]
+    job_members = [{p['jobId']} for p in current_pops]
+    movements = []
+
+    def eligible_transfer(pi, pj):
+        recipient = current_pops[pj]
+        for field, members in [('residenceId', residence_members), ('jobId', job_members)]:
+            target = recipient[field]
+            for source in members[pi] | members[pj]:
+                if zones[source] != zones[target] or distance_metres(coords_by_id[source], coords_by_id[target]) > max_merge_distance_m:
+                    return False
+        return True
+
+    def track_transfer(pi, pj):
+        residence_members[pj].update(residence_members[pi])
+        job_members[pj].update(job_members[pi])
+        movements.append(max(
+            distance_metres(coords_by_id[source], coords_by_id[current_pops[pj][field]])
+            for field, members in [('residenceId', residence_members), ('jobId', job_members)]
+            for source in members[pj]))
 
     for max_sz, max_dist in zip(consolidate_max_sizes, consolidate_distances):
         # Paso A: Consolidar orígenes para un mismo trabajo (jobId)
@@ -1390,14 +1618,25 @@ def consolidate_small_pops(
                     cos_lat = math.cos(math.radians((loc1[1] + loc2[1]) / 2.0))
                     dist_m = math.hypot((loc1[0] - loc2[0]) * 111320.0 * cos_lat, (loc1[1] - loc2[1]) * 110574.0)
 
-                    if dist_m <= max_dist:
+                    if dist_m <= min(max_dist, max_merge_distance_m) and eligible_transfer(pi, pj):
                         transfer = min(pop_i["size"], max_pop_size - pop_j["size"])
                         if transfer > 0:
+                            track_transfer(pi, pj)
                             w_tot = pop_j["size"] + transfer
                             pop_j["drivingSeconds"] = int(round((pop_j.get("drivingSeconds", 0) * pop_j["size"] + pop_i.get("drivingSeconds", 0) * transfer) / w_tot))
                             pop_j["drivingDistance"] = int(round((pop_j.get("drivingDistance", 0) * pop_j["size"] + pop_i.get("drivingDistance", 0) * transfer) / w_tot))
                             pop_j["size"] += transfer
                             pop_i["size"] -= transfer
+
+                            # Salvaguarda de piso físico en la cohorte receptora (Colin standard)
+                            loc_job = coords_by_id.get(job_id)
+                            if loc_job and loc2:
+                                cos_j = math.cos(math.radians((loc_job[1] + loc2[1]) / 2.0))
+                                euclid_j = math.hypot((loc_job[0] - loc2[0]) * 111320.0 * cos_j, (loc_job[1] - loc2[1]) * 110574.0)
+                                min_dist_j = max(150, int(round(euclid_j * 1.3)))
+                                if pop_j["drivingDistance"] < min_dist_j:
+                                    pop_j["drivingDistance"] = min_dist_j
+                                    pop_j["drivingSeconds"] = max(45, int(round(min_dist_j / (CANONICAL_SPEED_KMH / 3.6))))
 
                         if pop_i["size"] <= 0:
                             break
@@ -1437,19 +1676,33 @@ def consolidate_small_pops(
                     cos_lat = math.cos(math.radians((loc1[1] + loc2[1]) / 2.0))
                     dist_m = math.hypot((loc1[0] - loc2[0]) * 111320.0 * cos_lat, (loc1[1] - loc2[1]) * 110574.0)
 
-                    if dist_m <= max_dist:
+                    if dist_m <= min(max_dist, max_merge_distance_m) and eligible_transfer(pi, pj):
                         transfer = min(pop_i["size"], max_pop_size - pop_j["size"])
                         if transfer > 0:
+                            track_transfer(pi, pj)
                             w_tot = pop_j["size"] + transfer
                             pop_j["drivingSeconds"] = int(round((pop_j.get("drivingSeconds", 0) * pop_j["size"] + pop_i.get("drivingSeconds", 0) * transfer) / w_tot))
                             pop_j["drivingDistance"] = int(round((pop_j.get("drivingDistance", 0) * pop_j["size"] + pop_i.get("drivingDistance", 0) * transfer) / w_tot))
                             pop_j["size"] += transfer
                             pop_i["size"] -= transfer
 
+                            # Salvaguarda de piso físico en la cohorte receptora (Colin standard)
+                            loc_res = coords_by_id.get(res_id)
+                            if loc_res and loc2:
+                                cos_j = math.cos(math.radians((loc_res[1] + loc2[1]) / 2.0))
+                                euclid_j = math.hypot((loc_res[0] - loc2[0]) * 111320.0 * cos_j, (loc_res[1] - loc2[1]) * 110574.0)
+                                min_dist_j = max(150, int(round(euclid_j * 1.3)))
+                                if pop_j["drivingDistance"] < min_dist_j:
+                                    pop_j["drivingDistance"] = min_dist_j
+                                    pop_j["drivingSeconds"] = max(45, int(round(min_dist_j / (CANONICAL_SPEED_KMH / 3.6))))
+
                         if pop_i["size"] <= 0:
                             break
 
     active_pops = [p for p in current_pops if p["size"] > 0]
+    if merge_diagnostics is not None:
+        merge_diagnostics.update(max_merge_distance_m=max_merge_distance_m, transfers=len(movements),
+                                 max_original_endpoint_displacement_m=max(movements, default=0.))
     return demand_points, active_pops
 
 
@@ -1457,7 +1710,10 @@ def cluster_demand_points(
     demand_points: List[Dict],
     pops: List[Dict],
     max_pop_threshold: Optional[List[float]] = None,
-    buffer_meters: Optional[List[float]] = None
+    buffer_meters: Optional[List[float]] = None,
+    isolated_zones: Optional[List[Dict]] = None,
+    exclusion_zones: Optional[List[Dict]] = None,
+    urban_core_polygon: Optional[Any] = None
 ) -> Tuple[List[Dict], List[Dict]]:
     """
     Agrupa y fusiona espacialmente puntos de demanda contiguos según el método de clustering
@@ -1478,6 +1734,16 @@ def cluster_demand_points(
     if not regular_pts:
         return demand_points, pops
 
+    # A cluster must never contain both endpoints of a positive commute.
+    # Keep original IDs: checking only the representative misses later members.
+    from collections import defaultdict
+    commute_neighbors = defaultdict(set)
+    for pop in pops:
+        if pop['size'] > 0:
+            residence, job = pop['residenceId'], pop['jobId']
+            commute_neighbors[residence].add(job)
+            commute_neighbors[job].add(residence)
+
     res_by_id = {p["id"]: sum(pop["size"] for pop in pops if pop["residenceId"] == p["id"]) for p in regular_pts}
     jobs_by_id = {p["id"]: sum(pop["size"] for pop in pops if pop["jobId"] == p["id"]) for p in regular_pts}
     sizes = np.array([res_by_id[p["id"]] + jobs_by_id[p["id"]] for p in regular_pts], dtype=np.float64)
@@ -1490,6 +1756,11 @@ def cluster_demand_points(
     unique_sizes = []
     unique_ids = []
     point_mapping = {}
+    original_members = []
+    member_ids = []
+    zone_by_id = dict(zip([p['id'] for p in sorted_pts],
+                         assign_zones(np.array([p['location'] for p in sorted_pts]), isolated_zones)))
+    core = prepare_polygon_geom(urban_core_polygon) if urban_core_polygon else None
 
     for i, pt in enumerate(sorted_pts):
         pt_sz = sorted_sizes[i]
@@ -1509,7 +1780,18 @@ def cluster_demand_points(
                 (pt_loc[0] - c_loc[0]) * 111320.0 * cos_lat,
                 (pt_loc[1] - c_loc[1]) * 110574.0
             )
-            if dist_m <= buf:
+            if dist_m > buf:
+                continue
+            if not commute_neighbors[pt['id']].isdisjoint(member_ids[c_idx]):
+                continue
+            total_weight = unique_sizes[c_idx] + pt_sz
+            candidate = [(c_loc[d]*unique_sizes[c_idx] + pt_loc[d]*pt_sz)/total_weight
+                         for d in range(2)] if total_weight > 0 else c_loc
+            same_zone = zone_by_id[pt['id']] == zone_by_id[unique_ids[c_idx]]
+            bounded = all(distance_metres(loc, candidate) <= max(buffer_meters)
+                          for loc in original_members[c_idx] + [pt_loc])
+            if dist_m <= buf and same_zone and bounded and location_is_allowed(
+                    candidate, zone_by_id[pt['id']], isolated_zones, exclusion_zones, core):
                 merged_to = c_idx
                 break
 
@@ -1518,6 +1800,8 @@ def cluster_demand_points(
             unique_centers.append(list(pt_loc))
             unique_sizes.append(pt_sz)
             unique_ids.append(pt["id"])
+            original_members.append([pt_loc])
+            member_ids.append({pt['id']})
             point_mapping[pt["id"]] = pt["id"]
         else:
             target_id = unique_ids[merged_to]
@@ -1528,6 +1812,8 @@ def cluster_demand_points(
                 unique_centers[merged_to][0] = (unique_centers[merged_to][0] * cur_sz + pt_loc[0] * pt_sz) / new_sz
                 unique_centers[merged_to][1] = (unique_centers[merged_to][1] * cur_sz + pt_loc[1] * pt_sz) / new_sz
             unique_sizes[merged_to] = new_sz
+            original_members[merged_to].append(pt_loc)
+            member_ids[merged_to].add(pt['id'])
 
     updated_pops = []
     for p in pops:
@@ -2146,8 +2432,7 @@ def _calibrate_beta_from_demand_points(
 
     # Soporte de Respaldo para Filas/Columnas Huérfanas (Equivalencia exacta con simulate_gravity_demand)
     # Furness conecta cada fila o columna sin pares admisibles a sus <= 5 destinos/orígenes
-    # más cercanos en la misma zona. Si una zona carece totalmente de empleo local (zona residencial huérfana),
-    # simulate_gravity_demand() conecta los residentes uniformemente a los <= 5 destinos globales más cercanos.
+    # más cercanos en la misma zona. Una zona sin empleo local no autoriza soporte global.
     orphan_pairs = {}
     if np.any(~orig_has_dest):
         orphan_origins = np.where(~orig_has_dest)[0]
@@ -2188,10 +2473,12 @@ def _calibrate_beta_from_demand_points(
                         orig_has_dest[u_idx] = True
                         dest_has_orig[v_idx] = True
 
-            # 2. Respaldo global idéntico a simulate_gravity_demand() (líneas 1175-1178 y 1186-1188)
-            # Para zonas exclusivamente residenciales sin empleo local o filas residuales en cero
-            # Selecciona sobre las filas originales de regular_dests conservando multiplicidad de centroides colocados
+            # Residual fallback ranks raw records, but only within the same zone.
             if not orig_has_dest[u_idx]:
+                eligible_raw = np.flatnonzero(dest_zones[raw_to_spatial_dest] == z_u)
+                if len(eligible_raw) == 0:
+                    logging.getLogger(__name__).warning('Beta calibration: zone %d has no local regular jobs', z_u)
+                    continue
                 dlat = rlat_raw_d - rlat_o[u_idx]
                 dlon = rlon_raw_d - rlon_o[u_idx]
                 sin_half_dlat = np.sin(0.5 * dlat)
@@ -2199,8 +2486,8 @@ def _calibrate_beta_from_demand_points(
                 a = sin_half_dlat**2 + math.cos(rlat_o[u_idx]) * np.cos(rlat_raw_d) * sin_half_dlon**2
                 d_raw_all = 6371.0 * 2.0 * np.arcsin(np.clip(np.sqrt(a), 0.0, 1.0))
 
-                k_closest = min(5, len(destinations_raw))
-                closest_raw_idx = np.argsort(d_raw_all)[:k_closest]
+                k_closest = min(5, len(eligible_raw))
+                closest_raw_idx = eligible_raw[np.argsort(d_raw_all[eligible_raw])[:k_closest]]
                 unit_w = orig_w[u_idx] / float(k_closest)
                 for r_idx in closest_raw_idx:
                     v_idx = int(raw_to_spatial_dest[r_idx])
@@ -2662,4 +2949,3 @@ def recommend_gravity_beta(
             "rationale": f"BBOX diagonal de {diag_km:.1f} km (28–65 km). Escala metropolitana típica.",
             "metrics": {"method": "bbox_fallback", "bbox_diagonal_km": round(diag_km, 1)}
         }
-

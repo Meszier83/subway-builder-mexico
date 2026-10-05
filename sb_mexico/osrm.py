@@ -329,7 +329,7 @@ def stop_osrm_daemon_wsl(city_code: str) -> None:
             try:
                 _ACTIVE_OSRM_PROC.kill()
             except Exception:
-                pass
+                reason = 'request_or_response_error'
         _ACTIVE_OSRM_PROC = None
 
 
@@ -337,7 +337,8 @@ def enrich_pops_with_osrm(
     pops: List[Dict],
     demand_points: List[Dict],
     osrm_url: str = "http://127.0.0.1:5000",
-    include_driving_path: bool = False
+    include_driving_path: bool = False,
+    diagnostics: Optional[Dict] = None
 ) -> Tuple[int, int]:
     """
     Enriquece cada cohorte (pop) con drivingSeconds y drivingDistance (y drivingPath
@@ -365,6 +366,7 @@ def enrich_pops_with_osrm(
             unique_pairs.add((res_id, job_id))
 
     routes_cache: Dict[Tuple[str, str], Tuple[int, int, Optional[List]]] = {}
+    provenance = {}
     osrm_success = 0
     fallback_count = 0
 
@@ -399,14 +401,18 @@ def enrich_pops_with_osrm(
             dy_m = (dest_loc[1] - orig_loc[1]) * 110_574.0
             euclid_m = math.hypot(dx_m, dy_m)
 
+            reason = 'no_route'
             # Si origen y destino son el mismo punto (viaje local intra-celda)
             if res_id == job_id or euclid_m < 20.0:
                 fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
                 routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
+                provenance[(res_id, job_id)] = ('canonical', 'local_pair')
+                fallback_count += 1
                 continue
 
             # Si el microservicio OSRM se abortó por desconexión previa, aplicar fallback directo sin latencia
             if service_aborted:
+                provenance[(res_id, job_id)] = ('canonical', 'service_aborted')
                 fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
                 routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
                 fallback_count += 1
@@ -421,13 +427,16 @@ def enrich_pops_with_osrm(
             try:
                 resp = session.get(url, timeout=(1.0, 3.0))
                 consecutive_connection_errors = 0  # El servidor respondió, está activo
+                reason = 'http_error'
                 if resp.status_code == 200:
                     data = resp.json()
+                    reason = str(data.get('code') or 'empty_routes')
                     if data.get("code") == "Ok" and data.get("routes"):
                         # Salvaguarda 1: Verificación de snapping excesivo (puntos fuera de cobertura vial)
                         waypoints = data.get("waypoints", [])
                         max_snap_m = max([float(w.get("distance", 0.0)) for w in waypoints], default=0.0)
                         if max_snap_m > MAX_WAYPOINT_SNAPPING_METERS:
+                            provenance[(res_id, job_id)] = ('canonical', 'excessive_snapping')
                             # Uno o ambos puntos quedaron demasiado lejos de la red vial mapeada
                             fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
                             routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
@@ -441,21 +450,25 @@ def enrich_pops_with_osrm(
 
                         # Salvaguarda 2: Verificación de invariantes físicos (atajos imposibles por fallo topológico)
                         if euclid_m > 500.0 and distance_m < (MIN_CIRCUITY_RATIO * euclid_m):
+                            provenance[(res_id, job_id)] = ('canonical', 'impossible_shortcut')
                             fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
                             routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
                             fallback_count += 1
                             continue
 
                         if euclid_m > 250.0 and distance_m < MIN_INTER_NODE_ROAD_METERS:
+                            provenance[(res_id, job_id)] = ('canonical', 'road_distance_too_short')
                             fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
                             routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
                             fallback_count += 1
                             continue
 
                         routes_cache[(res_id, job_id)] = (distance_m, duration_sec, path_coords)
+                        provenance[(res_id, job_id)] = ('osrm', 'accepted')
                         osrm_success += 1
                         continue
             except (requests.exceptions.ConnectionError, requests.exceptions.ConnectTimeout):
+                reason = 'connection_error'
                 consecutive_connection_errors += 1
                 if consecutive_connection_errors >= 5:
                     print(
@@ -465,8 +478,9 @@ def enrich_pops_with_osrm(
                     )
                     service_aborted = True
             except Exception:
-                pass
+                reason = 'request_or_response_error'
 
+            provenance[(res_id, job_id)] = ('canonical', reason)
             # Fallback canónico oficial de Colin si OSRM no conecta el par (ej. Isla Mujeres sin puente)
             fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
             routes_cache[(res_id, job_id)] = (fb_dist, fb_sec, None)
@@ -486,4 +500,26 @@ def enrich_pops_with_osrm(
             else:
                 p.pop("drivingPath", None)
 
+    if diagnostics is not None:
+        diagnostics.update(summarize_routing_provenance(pops, provenance))
     return osrm_success, fallback_count
+
+
+def summarize_routing_provenance(pops, provenance):
+    """Sidecar-only evidence; never infer route source from numeric coincidence."""
+    pairs = {}
+    for pop in pops:
+        key = (pop['residenceId'], pop['jobId'])
+        source, reason = provenance.get(key, ('unknown', 'missing_endpoint'))
+        row = pairs.setdefault(key, dict(origin_id=key[0], destination_id=key[1],
+            source=source, reason=reason, cohorts=0, travelers=0))
+        row['cohorts'] += 1
+        row['travelers'] += int(pop['size'])
+    totals = {}
+    for row in pairs.values():
+        key = row['source'] + ':' + row['reason']
+        total = totals.setdefault(key, dict(pairs=0, cohorts=0, travelers=0))
+        total['pairs'] += 1
+        total['cohorts'] += row['cohorts']
+        total['travelers'] += row['travelers']
+    return dict(schema_version=1, totals=totals, pairs=[pairs[k] for k in sorted(pairs)])

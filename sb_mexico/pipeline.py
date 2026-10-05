@@ -57,6 +57,10 @@ from sb_mexico.special_demand import (
     validate_special_demand_points,
     save_special_demand_points
 )
+from sb_mexico.residential import validate_placement_mode, discover_marco_layers, grid_accounting
+from sb_mexico.residential_employment import validate_employment_mode, attach_source_context
+from sb_mexico.workplace_employment import validate_workplace_mode, load_workplaces
+from sb_mexico.inegi import resolve_projection_year
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 console = Console()
@@ -115,7 +119,52 @@ def load_city_config(config_path: str) -> Dict[str, Any]:
             except (ValueError, TypeError):
                 pass
 
+    from sb_mexico.config_defaults import apply_demand_defaults
+    apply_demand_defaults(config)
+    validate_placement_mode(config['city']['residential_placement'])
+    validate_employment_mode(config['macroeconomics'].get('residential_employment', 'legacy'))
+    validate_workplace_mode(config['macroeconomics'].get('workplace_employment', 'legacy'))
+    if config['macroeconomics'].get('workplace_employment') == 'historical_transfer':
+        from sb_mexico.historical_transfer import validate_transfer_contract
+        validate_transfer_contract(config['macroeconomics'].get('historical_workplace_transfer'))
     return config
+
+
+def validate_exported_commutes(pops, demand_points, expected_commuters):
+    """Reject self-commutes, missing endpoints or lost mass before export.
+
+    Preserve the existing display policy for an unserved special POI: its
+    declared jobs may remain visible even when no commuters were allocated.
+    """
+    from collections import Counter
+    points = {point['id']: point for point in demand_points}
+    incoming, outgoing = Counter(), Counter()
+    errors = []
+    if len(points) != len(demand_points):
+        errors.append('Duplicate demand point IDs')
+    for pop in pops:
+        residence, job, size = pop['residenceId'], pop['jobId'], pop['size']
+        if size <= 0:
+            errors.append(f"{pop.get('id', '?')}: nonpositive size={size}")
+        if residence == job and size > 0:
+            errors.append(f"{pop.get('id', '?')}: self-commute {residence}->{job}, size={size}")
+        if residence not in points or job not in points:
+            errors.append(f"{pop.get('id', '?')}: missing endpoint {residence}->{job}")
+        outgoing[residence] += size
+        incoming[job] += size
+    actual = sum(pop['size'] for pop in pops)
+    if actual != expected_commuters:
+        errors.append(f'Commuter budget: exported={actual}, expected={expected_commuters}')
+    for point in demand_points:
+        key = point['id']
+        if point.get('residents', 0) != outgoing[key]:
+            errors.append(f'{key}: displayed residents differ from realized commuters')
+        unserved_special = point.get('is_special', False) and incoming[key] == 0
+        if not unserved_special and point.get('jobs', 0) != incoming[key]:
+            errors.append(f'{key}: displayed jobs differ from realized commuters')
+    if errors:
+        raise ValueError('Commute export integrity failed: ' + '; '.join(errors[:10]) +
+                         (f'; {len(errors)-10} further errors' if len(errors) > 10 else ''))
 
 
 def validate_cohort_spatial_integrity(
@@ -265,6 +314,19 @@ def execute_pipeline(
         return _dedup_glob(candidates)
 
     src_dir = search_dirs[0] if search_dirs else ROOT_DIR
+    if macro.get('workplace_employment') == 'auto':
+        from sb_mexico.demand_sources import select_sources
+        from sb_mexico.automatic_workplace import resolve_automatic_workplace
+        # Fail conflicting source controls before expensive cartography.
+        resolve_automatic_workplace(
+            select_sources(project_dir or national_data_dir, national_data_dir, 'denue', cfg.get('data_exclusions', [])),
+            select_sources(project_dir or national_data_dir, national_data_dir, 'ce', cfg.get('data_exclusions', [])),
+            macro, ROOT_DIR)
+    if macro.get('workplace_employment') == 'historical_transfer':
+        from sb_mexico.demand_sources import select_sources
+        from sb_mexico.historical_transfer import checked_sources
+        checked_sources(select_sources(project_dir or national_data_dir, national_data_dir,
+                                       'denue', cfg.get('data_exclusions', [])), macro, ROOT_DIR)
 
     # =========================================================================
     # 1. COMPILACIÓN CARTOGRÁFICA (SI NO SE OMITE)
@@ -335,6 +397,15 @@ def execute_pipeline(
         "*ageb*.shp", "*ageb*.geojson", "*ageb*.gpkg",
         "*manzana*.shp", "*manzana*.geojson"
     ])
+    from sb_mexico.demand_sources import select_sources
+    source_sets = {kind: select_sources(project_dir or national_data_dir, national_data_dir,
+                                       kind, cfg.get('data_exclusions', []))
+                   for kind in ('denue', 'cpv', 'ce', 'enoe', 'conapo')}
+    denue_files, cpv_files, ce_files, enoe_files, conapo_files = (
+        source_sets[kind] for kind in ('denue', 'cpv', 'ce', 'enoe', 'conapo'))
+    placement_mode = validate_placement_mode(city_info.get("residential_placement", "legacy"))
+    if placement_mode == "official_blocks":
+        marco_files = discover_marco_layers(project_dir)
     if marco_files:
         console.print(f"-> Capas de Marco Geoestadístico detectadas: [green]{len(marco_files)}[/green] archivos.")
 
@@ -363,15 +434,26 @@ def execute_pipeline(
     # C. Carga y Calibración DENUE
     if not denue_files:
         raise FileNotFoundError("No se encontró archivo de DENUE (*denue*.csv).")
-    df_denue_raw = load_denue(denue_files, bbox_dict)
-    console.print(f"-> DENUE cargado: [cyan]{len(df_denue_raw):,}[/cyan] establecimientos en BBOX.")
-
-    df_denue, audit_calib = calibrate_denue_employment(
-        df_denue=df_denue_raw,
-        ce_benchmarks=ce_benchmarks,
-        til_1=til_1,
-        min_sample_threshold=macro.get("sample_threshold", 500)
-    )
+    df_denue, audit_calib, workplace_report = load_workplaces(
+        denue_files, bbox_dict, {**macro, 'til_1_state': til_1}, ce_benchmarks, ce_files, source_root=ROOT_DIR)
+    console.print(f"-> DENUE cargado: [cyan]{len(df_denue):,}[/cyan] establecimientos en BBOX.")
+    if workplace_report.get('automatic_selection'):
+        notice = workplace_report['automatic_selection']
+        console.print(f"-> Selección automática CE: {notice['effective_mode']}. {notice['reason']}")
+    if workplace_report['mode'] == 'historical_transfer':
+        console.print(f"[yellow]ATENCIÓN CE histórico: {workplace_report['transferred_establishments']:,} "
+                      f"establecimientos transferidos; {workplace_report['fallback_establishments']:,} "
+                      "conservan estimaciones DENUE (fuente completa, antes del BBOX).[/yellow]")
+        from collections import Counter
+        reasons = Counter(row['status'] for row in workplace_report['controls']
+                          if row['status'] != 'TRANSFERRED_HISTORICAL_MEAN')
+        console.print(f"-> Grupos sin transferencia por causa: {dict(reasons)}")
+    elif workplace_report['mode'] == 'ce_bounded':
+        fitted = sum(row['status'] == 'FITTED_DECLARED_COMPARABLE' for row in workplace_report['controls'])
+        console.print(f"[yellow]ATENCIÓN: transferencia histórica CE DESACTIVADA. "
+                      f"Estimaciones DENUE acotadas; {fitted} controles CE comparables ajustados.[/yellow]")
+        for reason in workplace_report['control_gate_reasons']:
+            console.print(f"-> Motivo CE: {reason}")
 
     # Imprimir tabla de calibración con desglose territorial BBOX
     tabla_calib = Table(title=f"Calibración de Empleo Municipal ({city_code})")
@@ -379,8 +461,8 @@ def execute_pipeline(
     tabla_calib.add_column("Municipio", style="white")
     tabla_calib.add_column("DENUE Base", justify="right", style="yellow")
     tabla_calib.add_column("BBOX %", justify="right", style="blue")
-    tabla_calib.add_column("H001A (BBOX)", justify="right", style="green")
-    tabla_calib.add_column("Factor Micro", justify="right", style="bold")
+    tabla_calib.add_column("H001A (BBOX)" if workplace_report['mode'] == 'legacy' else "Control: informe", justify="right", style="green")
+    tabla_calib.add_column("Factor Micro" if workplace_report['mode'] == 'legacy' else "Factor total", justify="right", style="bold")
     tabla_calib.add_column("Estado", style="magenta")
 
     for cve, data in audit_calib.items():
@@ -403,24 +485,54 @@ def execute_pipeline(
 
     growth_factors = macro.get("growth_factors", {}).copy()
     conapo_projs = None
+    projection_year = resolve_projection_year(macro)
+    projection_report = dict(requested_year=projection_year, manual_factors=growth_factors)
     if conapo_files:
-        conapo_projs = parse_conapo_projections(conapo_files[0], as_growth_factors=True)
+        from sb_mexico.population_projection import resolve_population_factors
+        conapo_projs = resolve_population_factors(conapo_files[0], cpv_files, macro, projection_report)
+        projection_report['manual_factors'] = growth_factors
+        projection_report['source_path'] = conapo_files[0]
         if conapo_projs:
             console.print(f"-> Proyecciones CONAPO cargadas automáticamente: [green]{len(conapo_projs)}[/green] municipios ({os.path.basename(conapo_files[0])}).")
+            console.print(f"   Projection year: requested={projection_year}; effective={projection_report.get('effective_year')}; basis={projection_report.get('year_basis')}")
 
     df_cpv = load_cpv_demography(
         cpv_paths=cpv_files,
         df_denue=df_denue,
         bbox=bbox_dict,
         tasa_pea=tasa_pea,
-        growth_factors=growth_factors,
-        conapo_projections=conapo_projs,
+        growth_factors={**(conapo_projs or {}), **growth_factors},
+        conapo_projections=None,
         default_growth=macro.get("default_growth_factor", 1.0),
-        marco_paths=marco_files if marco_files else None
+        marco_paths=marco_files if marco_files else None,
+        placement_mode=placement_mode,
+        employment_mode=macro.get('residential_employment', 'legacy'),
+        projection_year=projection_year
     )
     total_cpv_pop = float(df_cpv['pobtot_adj'].sum()) if len(df_cpv) > 0 else 0.0
     total_cpv_pea = float(df_cpv['pea_real'].sum()) if len(df_cpv) > 0 else 0.0
+    if conapo_projs and projection_report.get('year_basis') == 'unverified':
+        automatic_muns = sorted(set(df_cpv.cve_mun_clean) & set(conapo_projs) - set(growth_factors))
+        if automatic_muns:
+            raise ValueError('CONAPO source has no year column. Confirm macroeconomics.conapo_source_year '
+                             f'before using automatic factors for municipalities {automatic_muns}')
+    projection_report['effective_factors'] = {str(k): float(v) for k, v in df_cpv.groupby('cve_mun_clean')['growth'].first().items()}
+    with open(os.path.join(out_dir, 'population_projection_report.json'), 'w', encoding='utf-8') as f:
+        json.dump(projection_report, f, ensure_ascii=False, indent=2)
     console.print(f"-> Censo CPV cargado y georreferenciado: [cyan]{len(df_cpv):,}[/cyan] manzanas habitadas | [bold green]{int(total_cpv_pop):,}[/bold green] hab. proyectados (PEA base: [bold green]{int(total_cpv_pea):,}[/bold green]).")
+    placement_report = df_cpv.attrs.get("residential_placement")
+    employment_report = df_cpv.attrs.get('residential_employment')
+    if employment_report is not None:
+        import hashlib
+        employment_report['effective_config_sha256'] = hashlib.sha256(
+            json.dumps(cfg, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
+        attach_source_context(employment_report, config_path, projection_report, conapo_files[:1])
+        console.print('-> Residential employment: census_employed (projected employed residents)')
+    if placement_report is not None:
+        console.print("-> Residential placement: official_blocks (active)")
+        for source, values in placement_report["sources_retained"].items():
+            console.print(f"   {source}: {values['blocks']:,} blocks | {values['population']:,.1f} residents | {values['pea']:,.1f} PEA")
+        console.print(f"   Unlocated: {placement_report['unlocated']} | Outside BBOX: {placement_report['outside_bbox']}")
 
     # =========================================================================
     # 3. MALLA ESPACIAL, SNAPPING VIAL Y FUSIÓN DE POIS
@@ -473,6 +585,7 @@ def execute_pipeline(
         enabled_excl = [z for z in exclusion_zones if z.get("enabled", True)]
         console.print(f"-> Zonas de Exclusión detectadas: [bold red]{len(enabled_excl)}[/bold red] activas ({len(exclusion_zones)} totales) - Sin simulación de demanda en sus perímetros.")
 
+    grid_merge_report, cohort_merge_report, balancing_reports = {}, {}, []
     demand_points, poi_audit = build_demand_grid(
         df_denue=df_denue,
         df_cpv=df_cpv,
@@ -485,10 +598,25 @@ def execute_pipeline(
         affluence_zones=affluence_zones,
         exclusion_zones=exclusion_zones,
         urban_core_polygon=city_info.get("urban_core_polygon"),
-        restrict_demand_to_urban_core=city_info.get("restrict_demand_to_urban_core", True)
+        restrict_demand_to_urban_core=city_info.get("restrict_demand_to_urban_core", True),
+        isolated_zones=cfg.get('isolated_zones', city_info.get('isolated_zones', [])),
+        merge_diagnostics=grid_merge_report
     )
 
     console.print(f"-> Nodos de demanda consolidados: [green]{len(demand_points):,}[/green]")
+    if employment_report is not None:
+        employment_report['grid'] = grid_accounting(
+            df_cpv, demand_points, exclusion_zones, city_info.get('urban_core_polygon'),
+            city_info.get('restrict_demand_to_urban_core', True))
+        employment_report['attraction_jobs_before_simulation'] = sum(p.get('jobs', 0) for p in demand_points)
+    if placement_report is not None:
+        placement_report["grid"] = grid_accounting(
+            df_cpv, demand_points, exclusion_zones,
+            city_info.get("urban_core_polygon"),
+            city_info.get("restrict_demand_to_urban_core", True))
+        with open(os.path.join(out_dir, "residential_placement_report.json"), "w", encoding="utf-8") as f:
+            json.dump(placement_report, f, ensure_ascii=False, indent=2)
+        console.print(f"   Residential grid accounting: {placement_report['grid']}")
 
     if poi_audit:
         tabla_poi = Table(title=f"Auditoría de POIs Especiales ({city_code})")
@@ -512,7 +640,13 @@ def execute_pipeline(
         console.print(f"-> Zonas topológicas aisladas detectadas: [cyan]{len(isolated_zones)}[/cyan] zonas.")
     console.print("-> Motor Gravitatorio Doblemente Acotado (Furness / IPFP): [green]Habilitado[/green]")
 
+    workplace_report['attraction_jobs_before_simulation'] = sum(p.get('jobs', 0) for p in demand_points)
     total_pea = sum(p.get("pea_15ymas", 0) for p in demand_points)
+    budget_zones = assign_zones(np.array([p['location'] for p in demand_points]), isolated_zones or [])
+    zone_budgets = {}
+    for point, zone in zip(demand_points, budget_zones):
+        zone_budgets[int(zone)] = zone_budgets.get(int(zone), 0) + int(point.get('pea_15ymas', 0))
+    territorial_report = []
 
     target_pop_size = macro.get("target_pop_size", 180)
     max_pop_size = macro.get("max_pop_size", 200)
@@ -560,23 +694,39 @@ def execute_pipeline(
         affluence_zones=affluence_zones,
         furness_iterations=macro.get("furness_iterations", 15),
         furness_tol=macro.get("furness_tol", 0.02),
-        road_index=None
+        road_index=None,
+        balancing_diagnostics=balancing_reports
     )
+
+    for balance in balancing_reports:
+        if balance.get('target_adjusted'):
+            console.print(f"[yellow]-> Zona {balance['zone']}: objetivos de atracción ajustados al presupuesto alcanzable; "
+                          f"masa redistribuida {balance['target_adjustment_half_l1']:,.1f}. "
+                          "Objetivos originales y efectivos registrados; no son conteos observados.[/yellow]")
+        console.print(f"-> Balance de empleo zona {balance['zone']}: {balance.get('status', 'unknown')}; "
+                      f"error esperado de destinos {balance.get('column_relative_error', 0):.2%} "
+                      f"(tolerancia {balance.get('tolerance', 0):.2%}).")
 
     console.print(f"-> Pipeline Canónico de Consolidación y Escala Subway Builder:")
     raw_pop_count = len(raw_pops)
 
     # 1. Clustering espacial de puntos contiguos (Colin's method)
-    demand_points, pops = cluster_demand_points(demand_points, raw_pops)
+    demand_points, pops = cluster_demand_points(
+        demand_points, raw_pops, isolated_zones=isolated_zones,
+        exclusion_zones=exclusion_zones,
+        urban_core_polygon=city_info.get('urban_core_polygon') if city_info.get('restrict_demand_to_urban_core', True) else None)
 
     # 2. Consolidación de micro-flujos residuales hacia nodos principales
-    demand_points, pops = consolidate_small_pops(demand_points, pops, min_pop_size=min_pop_size, max_pop_size=max_pop_size)
+    demand_points, pops = consolidate_small_pops(demand_points, pops, min_pop_size=min_pop_size,
+                                               max_pop_size=max_pop_size, isolated_zones=isolated_zones,
+                                               merge_diagnostics=cohort_merge_report)
 
     # 3. Fusión de viajes idénticos
     pops = merge_identical_commutes(pops, min_pop_size=min_pop_size, max_pop_size=max_pop_size, include_driving_path=include_driving_path)
 
     # 4. Sincronización 1:1 entre display (residents, jobs) y simulación real
     demand_points, pops = sync_demand_points_and_pops(demand_points, pops, remove_orphans=True, include_driving_path=include_driving_path)
+    validate_exported_commutes(pops, demand_points, total_pea)
 
     total_viajeros = sum(p["size"] for p in pops)
 
@@ -599,9 +749,9 @@ def execute_pipeline(
         tabla_zonas = Table(title="Auditoría de Demanda por Masa Territorial / Aislamiento", header_style="bold magenta")
         tabla_zonas.add_column("Masa / Zona", style="cyan")
         tabla_zonas.add_column("Puntos", justify="right", style="white")
-        tabla_zonas.add_column("Residentes", justify="right", style="blue")
-        tabla_zonas.add_column("PEA Activa", justify="right", style="yellow")
-        tabla_zonas.add_column("Empleos", justify="right", style="green")
+        tabla_zonas.add_column("Salidas", justify="right", style="blue")
+        tabla_zonas.add_column("Presupuesto origen", justify="right", style="yellow")
+        tabla_zonas.add_column("Llegadas", justify="right", style="green")
         tabla_zonas.add_column("Viajeros", justify="right", style="bold green")
         tabla_zonas.add_column("Cohortes", justify="right", style="dim white")
         tabla_zonas.add_column("Balance Masa", justify="center", style="bold")
@@ -613,10 +763,11 @@ def execute_pipeline(
             if not pts_in_zone:
                 continue
             z_res = sum(p.get("residents", 0) for p in pts_in_zone)
-            z_pea = sum(p.get("pea_15ymas", 0) for p in pts_in_zone)
+            z_pea = zone_budgets.get(z_idx, 0)
             z_jobs = sum(p.get("jobs", 0) for p in pts_in_zone)
             z_viajeros = sum(p["size"] for p in pops if dp_id_to_zone.get(p["residenceId"]) == z_idx)
             z_cohortes = sum(1 for p in pops if dp_id_to_zone.get(p["residenceId"]) == z_idx)
+            territorial_report.append(dict(zone=int(z_idx), name=zone_names[z_idx], origin_budget=z_pea, travelers=z_viajeros, delta=z_viajeros-z_pea))
             bal_str = "[green]Δ = 0[/green]" if z_viajeros == z_pea else f"[red]Δ = {z_viajeros - z_pea}[/red]"
 
             tabla_zonas.add_row(
@@ -640,6 +791,8 @@ def execute_pipeline(
     docker_avail, docker_env = is_docker_available()
 
     osrm_applied = False
+    routing_report = {}
+    fallback_reason = 'missing_pbf' if not osm_pbf else 'docker_unavailable'
     if osm_pbf and docker_avail:
         console.print(f"-> Docker en WSL 2 detectado ({docker_env}). Preparando red vial canónica OSRM...")
         prep_ok, osrm_dir = prepare_osrm_network_wsl(
@@ -657,7 +810,8 @@ def execute_pipeline(
                         pops=pops,
                         demand_points=demand_points,
                         osrm_url="http://127.0.0.1:5000",
-                        include_driving_path=include_driving_path
+                        include_driving_path=include_driving_path,
+                        diagnostics=routing_report
                     )
                     console.print(
                         f"   • Rutas OSRM exactas (geometría y tiempos reales): [green]{osrm_ok:,}[/green]\n"
@@ -667,8 +821,10 @@ def execute_pipeline(
                 finally:
                     stop_osrm_daemon_wsl(city_code=city_code)
             else:
+                fallback_reason = 'daemon_start_failed'
                 console.print("[yellow][WARN] No fue posible levantar el daemon OSRM. Se aplicará fallback canónico.[/yellow]")
         else:
+            fallback_reason = 'network_prepare_failed'
             console.print("[yellow][WARN] No fue posible preparar la red OSRM en WSL. Se aplicará fallback canónico.[/yellow]")
     else:
         if not osm_pbf:
@@ -677,21 +833,26 @@ def execute_pipeline(
             console.print("[dim]-> Docker en WSL 2 no disponible. Aplicando fallback canónico directo.[/dim]")
 
     if not osrm_applied:
-        console.print("-> Verificando métricas canónicas Colin de respaldo (1.3× circuidad @ 40 km/h flujo libre)...")
+        console.print("-> Aplicando métricas canónicas Colin de respaldo (1.3× circuidad @ 40 km/h flujo libre)...")
         dp_locs = {p["id"]: p["location"] for p in demand_points}
         import math
         for p in pops:
-            if "drivingSeconds" not in p or not p.get("drivingSeconds"):
-                o_loc = dp_locs.get(p.get("residenceId"))
-                d_loc = dp_locs.get(p.get("jobId"))
-                if o_loc and d_loc:
-                    cos_lat = math.cos(math.radians((o_loc[1] + d_loc[1]) / 2.0))
-                    dx_m = (d_loc[0] - o_loc[0]) * 111_320.0 * cos_lat
-                    dy_m = (d_loc[1] - o_loc[1]) * 110_574.0
-                    euclid_m = math.hypot(dx_m, dy_m)
-                    fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
-                    p["drivingDistance"] = fb_dist
-                    p["drivingSeconds"] = fb_sec
+            o_loc = dp_locs.get(p.get("residenceId"))
+            d_loc = dp_locs.get(p.get("jobId"))
+            if o_loc and d_loc:
+                cos_lat = math.cos(math.radians((o_loc[1] + d_loc[1]) / 2.0))
+                dx_m = (d_loc[0] - o_loc[0]) * 111_320.0 * cos_lat
+                dy_m = (d_loc[1] - o_loc[1]) * 110_574.0
+                euclid_m = math.hypot(dx_m, dy_m)
+                fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
+                p["drivingDistance"] = fb_dist
+                p["drivingSeconds"] = fb_sec
+
+    if not osrm_applied:
+        from .osrm import summarize_routing_provenance
+        routing_report = summarize_routing_provenance(pops, {(p['residenceId'], p['jobId']): ('canonical', fallback_reason) for p in pops})
+    fallback_travelers = sum(v['travelers'] for k, v in routing_report.get('totals', {}).items() if k.startswith('canonical:'))
+    console.print(f'-> Respaldo vial estimado: {fallback_travelers:,} viajeros ({fallback_travelers / max(1, total_viajeros):.2%}).')
 
     # =========================================================================
     # 5.1. LABORATORIO EXPERIMENTAL: COMPETITIVIDAD MODAL (AUTO VS. METRO)
@@ -708,6 +869,33 @@ def execute_pipeline(
             f"Velocidad Tráfico: [bold]{v_speed} km/h[/bold] | "
             f"Tasa Motorización: [bold]{int(round(float(p_motor)*100))}%[/bold][/magenta]"
         )
+
+    # Salvaguarda de integridad física espacial: Auto-sanar cualquier anomalía residual post-clustering
+    dp_locs = {p["id"]: p["location"] for p in demand_points}
+    healed_count = 0
+    import math
+    for p in pops:
+        r_id = p.get("residenceId")
+        j_id = p.get("jobId")
+        if r_id == j_id:
+            continue
+        o_loc = dp_locs.get(r_id)
+        d_loc = dp_locs.get(j_id)
+        if not o_loc or not d_loc:
+            continue
+        cos_lat = math.cos(math.radians((o_loc[1] + d_loc[1]) / 2.0))
+        dx_m = (d_loc[0] - o_loc[0]) * 111_320.0 * cos_lat
+        dy_m = (d_loc[1] - o_loc[1]) * 110_574.0
+        euclid_m = math.hypot(dx_m, dy_m)
+        d_road = p.get("drivingDistance", 0)
+        if (euclid_m > 500.0 and d_road < (0.70 * euclid_m)) or (euclid_m > 250.0 and d_road < 150):
+            fb_dist, fb_sec = calculate_canonical_driving_fallback(euclid_m)
+            p["drivingDistance"] = fb_dist
+            p["drivingSeconds"] = fb_sec
+            healed_count += 1
+
+    if healed_count > 0:
+        console.print(f"   [yellow]• Invariantes físicas:[/yellow] {healed_count} cohorte(s) con anomalía post-clustering auto-sanadas al canon Colin.")
 
     # =========================================================================
     # 5.2. AUDITORÍA DE DISTRIBUCIÓN DE DISTANCIAS DE VIAJE (COLIN MILLER STANDARD)
@@ -727,7 +915,7 @@ def execute_pipeline(
     for b in distrib.get("brackets", []):
         pct = b["percentage"]
         bar_len = int(round(pct / 4.0))
-        bar_str = "█" * bar_len + "░" * max(0, 25 - bar_len)
+        bar_str = "=" * bar_len + "-" * max(0, 25 - bar_len)
         tabla_tld.add_row(
             b["category"],
             b["label"],
@@ -751,6 +939,7 @@ def execute_pipeline(
 
     # Auditoría estricta de integridad física y espacial antes de tocar disco
     validate_cohort_spatial_integrity(pops, demand_points)
+    validate_exported_commutes(pops, demand_points, total_pea)
 
     # Centrado de Cámara (initialViewState):
     # Si el usuario configuró manualmente initial_center en el Wizard, se respeta con máxima prioridad.
@@ -785,6 +974,33 @@ def execute_pipeline(
         )
 
     clean_demand_points = sanitize_demand_points(demand_points)
+    workplace_report['simulation'] = dict(exported_commuters=total_viajeros,
+        exported_display_jobs=sum(p.get('jobs', 0) for p in clean_demand_points),
+        semantics='Realized model commuters, not measured CE workplace counts')
+    with open(os.path.join(out_dir, 'workplace_employment_report.json'), 'w', encoding='utf-8') as f:
+        json.dump(workplace_report, f, ensure_ascii=False, indent=2)
+    if employment_report is not None:
+        employment_report['simulation'] = dict(
+            origin_budget=total_pea, exported_commuters=total_viajeros,
+            exported_display_jobs=sum(p.get('jobs', 0) for p in clean_demand_points),
+            exported_display_residents=sum(p.get('residents', 0) for p in clean_demand_points),
+            semantics='Realized model commuters; destination counts are not observed census marginals.')
+    # Always replace the sidecar so a legacy rebuild cannot expose stale
+    # candidate provenance from a previous run in the same output directory.
+    with open(os.path.join(out_dir, 'residential_employment_report.json'), 'w', encoding='utf-8') as f:
+        json.dump(employment_report if employment_report is not None else dict(
+            schema_version=1, mode='legacy', semantics='Projected 15+ population times active-population rate',
+            model_year=projection_year, tasa_pea=tasa_pea, exported_commuters=total_viajeros),
+            f, ensure_ascii=False, indent=2)
+    with open(os.path.join(out_dir, 'demand_pipeline_report.json'), 'w', encoding='utf-8') as f:
+        json.dump(dict(denue_identity=df_denue.attrs.get('source_identity'),
+                       census_identity=df_cpv.attrs.get('source_identity'),
+                       grid_merges=grid_merge_report, cohort_merges=cohort_merge_report,
+                       employment_balancing=balancing_reports, territorial_accounting=territorial_report, routing=routing_report, population_projection=projection_report,
+                       residential_employment=employment_report,
+                       workplace_employment=workplace_report,
+                       points=len(demand_points), cohorts=len(pops), commuters=total_viajeros),
+                  f, ensure_ascii=False, indent=2)
     cfg_out_path = os.path.join(out_dir, "config.json")
     demand_out_path = os.path.join(out_dir, "demand_data.json")
 

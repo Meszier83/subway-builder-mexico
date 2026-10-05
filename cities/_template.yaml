@@ -3,6 +3,7 @@
 # ==============================================================================
 
 city:
+  residential_placement: "official_blocks" # Geometría oficial con cobertura/fallback documentados
   code: "XXX"                         # Código IATA o clave de 3 letras (ej. CUN, MTY, GDL)
   name: "Nombre Completo de la Ciudad" # Nombre oficial de la zona metropolitana
   description: "Descripción breve"    # Menor a 80 caracteres para el juego
@@ -33,6 +34,8 @@ city:
 
 
 macroeconomics:
+  residential_employment: "census_employed" # CPV POCUPADA, con reconstrucción controlada
+  workplace_employment: "auto" # Inspección automática CE; aviso explícito si falta detalle
   tasa_pea: 0.62                      # Tasa de participación laboral (ENOE)
   til_1_state: 0.45                   # Tasa de informalidad laboral estatal (ENOE)
   sample_threshold: 500               # Mínimo de muestra formal para calibrar municipio
