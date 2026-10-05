@@ -682,6 +682,11 @@ def execute_pipeline(
             f"(Referencia morfológica BBOX: {rec_val:.3f} [{beta_diag.get('label', '')}])"
         )
 
+    from .config_defaults import DEFAULT_OD_ALLOCATION, validate_od_allocation_mode
+    allocation_mode = validate_od_allocation_mode(macro.get('od_allocation', DEFAULT_OD_ALLOCATION))
+    initial_allocation_points = [dict(point) for point in demand_points]
+    allocation_report = None
+    point_mapping = {}
     raw_pops = simulate_gravity_demand(
         demand_points=demand_points,
         beta=effective_beta,
@@ -714,19 +719,40 @@ def execute_pipeline(
     demand_points, pops = cluster_demand_points(
         demand_points, raw_pops, isolated_zones=isolated_zones,
         exclusion_zones=exclusion_zones,
-        urban_core_polygon=city_info.get('urban_core_polygon') if city_info.get('restrict_demand_to_urban_core', True) else None)
+        urban_core_polygon=city_info.get('urban_core_polygon') if city_info.get('restrict_demand_to_urban_core', True) else None,
+        mapping_diagnostics=point_mapping)
+
+    for pop in pops:
+        if pop['size'] > 0 and pop['residenceId'] == pop['jobId']:
+            raise ValueError(f"{pop.get('id', '?')}: self-commute "
+                             f"{pop['residenceId']}->{pop['jobId']}, size={pop['size']}")
 
     # 2. Consolidación de micro-flujos residuales hacia nodos principales
-    demand_points, pops = consolidate_small_pops(demand_points, pops, min_pop_size=min_pop_size,
-                                               max_pop_size=max_pop_size, isolated_zones=isolated_zones,
-                                               merge_diagnostics=cohort_merge_report)
+    if allocation_mode == 'balanced_integer_v1':
+        from .od_allocation import finalize_integer_od, validate_integer_margins
+        pops, allocation_report = finalize_integer_od(
+            initial_allocation_points, demand_points, pops, point_mapping, balancing_reports,
+            max_distance_km=effective_max_dist, beta=effective_beta,
+            isolated_zones=isolated_zones, max_pop_size=max_pop_size, min_pop_size=min_pop_size)
+        console.print('[green]-> Márgenes enteros del modelo preservados; destinos estimados. '
+                      'Residuos pequeños conservados en su par O/D.[/green]')
+    else:
+        demand_points, pops = consolidate_small_pops(demand_points, pops, min_pop_size=min_pop_size,
+                                                   max_pop_size=max_pop_size, isolated_zones=isolated_zones,
+                                                   merge_diagnostics=cohort_merge_report)
 
     # 3. Fusión de viajes idénticos
     pops = merge_identical_commutes(pops, min_pop_size=min_pop_size, max_pop_size=max_pop_size, include_driving_path=include_driving_path)
+    if allocation_report is not None:
+        validate_integer_margins(pops, allocation_report)
+        allocation_report.update(cohorts=len(pops),
+            small_cohorts=sum(pop['size'] < min_pop_size for pop in pops))
 
     # 4. Sincronización 1:1 entre display (residents, jobs) y simulación real
     demand_points, pops = sync_demand_points_and_pops(demand_points, pops, remove_orphans=True, include_driving_path=include_driving_path)
     validate_exported_commutes(pops, demand_points, total_pea)
+    if allocation_report is not None:
+        validate_integer_margins(pops, allocation_report)
 
     total_viajeros = sum(p["size"] for p in pops)
 
@@ -974,6 +1000,10 @@ def execute_pipeline(
         )
 
     clean_demand_points = sanitize_demand_points(demand_points)
+    if allocation_report is not None:
+        validate_integer_margins(pops, allocation_report)
+    with open(os.path.join(out_dir, 'od_allocation_report.json'), 'w', encoding='utf-8') as f:
+        json.dump(allocation_report or dict(schema_version=1, mode='legacy'), f, ensure_ascii=False, indent=2)
     workplace_report['simulation'] = dict(exported_commuters=total_viajeros,
         exported_display_jobs=sum(p.get('jobs', 0) for p in clean_demand_points),
         semantics='Realized model commuters, not measured CE workplace counts')
@@ -996,7 +1026,8 @@ def execute_pipeline(
         json.dump(dict(denue_identity=df_denue.attrs.get('source_identity'),
                        census_identity=df_cpv.attrs.get('source_identity'),
                        grid_merges=grid_merge_report, cohort_merges=cohort_merge_report,
-                       employment_balancing=balancing_reports, territorial_accounting=territorial_report, routing=routing_report, population_projection=projection_report,
+                       employment_balancing=balancing_reports, od_allocation=allocation_report,
+                       territorial_accounting=territorial_report, routing=routing_report, population_projection=projection_report,
                        residential_employment=employment_report,
                        workplace_employment=workplace_report,
                        points=len(demand_points), cohorts=len(pops), commuters=total_viajeros),
@@ -1054,6 +1085,10 @@ def execute_pipeline(
         }
         with open(cfg_out_path, "w", encoding="utf-8") as f:
             json.dump(config_data, f, indent=2, ensure_ascii=False)
+
+    if allocation_report is not None:
+        with open(demand_out_path, encoding='utf-8') as stream:
+            validate_integer_margins(json.load(stream)['pops'], allocation_report)
 
     # B. Generación y Validación de Metadatos de Demanda Especial (Subway Builder Modded Standard)
     if pois_cfg:
@@ -1118,6 +1153,11 @@ def execute_pipeline(
             if os.path.exists(fpath):
                 zipf.write(fpath, arcname=fname)
                 console.print(f"  + Empaquetado: [dim]{fname}[/dim]")
+
+    if allocation_report is not None:
+        with zipfile.ZipFile(zip_path) as archive:
+            delivered = json.loads(archive.read('demand_data.json'))
+        validate_integer_margins(delivered['pops'], allocation_report)
 
     console.print(Panel.fit(
         f"[bold green]¡PAQUETE {zip_name} GENERADO CON ÉXITO![/bold green]\n"

@@ -64,6 +64,12 @@ def validate_package(path, code):
             if set(point['popIds']) != membership[key]:
                 raise ValueError('Broken point membership')
         commuters = sum(pop['size'] for pop in pops.values())
+        allocation_path = Path(path).parent / 'od_allocation_report.json'
+        if allocation_path.exists():
+            allocation = json.loads(allocation_path.read_text(encoding='utf-8'))
+            if allocation.get('mode') == 'balanced_integer_v1':
+                from .od_allocation import validate_integer_margins
+                validate_integer_margins(demand['pops'], allocation)
         report = Path(path).parent / 'demand_pipeline_report.json'
         if report.exists() and json.loads(report.read_text(encoding='utf-8'))['commuters'] != commuters:
             raise ValueError('Package commuter total differs from the build report')

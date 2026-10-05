@@ -11003,6 +11003,14 @@
         const points = data.points || [];
         const isNotCompiled = !data || data.metadata?.status === 'not_compiled' || points.length === 0;
         const packageAvailable = data.metadata?.package_available === true;
+        const marginNotice = document.getElementById('metricODMargins');
+        if (marginNotice) {
+          const exactMargins = data.metadata?.od_allocation?.mode === 'balanced_integer_v1';
+          marginNotice.classList.toggle('hidden', !exactMargins);
+          marginNotice.textContent = exactMargins
+            ? 'Márgenes enteros del modelo conservados. Destinos estimados; residuos pequeños conservados en su par O/D.'
+            : '';
+        }
         isDemandCompiled = !isNotCompiled;
 
         const emptyStateEl = document.getElementById('demandEmptyState');

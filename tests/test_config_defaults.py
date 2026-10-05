@@ -6,10 +6,19 @@ from pathlib import Path
 import yaml
 
 from sb_mexico.pipeline import load_city_config
+from sb_mexico.config_defaults import DEFAULT_OD_ALLOCATION
 from tools import wizard, poi_studio
 
 
 class DemandDefaultTests(unittest.TestCase):
+    def test_integer_candidate_survives_save_and_all_loaders(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directory:
+            path = Path(directory) / 'city.yaml'
+            config = dict(city=dict(code='TST'), macroeconomics=dict(od_allocation='balanced_integer_v1'))
+            wizard.save_full_city_data(str(path), config)
+            for load in (load_city_config, wizard.load_city_data, poi_studio.load_city_data):
+                self.assertEqual(load(str(path))['macroeconomics']['od_allocation'], 'balanced_integer_v1')
+
     def test_unspecified_modes_are_enabled_without_changing_source_file(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directory:
             path = Path(directory) / 'city.yaml'
@@ -20,6 +29,9 @@ class DemandDefaultTests(unittest.TestCase):
                 self.assertEqual(config['city']['residential_placement'], 'official_blocks')
                 self.assertEqual(config['macroeconomics']['residential_employment'], 'census_employed')
                 self.assertEqual(config['macroeconomics']['workplace_employment'], 'auto')
+                self.assertNotIn('od_allocation', config['macroeconomics'])
+                self.assertEqual(config['macroeconomics'].get('od_allocation', DEFAULT_OD_ALLOCATION),
+                                 'balanced_integer_v1')
                 self.assertNotIn('historical_workplace_transfer', config['macroeconomics'])
             self.assertEqual(path.read_text(), content)
 
@@ -27,10 +39,12 @@ class DemandDefaultTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directory:
             path = Path(directory) / 'city.yaml'
             config = dict(city=dict(code='TST', residential_placement='legacy'),
-                          macroeconomics=dict(residential_employment='legacy', workplace_employment='legacy'))
+                          macroeconomics=dict(residential_employment='legacy', workplace_employment='legacy',
+                                              od_allocation='legacy'))
             wizard.save_full_city_data(str(path), config)
             for load in (load_city_config, wizard.load_city_data, poi_studio.load_city_data):
                 actual = load(str(path))
                 self.assertEqual(actual['city']['residential_placement'], 'legacy')
                 self.assertEqual(actual['macroeconomics']['residential_employment'], 'legacy')
                 self.assertEqual(actual['macroeconomics']['workplace_employment'], 'legacy')
+                self.assertEqual(actual['macroeconomics']['od_allocation'], 'legacy')

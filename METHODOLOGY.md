@@ -1,733 +1,128 @@
-# Libro Blanco de Metodologia y Fundamentos Matematicos (v7.1)
-
-Este documento expone formalmente la arquitectura matematica, estadistica y algoritmica del motor de generacion de demanda y ruteo vial de **Subway Builder Mexico** (`sb_mexico`). El sistema modela patrones de movilidad metropolitana a escala de manzana censal compatibles con el motor de simulacion de pasajeros de *Subway Builder* (Colin Miller) y sus variantes avanzadas (*Subway-Builder-Modded* de Kronifer).
-
----
-
-# PARTE 1: Fundamentos Estadisticos, Fuentes de Datos y Calibracion Municipal
-
-## 1. Contexto Teorico y Justificacion Metodologica
-
-### 1.1. La Brecha de Datos de Origen-Destino (LODES/LEHD vs. Mexico)
-En modelos internacionales de planificacion de transporte masivo (particularmente en Estados Unidos), la asignacion de viajes cotidianos se alimenta de fuentes patronales integradas como **LODES/LEHD** (*Longitudinal Employer-Household Dynamics / Origin-Destination Employment Statistics*) del U.S. Census Bureau. Dichos registros permiten vincular de forma empirica y directa la manzana residencial de cada empleado con el punto geografico de su puesto de trabajo.
-
-En Mexico, no existe un repositorio universal publico de matrices de origen-destino desagregadas a escala de manzana o microzona censal. Los planificadores urbanos tradicionalmente han enfrentado dos alternativas insuficientes:
-1. **Encuestas Origen-Destino (EOD):** Limitadas a un punado de metropolis (como la EOD ZMVM 2017 del Valle de Mexico), con muestras pequenas, costos multimillonarios y desfases de actualizacion decenales. En ciudades intermedias o turisticas (Cancun, Merida, Queretaro, Hermosillo), no existen encuestas domiciliarias comparables.
-2. **Matrices Sinteticas Agregadas por Zonas de Trafico (TAZ):** Modelos basados en macro-poligonos que destruyen la resolucion peatonal y conducen a asignaciones irreales de primera y ultima milla en estaciones de transporte rapido.
-
-### 1.2. Sintesis Espacial a Escala de Manzana Urbana
-Para salvar esta brecha sin incurrir en supuestos arbitrarios, `sb_mexico` implementa un marco de **microsimulacion de eleccion discreta y gravedad espacial de entropia acotada**. El motor sintetiza flujos origen-destino a escala micrometrica combinando cinco fuentes abiertas oficiales del Instituto Nacional de Estadistica y Geografia (INEGI) y del Consejo Nacional de Poblacion (CONAPO):
-
-| Fuente Oficial | Entidad Emisora | Nivel de Resolucion | Rol Metodologico en el Motor |
-| :--- | :--- | :--- | :--- |
-| **Censo CPV 2020** | INEGI | Manzana urbana (`RESAGEBURB`) | Masa residencial base, poblacion activa y estructura de hogares. |
-| **DENUE** | INEGI | Establecimiento puntual (lat/lon) | Masa de atraccion laboral, estrato de tamano y giro comercial. |
-| **Censos Economicos 2024 (CE)** | INEGI | Agregado municipal (`H001A`) | Cifras de control de empleo formal e informal por municipio. |
-| **ENOE** | INEGI | Indicadores estrategicos estatales | Tasa de participacion laboral (PEA) y Tasa de Informalidad Laboral ($TIL_1$). |
-| **Proyecciones CONAPO 2020-2053** | CONAPO | Municipal anual (`POB_MIT_MUN`) | Sincronizacion temporal intercensal y factor de crecimiento urbano. |
-| **Marco Geoestadistico Nacional (MGM)**| INEGI | Cartografia vectorial (Shapefile/GeoJSON)| Centroides poligonales oficiales de Manzanas y AGEBs urbanos. |
-
----
-
-## 2. Ingesta Demografica, Georreferenciacion y Proyecciones CONAPO
-
-### 2.1. Sincronizacion Temporal Intercensal (2020 -> 2026)
-Dado que el Censo General por manzana universal data de 2020, mientras que el DENUE y los Censos Economicos reflejan la actividad contemporanea (2024-2026), se requiere una sincronizacion demografica para no subestimar la demanda en ciudades con alto dinamismo migratorio (ej. Riviera Maya, Queretaro, Tijuana, Ciudad Juarez).
-
-El sistema extrae las series oficiales de proyecciones demograficas de CONAPO a mitad de ano (`POB_MIT_MUN`) y calcula el factor de crecimiento municipal homogeneo:
-
-$$\text{growth\_factor}_m = \frac{\text{POB\_MIT\_MUN}_{m, \text{target}}}{\text{POB\_BASE}_{m, 2020}}$$
-
-Donde:
-* $\text{POB\_MIT\_MUN}_{m, \text{target}}$ es la poblacion proyectada para el municipio $m$ en el ano meta (por defecto ano actual, 2026).
-* $\text{POB\_BASE}_{m, 2020}$ es la poblacion de referencia para 2020 dentro del mismo marco censal/proyectivo.
-
-**Salvaguarda Estadistica de Clamping:**
-Para blindar el modelo contra fluctuaciones o anomalías en municipios rurales perifericos, el factor de crecimiento se acota en un intervalo seguro:
-$$\text{growth\_factor}_m \in [0.90, \ 1.60]$$
-
-### 2.2. Determinacion de la Poblacion Economicamente Activa ($\text{PEA}_i$)
-A nivel de cada manzana censal $i$ perteneciente al municipio $m$:
-$$\text{POBTOT}_{\text{adj}, i} = \text{POBTOT}_i \times \text{growth\_factor}_m$$
-$$\text{P15MAS}_{\text{adj}, i} = \text{P\_15YMAS}_i \times \text{growth\_factor}_m$$
-$$\text{PEA}_i = \text{P15MAS}_{\text{adj}, i} \times \text{tasa\_pea}_{\text{ENOE}}$$
-
-Donde $\text{tasa\_pea}_{\text{ENOE}}$ es la Tasa de Participacion Laboral oficial del estado reportada en la ENOE (tipicamente entre 0.60 y 0.68). Esta masa $\text{PEA}_i$ constituye el presupuesto estricto e invariable de viajeros que el modelo distribuira sin inflar ni perder masa en ningun paso posterior.
-
-### 2.3. Jerarquia Cuadruple de Georreferenciacion Espacial
-El tabulado tabular `RESAGEBURB` contiene estadisticas de poblacion por manzana pero carece de coordenadas geograficas en su archivo CSV. Para fijar la ubicacion espacial de cada manzana residencial se ejecuta una resolucion jerarquica en cascada:
-
-```
-[Nivel 0: Marco Geoestadistico Nacional (MGM)]
-   Centroide poligonal vectorial oficial de Manzana (CVE_ENT + CVE_MUN + CVE_AGEB + CVE_MZA)
-          | (si no se dispone de cartografia vectorial de manzana)
-          v
-[Nivel 1: Centroide Comercial DENUE Manzana]
-   Media baricentrica (lon, lat) de los comercios DENUE en la misma manzana censal
-          | (si la manzana es 100% dormitorio sin comercio registrado en DENUE)
-          v
-[Nivel 2: Marco Geoestadistico AGEB]
-   Centroide poligonal vectorial oficial del AGEB urbana
-          | (si no existe capa vectorial de AGEBs)
-          v
-[Nivel 3: Centroide Comercial DENUE AGEB]
-   Baricentro de todos los comercios DENUE dentro del AGEB en el area BBOX
-          | (si el registro no cruza con ninguna geometria dentro del BBOX)
-          v
-[Descarte Estricto (DROP)]
-   El registro censal se purga de la memoria. Cero imputacion artificial.
-```
-
-### 2.4. Principio de Cero Imputacion al Centro de BBOX
-Los microdatos censales estatales abarcan la totalidad de los municipios de la entidad federativa. Aquellas manzanas que pertenecen a localidades rurales, poblados distantes o municipios fuera del BBOX funcional carecen de interseccion con el DENUE o el Marco Geoestadistico local.
-
-> **Regla Metodologica de Cero Imputacion:** Queda estrictamente prohibido imputar las coordenadas del centro del BBOX `(mid_lon, mid_lat)` a registros sin localizacion geometrica. En modelos tradicionales, esta mala practica genera "megapuntos" o singularidades artificiales de cientos de miles de habitantes en coordenadas arbitrarias (a menudo en el centro de lagunas, sierras o aeropuertos). En `sb_mexico`, todo registro que no obtenga coordenadas validas mediante la jerarquia o cuyas coordenadas resulten externas al BBOX es descartado formalmente mediante `dropna()`.
-
----
-
-## 3. Calibracion Asimetrica de Empleo Municipal con Ponderacion BBOX
-
-### 3.1. Estratos DENUE y Sesgo Estructural de Captura
-El DENUE cataloga unidades economicas asignandoles un estrato de personal ocupado (`per_ocu`). Para cada establecimiento se asigna la media geometrica del intervalo:
-
-$$\text{media\_geometrica}(a, b) = \sqrt{a \cdot b}$$
-
-* `0 a 5 personas`: 2.24
-* `6 a 10 personas`: 7.75
-* `11 a 30 personas`: 18.17
-* `31 a 50 personas`: 39.37
-* `51 a 100 personas`: 71.41
-* `101 a 250 personas`: 158.90
-* `251 y mas personas`: 450.00
-
-**Sesgo Censal Identificado:** El DENUE tiene una captura sumamente exacta para medianas y grandes corporaciones, pero presenta subregistro sistematico en micro-negocios informales (talleres, puestos semi-fijos, comercio barrial). Por otro lado, los Censos Economicos (CE 2024 / SAIC) proveen la cifra de control de personal ocupado total (`H001A`), pero unicamente consolidada a nivel municipal global.
-
-### 3.2. Ponderacion Territorial BBOX (`share_bbox`)
-En metropolis y zonas conurbadas, el rectangulo delimitador (BBOX) de estudio rara vez coincide con las fronteras politicas completas de los municipios (ej. municipios de gran extension selvatica o rural como Benito Juarez en Quintana Roo, Ensenada en Baja California o Queretaro).
-
-Si se aplicara el valor integro de $H001A_{\text{Mun}}$ a los comercios dentro del BBOX, se concentraria indebidamente el empleo de todo el municipio en la mancha urbana central. Por ello, el motor calcula la participacion territorial previa al recorte:
-
-$$\text{share\_bbox}_m = \min\left(1.0, \ \frac{\sum_{j \in \text{BBOX} \cap m} E_{\text{formal}, j}}{\sum_{j \in m, \text{global}} E_{\text{formal}, j}}\right)$$
-
-El personal ocupado objetivo efectivo para el area de estudio es:
-$$H001A_{\text{BBOX}, m} = H001A_{\text{Mun}, m} \times \text{share\_bbox}_m$$
-
-### 3.3. Algoritmo de Expansion Asimetrica Acotada (*Clamped Micro-Expansion Factor*)
-Para calibrar el empleo sin alterar la escala ni inflar artificialmente a las grandes empresas ya verificadas por el censo, el ajuste se confina **estrictamente a micro y pequenas empresas** ($\le 50$ empleados):
-
-1. **Grandes Empresas (> 50 empleados):** Factor neutral unitario:
-   $$\text{calibrated\_jobs}_j = \text{jobs\_formal}_j \times 1.000$$
-2. **Micro y Pequenas Empresas ($\le 50$ empleados):** Absorben el diferencial de empleo necesario para alcanzar el control censal ajustado:
-   $$\text{factor\_micro}_m = \frac{H001A_{\text{BBOX}, m} - E_{\text{grandes}, m}}{E_{\text{micro\_base}, m}}$$
-3. **Techo Teorico por Informalidad Laboral ($TIL_1$):**
-   De acuerdo con los fundamentos del mercado laboral mexicano, el empleo informal no puede exceder la tasa estatal reportada en la ENOE:
-   $$\text{techo\_teorico}_m = \frac{1}{\max(0.01, \ 1 - TIL_1)}$$
-   $$\text{factor\_clamped}_m = \text{clamp}(\text{factor\_micro}_m, \ 1.0, \ \text{techo\_teorico}_m)$$
-
-**Manejo de Casos de Borde:**
-* Si las grandes empresas igualan o superan el objetivo proporcional ($E_{\text{grandes}, m} \ge H001A_{\text{BBOX}, m}$), las microempresas se mantienen con factor $1.000$ (sin sobreexpansion).
-* Si el municipio no posee benchmark en el CE 2024 o el conteo muestral es escaso ($< 500$ empleos), se aplica la tasa de informalidad estatal como factor de expansion por defecto:
-  $$\text{factor\_fallback} = 1.0 + TIL_1$$
-
----
-
-# PARTE 2: Malla Espacial, Modelo Gravitatorio en Dos Capas y Arquitectura de POIs
-
-## 4. Malla Espacial de Demanda y Agregacion Territorial
-
-### 4.1. Resolucion Espacial y Celulado Regular
-Para transformar millones de registros tabulares y poligonos censales en una representacion vectorial eficiente para el simulador de juego, `sb_mexico` proyecta los datos en una malla espacial continua:
-$$\text{grid\_size} = 0.0025^\circ \approx 275\text{ metros}$$
-
-Cada celda espacial se indexa mediante una clave bidimensional entera:
-$$\text{key}(x, y) = \left(\left\lfloor \frac{\text{lon}}{\text{grid\_size}} \right\rfloor, \ \left\lfloor \frac{\text{lat}}{\text{grid\_size}} \right\rfloor\right)$$
-
-### 4.2. Baricentros Ponderados por Masa Activa
-A diferencia de los modelos que asignan los datos al centroide geometrico rigido de la celda (lo que produce alineaciones cuadradas irreales), el sistema calcula el **baricentro ponderado por masa humana activa**:
-
-$$\text{lon}_{\text{celda}} = \frac{\sum_k w_k \cdot \text{lon}_k}{\sum_k w_k}, \qquad \text{lat}_{\text{celda}} = \frac{\sum_k w_k \cdot \text{lat}_k}{\sum_k w_k}$$
-
-Donde los pesos $w_k$ corresponden a:
-* Para unidades economicas: $w_k = \max(0.1, \ \text{calibrated\_jobs}_k)$
-* Para manzanas censales: $w_k = \max(0.1, \ \text{pobtot\_adj}_k)$
-
-Este baricentro atrae el punto de demanda hacia el nucleo donde realmente se concentra la poblacion o el comercio dentro del cuadrante.
-
-### 4.3. Consolidacion Espacial de Celdas Sub-Umbral mediante STRtree
-Para garantizar un rendimiento optimo de 60 cuadros por segundo en el motor grafico WebGL de *Subway Builder*, la escena no debe sobrecargarse con decenas de miles de celdas insignificantes (ej. celdas con 1 o 2 residentes en lotes baldios).
-
-Se definen umbrales de masa minima por celda:
-$$\text{min\_residents} = 10, \qquad \text{min\_jobs} = 3$$
-
-Las celdas que no alcanzan ninguno de estos minimos se denominan **sub-umbral**. En lugar de descartarse (lo cual violaria la conservacion censal), el motor indexa las celdas validas en un arbol espacial de empaquetamiento optimizado **STRtree** (*Sort-Tile-Recursive R-tree*) y transfiere la totalidad de su poblacion, PEA y empleos a la celda valida mas cercana:
-
-$$\text{celda}_{\text{destino}} = \operatorname{argmin}_{\text{celda} \in \text{Validas}} \operatorname{dist}(\text{celda}_{\text{sub}}, \ \text{celda})$$
-
-$$\text{jobs}_{\text{destino}} \leftarrow \text{jobs}_{\text{destino}} + \text{jobs}_{\text{sub}}$$
-$$\text{residents}_{\text{destino}} \leftarrow \text{residents}_{\text{destino}} + \text{residents}_{\text{sub}}$$
-$$\text{PEA}_{\text{destino}} \leftarrow \text{PEA}_{\text{destino}} + \text{PEA}_{\text{sub}}$$
-
-**Garantia:** 100% de la poblacion y empleo se preservan integramente en el sistema espacial ($\Delta = 0$).
-
-### 4.4. Snapping Vial Vectorial con STRtree
-Tanto las personas como los trabajadores abordan el transporte desde la via publica. Un punto de demanda ubicado en medio de una manzana cerrada o en el lecho de un cuerpo de agua resulta inaccesible.
-
-El motor ejecuta un algoritmo de proyeccion vectorial (*snapping*) sobre la red vial peatonal accesible de OpenStreetMap (`residential`, `primary`, `secondary`, `tertiary`, `pedestrian`, `footway`, `living_street`, descartando vias restringidas o autopistas sin acceso peatonal):
-
-1. Se indexan los segmentos viales en un `STRtree`.
-2. Para cada punto de demanda $p$, se consulta el segmento vial mas cercano $L$:
-   $$p_{\text{snap}} = \operatorname{proj}_L(p)$$
-3. Se evalua la distancia ortodromica con correccion por latitud $\cos(\text{lat})$:
-   $$\text{distancia\_m} = \sqrt{(\Delta x \cdot 111{,}320 \cdot \cos(\text{lat}))^2 + (\Delta y \cdot 110{,}574)^2}$$
-4. **Salvaguarda de Proyeccion Acotada:** El snapping se aplica exclusivamente si la distancia esta dentro del rango funcional peatonal:
-   $$\text{distancia\_m} \in [5\text{ m}, \ 300\text{ m}]$$
-   Si el punto ya esta sobre la calle ($< 5\text{ m}$) o se ubica en un area campestre alejada ($> 300\text{ m}$), se conserva su centroide original para evitar saltos geometricos aberrantes.
-
-### 4.5. Semantica Tecnica: Demand Points (`points`) vs Cohortes de Viaje (`pops`)
-Un error habitual en el modelado de *Subway Builder* es asumir que los puntos de demanda generan pasajeros. La arquitectura del motor del juego opera bajo dos capas conceptualmente disjuntas:
-
-* **Demand Points (`points`):** Son entidades puramente visuales y de referencia geografica (`{id, location, jobs, residents, popIds}`). Determinan el tamano y color de las burbujas graficas en el mapa y la informacion mostrada en los tooltips al pasar el cursor. **No suben a los trenes ni crean flujos de pasajeros.**
-* **Pops (`pops`):** Son las verdaderas cohortes de desplazamiento commuter (`{id, size, residenceId, jobId, drivingSeconds, drivingDistance}`). Cada objeto `pop` representa un grupo discreto de personas que viajan recurrentemente desde su `residenceId` hasta su `jobId`. Son los unicos agentes que abordan los trenes, saturan los andenes y generan la recaudacion del metro.
-
-### 4.6. Zonas de Exclusion (`exclusion_zones`) y Preservacion de Infraestructura
-En diversas conurbaciones existen areas naturales protegidas, lagunas interiores, humedales, manglares, salinas o zonas federales e islas deshabitadas donde no debe asignarse poblacion activa ni puestos de trabajo:
-* Si se confiara exclusivamente en la agregacion censal o baricentros, registros espurios o comercios periféricos podrian proyectar demanda en medio de lagunas o manglares.
-* Sin embargo, el modelador **desea conservar intacta la red vial, los puentes, las vias ferreas y los edificios 3D** en dichas zonas (por ejemplo, el puente sobre la Laguna Nichupte o autopistas escénicas).
-
-Para conciliar ambos objetivos sin distorsionar la cartografia, `sb_mexico` introduce **Zonas de Exclusion (`exclusion_zones`)**:
-1. Se delimitan poligonos vectoriales o cuadros delimitadores en el archivo YAML o en la pestana *Exclusiones* de POI Studio.
-2. Durante la agregacion espacial censal y economica, toda celda cuyo baricentro quede cubierto por una zona de exclusion activa es purgada de la simulacion:
-   $$\text{residents}_k = 0, \qquad \text{PEA}_k = 0, \qquad \text{jobs}_k = 0$$
-3. Como resultado, ningun objeto `pop` puede originarse ni tener como destino la zona excluida ($T_{ik} = 0$, $T_{kj} = 0$).
-4. **Preservacion Cartografica Total:** El mapa base vectorial (`.pmtiles`) y la red vial (`roads.geojson`) se compilan a partir de la totalidad del extracto OSM metropolitano, asegurando que avenidas, puentes maritimos y estructuras continúen mostrandose con fidelidad al 100% en el motor del juego.
-
----
-
-## 5. El Modelo Gravitatorio en Dos Capas (Two-Tier Doubly-Constrained Model)
-
-La distribucion de viajes entre origenes residenciales y destinos laborales no es un fenomeno homogeneo. Mientras que el empleo de barrio o comercial responde a fricciones espaciales estrictas, los polos de transporte y educacion superior operan a escala metropolitana universal. Por ello, el motor divide la asignacion en dos capas secuenciales:
-
-```
-[Poblacion Economicamente Activa Total (PEA_i por celda)]
-                       |
-                       v
-[CAPA 1: Generadores Especiales con Cuota Exacta (Hubs Metropolitanos)]
-   - Aeropuertos (AIR_), Universidades (UNI_), Estadios (SPO_)
-   - Atraccion metropolitana de largo alcance (beta = 0.04)
-   - Asignacion Multinomial Acotada
-                       |
-                       v
-[Deduccion Estricta de Presupuesto]
-   PEA_rem_i = PEA_i - Sum_k T_{i -> k}
-                       |
-                       v
-[CAPA 2: Empleo Regular DENUE (Furness / IPFP Doblemente Acotado)]
-   - Friccion espacial estandard (beta = 0.12, d <= 55 km)
-   - Balanceo iterativo de filas (PEA_rem_i) y columnas (Empleos DENUE_j)
-   - Sorteo estocastico de cohortes multinomiales discretas
-                       |
-                       v
-[Matriz Final de Cohortes 'pops' y Validacion de Conservacion Sum(T) == PEA]
-```
-
-### 5.1. Capa 1: Generadores Especiales con Cuota Exacta (Hubs Metropolitanos)
-Los generadores especiales concentran viajes de indole no exclusivamente asalariada que abarcan cuencas metropolitanas enteras.
-
-#### Estimacion Empirica de Cuotas Objetivas ($Q_k$)
-* **Aeropuertos Internacionales (`AIR_`):** Calculado a partir de la estadistica de la Agencia Federal de Aviacion Civil (AFAC):
-  $$Q_{\text{AIR}} = \operatorname{round}\left(\frac{\text{Pasajeros Anuales AFAC} \times 0.05}{365}\right)$$
-  (Representa la fraccion diaria de pasajeros y tripulaciones propensas a transporte masivo mas el personal aeroportuario de tierra).
-* **Universidades y Campus Centrales (`UNI_`):** Calculado a partir de matriculas oficiales SEP / ANUIES:
-  $$Q_{\text{UNI}} = \operatorname{round}(\text{Matricula Activa Presencial} \times 0.70)$$
-* **Estadios y Polos Deportivos (`SPO_`):** Prorrateo de afluencia promedio por dia equivalente de partido o evento.
-
-#### Friccion Espacial de Cuenca Metropolitana
-Para reflejar que un estudiante o viajero aereo esta dispuesto a cruzar toda la metropoli, se aplica un coeficiente de friccion espacial reducido:
-$$\beta_{\text{esp}} = 0.04 \qquad (\text{en contraste con } \beta = 0.12 \text{ para empleo ordinario})$$
-
-La atractividad gravitatoria de largo alcance desde el origen $i$ hacia el polo especial $k$ es:
-$$W_{ik} = \text{PEA}_i \cdot e^{-\beta_{\text{esp}} \cdot d_{ik}}$$
-
-#### Asignacion Multinomial Acotada (*Bounded Cohort Draw*)
-La cuota $Q_k$ se fragmenta en cohortes discretas cuyo tamano depende del tipo de nodo (ej. tamano maximo de cohorte de 75 para universidades y 120 para aeropuertos):
-$$\vec{T}_{\cdot \to k} \sim \operatorname{Multinomial}\left(K_k, \ \left[\frac{W_{1k}}{\sum_m W_{mk}}, \dots, \frac{W_{Nk}}{\sum_m W_{mk}}\right]\right)$$
-
-Si el sorteo asigna a un origen $i$ un numero de viajeros mayor a su $\text{PEA}_i$ disponible, la asignacion se trunca al saldo real y el exceso se redistribuye estocasticamente entre los origenes restantes con capacidad remanente.
-
-#### Deduccion de Presupuesto Residencial
-Para evitar que un individuo viaje dos veces, la PEA asignada a la Capa 1 se resta del saldo de la celda:
-$$\text{PEA}_i^{\text{rem}} = \text{PEA}_i - \sum_k T_{i \to k}$$
-
-### 5.2. Capa 2: Modelo Gravitatorio Doblemente Acotado con Algoritmo de Furness (IPFP)
-Para el empleo comercial, corporativo e industrial restante, los modelos de gravitacion simples (uniconstrenidos) presentan una falla grave: asignan trabajadores a los destinos segun su cercania, pero **sin respetar la capacidad real de absorcion de los puestos de trabajo de destino**, sobrecargando comercios pequenos y subestimando grandes parques industriales.
-
-Para superar esto, `sb_mexico` implementa el algoritmo clasico de **Furness / IPFP** (*Iterative Proportional Fitting Procedure*), que equilibra bidireccionalmente la matriz de flujos $T_{ij}$:
-
-1. **Restriccion de Fila (Capacidad de Emision Residencial):**
-   $$\sum_{j} T_{ij} = \text{PEA}_i^{\text{rem}}$$
-2. **Restriccion de Columna (Capacidad de Absorcion Laboral):**
-   $$\sum_{i} T_{ij} \propto D_j \qquad (D_j = \text{calibrated\_jobs}_j)$$
-3. **Friccion Espacial Exponencial y Calibracion Empirica por Ciudad:**
-   $$f(d_{ij}) = e^{-\beta \cdot d_{ij}} \quad \text{para } d_{ij} \le 55\text{ km} \quad (\beta = 0.12)$$
-
-   * **El Estandar de Calibracion de Colin (Trip Length Distribution):** En la metodologia oficial de *Subway Builder*, el modelo gravitatorio se calibra especificamente para cada metropoli asegurando que la distribucion de distancias de viaje simuladas (*Commute Distance Distribution*) coincida con las curvas de distancia observadas en los censos de movilidad locales.
-   * En ciudades mexicanas compactas (ej. Cancun urbano, Campeche), los desplazamientos laborales diarios se concentran en medianas de 6 a 10 km ($\beta \approx 0.14 - 0.18$), mientras que en metropolis intermedias (Merida, Queretaro, Saltillo) rondan los 12 a 16 km ($\beta \approx 0.10 - 0.12$), y en megaciudades extensas (ZMVM, Monterrey, Guadalajara) superan los 20 a 30 km ($\beta \approx 0.07 - 0.09$).
-
-#### Algoritmo de Convergencia Bidireccional
-Se inicializa la matriz de flujos como $T_{ij}^{(0)} = \text{PEA}_i^{\text{rem}} \cdot D_j^* \cdot f(d_{ij})$ y se itera secuencialmente:
-
-$$\text{Paso A (Ajuste a Filas):} \quad T_{ij}^{(t+1/2)} = T_{ij}^{(t)} \cdot \frac{\text{PEA}_i^{\text{rem}}}{\sum_k T_{ik}^{(t)} + \epsilon}$$
-
-$$\text{Paso B (Ajuste a Columnas):} \quad T_{ij}^{(t+1)} = T_{ij}^{(t+1/2)} \cdot \frac{D_j^*}{\sum_k T_{kj}^{(t+1/2)} + \epsilon}$$
-
-El proceso itera hasta que el error relativo maximo en destinos cae por debajo de la tolerancia ($\text{tol} = 0.02$) o se alcanza el numero maximo de iteraciones ($\max_{\text{iter}} = 15$).
-
-#### Matriz Estocastica de Probabilidades y Muestreo de Cohortes
-Una vez balanceada la matriz continua, se normaliza para obtener las probabilidades condicionales de eleccion discreta:
-$$P_{ij} = \frac{T_{ij}}{\sum_k T_{ik}}$$
-
-Para cada origen residencial $i$, el saldo $\text{PEA}_i^{\text{rem}}$ se particiona en $K_i$ cohortes discretas equilibradas (con tamano adaptativo $\approx \text{target\_pop\_size}$) y se extrae una muestra multinomial:
-$$\vec{C}_{i} \sim \operatorname{Multinomial}(K_i, \ \vec{P}_{i \cdot})$$
-
-### 5.3. Teorema de Conservacion Estricta de Masa
-El modelo satisface de forma formal la invariante de conservacion de masa en cada corrida:
-
-$$\sum_{i, j} T_{ij} + \sum_{i, k} T_{ik} \equiv \sum_i \text{PEA}_i \qquad (\Delta = 0\text{ personas})$$
-
-No se genera ningun pasajero fantasma ni se pierde ningun trabajador censado.
-
----
-
-## 6. Arquitectura y Taxonomia de POIs (Special Demand) vs. Corredores de Empleo
-
-### 6.1. Limitaciones del Censo Tradicional y Justificacion de POIs Especiales
-Los censos economicos registran a los asalariados formales de las empresas. Sin embargo, en el transporte publico masivo:
-1. **Flujos No Asalariados:** Un campus con 2,000 docentes y administrativos moviliza a 25,000 estudiantes diarios. Un aeropuerto con 8,000 empleados moviliza a 60,000 pasajeros diarios. Ambos grupos se comportan como usuarios del transporte.
-2. **Escala de Cuenca Metropolitana:** El comercio general tiene una friccion espacial alta ($\beta = 0.12$), mientras que los grandes hubs metropolitanos atraen viajes desde toda la urbe ($\beta_{\text{esp}} = 0.04$).
-
-### 6.2. Taxonomia de Prefijos Nativos del Motor de Subway Builder
-El motor de *Subway Builder* inspecciona la cadena de texto de los identificadores (`jobId`) de los puntos de destino para aplicar modificaciones de comportamiento en tiempo real:
-
-* **Prefijo `AIR_*` (Aeropuertos):**
-  * Activa regimen continuo 24 horas al dia con **dampening = 0.5** y flujo bidireccional simetrico (los vuelos llegan y salen tanto en la madrugada como a mediodia).
-  * **Comportamiento y Distribucion de Ingresos:** El motor simula pasajeros aéreos y tripulaciones con distribucion de ingresos y tiempos de viaje especificos (en EE. UU. alimentado por la FAA; en Mexico por aforos oficiales de la AFAC).
-  * **Regla Estricta de Nomenclatura:** El motor de juego recorta automaticamente el prefijo `"AIR_"` y anexa la palabra `" Terminal"`.
-    * *Correcto:* `AIR_Cancun` (el juego mostrara `Cancun Terminal`).
-    * *Incorrecto:* `AIR_Aeropuerto_CUN` (el juego mostraria `Aeropuerto_CUN Terminal`).
-* **Prefijo `UNI_*` (Universidades):**
-  * Activa la curva horaria estudiantil con **dampening = 0.3** (amortigua los picos extremos de oficina y distribuye los viajes a lo largo del dia conforme a turnos matutino, vespertino e intermedio).
-  * **Comportamiento e Ingresos Estudiantiles:** Modela a la poblacion estudiantil con un estrato de ingresos reducido, lo cual disminuye su Valor del Tiempo ($VOT$) y dispara su propension y fidelidad al transporte masivo frente al automovil particular (en EE. UU. basado en datos federales de matricula; en Mexico en la estadistica oficial SEP / ANUIES).
-* **Sin prefijo o prefijos complementarios (`SPO_`, `TOU_`, `MED_`, `TRA_`):**
-  * Siguen la curva bimodal estandar de desplazamiento laboral urbano (picos marcados de 7:00–9:30 AM y 5:30–8:30 PM).
-* **Regla de Formato de IDs:** Prohibido usar guiones bajos `_` en el nombre propio tras el prefijo taxonomico. Usar nombres legibles con espacios (ej. `UNI_Universidad del Caribe`, no `UNI_Universidad_del_Caribe`).
-
-### 6.3. Mecanismo de Absorcion DENUE (`mode: MAX` vs `mode: SUM`)
-Un aeropuerto o campus universitario ya posee establecimientos registrados en el DENUE (restaurantes, locales de comida, librerias, tiendas duty-free). Si un POI manual declara 20,000 usuarios y se sumaran ciegamente los 4,500 empleos del DENUE ya censados en la pista o terminal, se incurriria en una doble contabilidad de 24,500 empleos.
-
-Para evitarlo, cada POI define un radio de absorcion (`radius_m: 1500–2500m` para aeropuertos, `radius_m: 800m` para universidades) y un modo de resolucion:
-* **`mode: MAX` (Predeterminado y Recomendado):**
-  $$\text{jobs\_finales} = \max(\text{jobs\_declarados}, \ \text{jobs\_denue\_absorbidos})$$
-  El POI absorbe los puestos comerciales locales garantizando que el nodo tenga al menos la cuota esperada sin duplicar masa censal.
-* **`mode: BOOST` o `ADDITIVE`:** Suma los empleos declarados a los del DENUE (usado unicamente para polos con nuevo desarrollo no capturado en el censo).
-* **Resolucion de Solapamientos por Minima Distancia ($\operatorname{argmin}$):** Si un establecimiento comercial cae dentro del radio de dos POIs adyacentes, se asigna rigurosamente al POI mas cercano empleando distancia esferoidal ponderada con $\cos(\text{lat})$.
-
-### 6.4. Corredores de Empleo vs. Nodos Puntuales Masivos
-Uno de los errores mas graves en el diseno de escenarios metropolitanos es concentrar corredores lineales continuos en mega-POIs artificiales:
-
-* **Nodos Puntuales Masivos (Aeropuertos, Estadios, Campus Centrales):**
-  * Poseen una unica entrada masiva o estacion central.
-  * Deben modelarse como un unico POI dedicado con radio de captura amplio (`radius_m: 1500–2500m`) y `mode: MAX`.
-* **Clusters y Corredores Lineales Continuos (Zona Hotelera de Cancun, Paseo de la Reforma, Av. Insurgentes, Corredores Industriales de Monterrey):**
-  * ❌ **Anti-patron del Mega-POI:** Colocar un solo POI manual de 60,000 empleos en el centro de la Zona Hotelera destruye el juego: una sola estacion colapsa con hacinamiento incontrolable mientras las 10 estaciones restantes a lo largo de los 20 km del bulevar permanecen vacias e inviables.
-  * ✅ **Diseno Metodologico Correcto:** Permitir que los establecimientos individuales del DENUE se agreguen organicamente en celdas de la malla espacial a lo largo de toda la avenida. De este modo, la demanda se reparte equitativamente a lo largo del corredor, haciendo viable un sistema de metro con multiples estaciones secuenciales de alta productividad. Si se requieren POIs de anclaje (ej. centros de convenciones), deben configurarse con radios acotados (`radius_m: 500–800m`).
-
-### 6.5. Tabla de Buenas y Malas Practicas (Do's and Don'ts)
-
-| Practica | Recomendacion | Justificacion Metodologica |
-| :--- | :--- | :--- |
-| **Prefijos Nativos (`AIR_`, `UNI_`)** | **DO (Obligatorio)** | Activa los algoritmos de dampening y horarios 24/7 o estudiantiles en el motor. |
-| **Absorcion DENUE (`mode: MAX`)** | **DO (Obligatorio)** | Previene inflar artificialmente el empleo ya censado en el area. |
-| **Deduccion de Presupuesto ($\text{PEA}^{\text{rem}}$)** | **DO (Obligatorio)** | Garantiza que nadie viaje dos veces y preserva la masa total ($\Delta = 0$). |
-| **Nombres limpios sin guiones bajos** | **DO** | Mejora la legibilidad estetica del juego (`UNI_UNAM Campus Central`). |
-| **Mega-POIs en avenidas continuas** | **DON'T** | Destruye la red lineal y colapsa una sola estacion, vaciando el resto de la linea. |
-| **Micro-POIs para escuelas basicas o plazas** | **DON'T** | Sobrecarga innecesaria de puntos; el DENUE ya los captura de forma natural. |
-| **Asignar BBOX center a POIs sin coordenadas** | **DON'T** | Crea un megapunto de atraccion infinita en ubicaciones absurdas. |
-
----
-
-## 7. Zonas de Alta Afluencia (`affluence_zones`) y Modulacion de Atraccion Territorial
-
-### 7.1. Justificacion Urbana: Corredores de Empleo vs. Macro-Distritos
-En la morfologia urbana existen areas de concentracion laboral intensiva que no se comportan como un polo puntual unico (como un aeropuerto) ni como empleo barrial homogeneamente disperso. Ejemplos representativos incluyen:
-* Corredores corporativos y distritos financieros (Paseo de la Reforma y Santa Fe en CDMX, San Pedro Garza Garcia en Monterrey).
-* Zonas hoteleras y franjas de recreacion intensiva (Boulevard Kukulcan en Cancun, Zona Hotelera Norte en Puerto Vallarta).
-* Macro-parques industriales y complejos logisticos metropolitanos (Parque Finsa en Puebla, Corredor El Salto en Guadalajara).
-
-Si un modelador intenta representar estas zonas continuas mediante un unico mega-POI puntual, colapsa la red en una estacion saturada ficticia y deja desierto el resto del trazado. Por el contrario, si solo confia en el DENUE disperso, se subestima la potencia de atraccion de largo alcance de estos distritos a escala metropolitana.
-
-### 7.2. Modulacion de Masa y Capacidad Laboral
-Para resolver esta disyuntiva, `sb_mexico` incorpora **Zonas de Alta Afluencia (`affluence_zones`)**, delimitadas como poligonos vectoriales o cuadros delimitadores en la configuracion YAML:
-
-1. **Multiplicador de Empleo Regular ($\alpha \ge 1.0$):**
-   Para cada establecimiento DENUE regular $j$ ubicado dentro del poligono de la zona $Z$:
-   $$E_{\text{mod}, j} = E_{\text{denue}, j} \times \alpha_Z$$
-2. **Modo Cupo Objetivo (`target_mode: TARGET_CAPACITY`):**
-   Si la zona declara una capacidad total de puestos de trabajo ($J_{\text{target}}$), el sistema cuantifica el empleo regular contenido y reescala uniformemente las celdas de la malla dentro del perimetro:
-   $$\text{scale} = \frac{J_{\text{target}}}{\sum_{k \in Z} E_k}, \qquad E'_k = E_k \times \text{scale}$$
-3. **Preservacion Hermetica de POIs Especiales:**
-   Los generadores especiales manuales (`AIR_`, `UNI_`, `SPO_`, `MED_`, etc.) contenidos dentro de la zona de afluencia **conservan estrictamente su cuota declarada**. El multiplicador $\alpha_Z$ modula exclusivamente el empleo regular DENUE, impidiendo distorsiones sobre nodos clave ya calibrados.
-
-### 7.3. Modulacion de Friccion Espacial y Bono de Alcance Metropolitano (`reach_bonus`)
-Un centro financiero o polo turistico internacional atrae trabajadores y visitantes desde distancias significativamente mayores que un comercio ordinario. Para modelar esta interaccion gravitatoria, cada zona de afluencia puede declarar un bono de alcance:
-$$\text{reach\_bonus}_Z \in [0.0, \ 0.60]$$
-
-En el algoritmo de balanceo bidireccional de Furness / IPFP, el bono de alcance modula directamente el coeficiente de decaimiento por distancia ($\beta = 0.12$) para cada celda de destino $j \in Z$:
-$$\beta_j = \beta \times (1.0 - \text{clamped\_reach}_j)$$
-
-Donde $\text{clamped\_reach}_j = \min(0.60, \ \max(0.0, \ \text{reach\_bonus}_Z))$.
-
-**Salvaguarda de Piso de Retencion Local ($d \le 3.0\text{ km}$):**
-A fin de asegurar que la reduccion de friccion a larga distancia no penalice artificialmente los viajes de proximidad residencial inmediata (residentes vecinos), se aplica una salvaguarda de piso en la funcion de impedancia:
-$$\text{friction}_{ij} = \begin{cases}
-\max\left(e^{-\beta_j \cdot d_{ij}}, \ e^{-\beta \cdot d_{ij}}\right) & \text{si } d_{ij} \le 3.0\text{ km} \\
-e^{-\beta_j \cdot d_{ij}} & \text{si } 3.0 < d_{ij} \le 55.0\text{ km} \\
-0.0 & \text{si } d_{ij} > 55.0\text{ km}
-\end{cases}$$
-
-### 7.4. Arquetipos Urbanos Estandarizados
-El motor tipifica cuatro arquetipos predefinidos con parametros de calibracion contrastados:
-
-| Arquetipo | Clave | Multiplicador ($\alpha$) | Bono de Alcance (`reach_bonus`) | Ambito Tipico de Aplicacion |
-| :--- | :--- | :--- | :--- | :--- |
-| **Distrito Financiero / CBD** | `cbd` | $2.5\text{x}$ | $0.40$ (de $\beta=0.12 \to 0.072$) | Centros financieros, Reforma, Santa Fe, Valle Oriente. |
-| **Polo Turistico / Hotelero** | `tourism` | $2.2\text{x}$ | $0.35$ (de $\beta=0.12 \to 0.078$) | Zona Hotelera Cancun, Malecon Mazatlan, Riviera Nayarit. |
-| **Corredor Industrial** | `industrial` | $1.8\text{x}$ | $0.25$ (de $\beta=0.12 \to 0.090$) | Parques industriales conurbados, aduanas interiores. |
-| **Cluster Comercial** | `commercial` | $1.4\text{x}$ | $0.15$ (de $\beta=0.12 \to 0.102$) | Corredores de centros comerciales y retail metropolitano. |
-| **Personalizado** | `custom` | Libre | Libre | Parametros arbitrarios calibrados en el YAML de la ciudad. |
-
-### 7.5. Resolucion Espacial de Solapamientos (Regla Canonica MAX Priority)
-Cuando una manzana o establecimiento queda cubierto por dos o mas zonas de alta afluencia simultaneas, el conflicto se resuelve de forma determinista mediante el principio de maxima jerarquia (*MAX Priority*):
-$$\alpha^* = \max(\alpha_1, \alpha_2, \dots, \alpha_k)$$
-$$\text{reach\_bonus}^* = \max(\text{reach}_1, \text{reach}_2, \dots, \text{reach}_k)$$
-
-Esta regla garantiza idempotencia e independencia del orden de definicion en el archivo YAML. La evaluacion se ejecuta mediante geometrias poligonales preparadas (`shapely.prepared.prep`) con filtrado rapido por BBOX.
-
----
-
-# PARTE 3: Fisicas Viales, Ruteo Arterial, Cohortes Dinamicas y Metadatos del Motor
-
-## 8. Arquitectura de Simulacion, Fisicas Viales y Eleccion Modal en Subway Builder
-
-Para que una red metropolitana construida en Mexico funcione de forma realista dentro de *Subway Builder*, es esencial comprender en profundidad el motor de simulacion de pasajeros de Colin Miller y las investigaciones academicas en las que se fundamenta. El juego no es un simulador estatico ni un modelo macroscopico tradicional; simula a millones de viajeros individuales con elecciones discretas a 60 FPS mediante tres componentes acoplados:
-
-### 8.1. Ruteo de Pasajeros sobre Horarios: range-RAPTOR (rRAPTOR)
-El motor de busqueda de rutas de transporte publico dentro del juego no ejecuta busquedas sobre grafos espaciales (como Dijkstra o A*), sino el algoritmo **range-RAPTOR (rRAPTOR)**, desarrollado por Delling, Pajor & Werneck (2012, Microsoft Research: *Round-Based Public Transit Routing*):
-
-1. **Ruteo por Rondas sobre Tablas de Horarios (Timetables):**
-   En lugar de explorar nodos geograficos, RAPTOR barre directamente las tablas de paso de los trenes en rondas discretas:
-   * *Ronda 1:* Identifica todas las estaciones alcanzables mediante un solo tren (cero transbordos).
-   * *Ronda 2:* Identifica estaciones alcanzables con exactamente un transbordo.
-   * *Ronda $k$:* Estaciones con $k-1$ transbordos.
-   Este diseno permite al motor rutear a miles de viajeros en microsegundos cada vez que el jugador anade una estacion o altera la frecuencia de una linea.
-
-2. **Ventana Temporal de 30 Minutos (Range Search):**
-   La variante *range-RAPTOR* evalua la totalidad de salidas programadas dentro de una ventana de 30 minutos, no unicamente el primer tren que llega al anden.
-   * *Comportamiento Inteligente (Locales vs. Expres):* Si un tren local lento sale en 2 minutos pero un tren exprés sale en 10 minutos y llega antes a la estacion de destino, el viajero decide conscientemente esperar en el anden o salir mas tarde para abordar el exprés, emulando la conducta de usuarios reales que conocen el itinerario.
-
-3. **Conectividad Peatonal y Transbordos a Pie (Walking Transfers):**
-   La busqueda de rRAPTOR integra los tramos de caminata desde el hogar a la estacion de origen, desde la estacion final al lugar de trabajo, y **transbordos peatonales entre estaciones cercanas**. Si dos estaciones de lineas distintas se ubican a distancia caminable (ej. 150–350 m), el motor las enlaza automaticamente como nodo de intercambio sin necesidad de fusionar las vias fisicamente.
-
-### 8.2. Evaluacion de Trayectos por Tiempo Percibido: Metanalisis de Wardman et al.
-Los itinerarios viables encontrados por rRAPTOR no se juzgan por tiempo cronometrico bruto, sino por **tiempo percibido (tiempo generalizado)**. Los factores de ponderacion provienen del metanalisis mundial sobre valoracion del tiempo en transporte de **Wardman et al.**:
-
-| Componente del Desplazamiento | Multiplicador Percibido | Comportamiento en la Simulacion del Juego |
-| :--- | :---: | :--- |
-| **Viaje a bordo del tren (Riding train)** | **$1.00\times$** | Linea base neutra de comparacion. |
-| **Caminata peatonal (Walking)** | **$1.39\times$** | Acceso a estaciones, salida al destino y transbordos a pie entre andenes. |
-| **Espera en el anden (Waiting on platform)** | **$1.37\times$** | Espera inicial del primer tren y esperas de conexion en transbordos. |
-| **Desplazamiento horario (Departing later)** | **$0.40\times$** | *Displacement-time*: Esperar en casa por un mejor tren penaliza solo al 40% del tiempo de viaje. |
-| **Conduccion en congestion vial** | **$1.33\times$** | Trafico metropolitano denso en horas punta. |
-| **Friccion de estacionamiento (Parking)** | **$1.60\times$** | Busqueda de cajon y caminata desde el auto al destino final. |
-
-**Conclusiones Metodologicas:**
-* Caminar ($1.39\times$) y esperar en el anden ($1.37\times$) tienen una penalizacion casi 40% superior a viajar sentado en el tren. Redes con frecuencias deficientes (largas esperas) o pasillos de transbordo excesivos pierden competitividad de inmediato frente al auto.
-* Esperar en casa ($0.40\times$) es significativamente mas comodo que esperar en la plataforma ($1.37\times$), por lo que los pasajeros toleran ajustar su horario de salida algunos minutos con tal de tomar un servicio mas directo.
-
-### 8.3. Eleccion Modal por Estratos de Ingreso (Mode Choice Modeling)
-El mejor trayecto de metro seleccionado por rRAPTOR compite contra el automovil privado y la caminata directa. El modelo de eleccion modal implementa los principios de eleccion discreta documentados por **Tao, Wu et al. (2020)** en *Transportation Research Part A*:
-
-1. **Funcion de Costo Generalizado:**
-   Cada viajero compara los modos disponibles balanceando tiempo percibido, desembolsos monetarios y su **Valor del Tiempo ($VOT$)**:
-   $$\text{Costo Generalizado}_{\text{Metro}} = \text{Tiempo Percibido}_{\text{Metro}} \times VOT_h + \text{Tarifa}$$
-   $$\text{Costo Generalizado}_{\text{Auto}} = \text{Tiempo Percibido}_{\text{Auto}} \times VOT_h + (\text{distancia} \times \$0.65/\text{km}) + \text{Costo Estacionamiento}$$
-
-2. **Heterogeneidad de Ingresos por Vecindario ($VOT_h$):**
-   El Valor del Tiempo es funcion directa del nivel de ingresos del hogar ($VOT_h \propto \text{Ingreso}_h$). En lugar de tratar a cada barrio como una masa homogenea:
-   * Los estratos de menores ingresos poseen un $VOT$ reducido: son altamente sensibles al costo de la gasolina ($\$0.65/\text{km}$), tarifas de estacionamiento y costo del boleto, tolerando mayor tiempo de viaje en metro para evitar gastos automotrices.
-   * Los estratos de altos ingresos poseen un $VOT$ elevado: priorizan la velocidad y el confort, optando por el auto salvo que el metro sea sustancialmente mas veloz y directo.
-   * **Elasticidad Continua de la Demanda:** Debido a la varianza de ingresos intrabarrio, la captacion de pasajeros responde con una **curva sigmoide suave y continua** ante cambios en tarifas o frecuencias, en lugar de un salto binario todo-o-nada.
-
-### 8.4. La Funcion de Eleccion Modal en Tiempo Real y Regla de Flujo Libre
-Con base en los fundamentos anteriores, se formaliza la relacion entre el archivo `demand_data.json` y el motor en ejecucion:
-
-1. **El juego NO calcula rutas viales en tiempo real:** Durante la simulacion a 60 FPS, el motor no ejecuta busquedas de caminos sobre la red de calles para los vehiculos; lee directamente `drivingSeconds` y `drivingDistance` para cada cohorte `pop`.
-2. **Penalizaciones Dinamicas en Tiempo de Ejecucion:**
-   El motor aplica automaticamente sobre el valor base de `drivingSeconds`:
-   * **Multiplicador de Hora Pico:** `DRIVING_TIMES.HIGH_DEMAND = 1.5x`.
-   * **Multiplicador de Congestion Vial Dinamica:** `CONGESTED_DRIVING_MULTIPLIER = 1.33x` (Wardman et al.).
-   * **Friccion de Estacionamiento:** $+180\text{ s}$ en origen y $+180\text{ s}$ en destino, escalados por un factor de hasta $1.60\text{x}$ ($\approx 576\text{ s}$ adicionales de busqueda).
-   * **Costo Operativo por Kilometro:** $\$0.65/\text{km}$ derivado de `drivingDistance`.
-
-3. **Regla de Oro: Prohibida la Doble Contabilidad de Congestion:**
-   Dado que el motor ya aplica las penalizaciones de congestion ($1.33\times$), hora punta ($1.5\times$) y estacionamiento ($1.6\times$) en tiempo real, el valor inyectado en `drivingSeconds` **debe corresponder estrictamente a la linea base a flujo libre** (~40 km/h promedio en red mixta). Pre-congestionar artificialmente los datos a 20 o 25 km/h destruye el canon del juego, penalizando doblemente al automovil y creando una demanda ficticia.
-
-### 8.5. Linea Base Canonica de Colin (Colin's Canonical Fallback)
-Documentado formalmente en las guias oficiales del creador del juego (*Subway Builder Custom Cities / Demand API*), el estandar universal de respaldo ante la ausencia de ruteo punto a punto es:
-* **Circuidad Vial Canonica:** Las calles urbanas anaden un 30% de distancia sobre la linea recta euclidiana ($\tau = 1.3$).
-* **Velocidad Promedio Canonica:** $40\text{ km/h}$ ($\approx 11.11\text{ m/s}$) representativa del flujo urbano promedio.
-* **Formulacion Matematica:**
-  $$\text{drivingDistance} = \max(150\text{ m}, \ \operatorname{round}(d_{\text{euclid}} \times 1.3))$$
-  $$\text{drivingSeconds} = \max\left(45\text{ s}, \ \operatorname{round}\left(\frac{\text{drivingDistance}}{40.0 / 3.6}\right)\right)$$
-
-Este calculo garantiza valores fisicamente plausibles, evita discontinuidades numericas y sirve como salvaguarda absoluta en todo el sistema.
-
-### 8.6. Laboratorio Experimental de Competitividad Modal (`modal_experiment`)
-En ciudades latinoamericanas con niveles de congestion vehicular atipicos o donde la tasa de motorizacion privada es reducida y gran parte de la clase trabajadora depende de transporte colectivo de superficie de baja velocidad (combis, microbuses, autobuses urbanos con paradas continuas), los planificadores pueden requerir simular condiciones de competitividad modal reforzada.
-
-Para este fin, `sb_mexico` provee el modulo opcional `modal_experiment` en la seccion `macroeconomics` del YAML.
-
-#### Formulacion de Impedancia Alternativa Ponderada
-Cuando se activa (`enabled: true`), el modulo transforma los tiempos viales base mediante una funcion de dos modos competitivos:
-1. **Tiempo en Automovil Congestionado:**
-   $$T_{\text{auto}} = \begin{cases}
-   \max\left(45\text{ s}, \ \text{drivingSeconds} \times \frac{40.0}{V_{\text{trafico}}}\right) & \text{si } \text{drivingSeconds} > 0 \\
-   \max\left(45\text{ s}, \ \frac{\text{drivingDistance}}{V_{\text{trafico}} / 3.6}\right) & \text{en otro caso}
-   \end{cases}$$
-2. **Tiempo en Transporte Colectivo de Superficie (Ruta Lenta + Espera):**
-   $$T_{\text{colectivo}} = T_{\text{auto}} \times 2.0 + 300\text{ s}$$
-3. **Tiempo Efectivo Inyectado (`drivingSeconds`):**
-   $$T_{\text{effective}} = P_{\text{auto}} \cdot T_{\text{auto}} + (1.0 - P_{\text{auto}}) \cdot T_{\text{colectivo}}$$
-   $$\text{drivingSeconds} = \max(45\text{ s}, \ \operatorname{round}(T_{\text{effective}}))$$
-
-Donde:
-* $V_{\text{trafico}}$ es la velocidad vehicular media configurada en km/h ($[10.0, 60.0]$).
-* $P_{\text{auto}}$ es la tasa de motorizacion de hogares ($[0.05, 1.0]$). El remanente $(1 - P_{\text{auto}})$ representa poblacion cautiva de transporte colectivo de superficie.
-
-#### Presets Estandarizados
-
-| Preset | Nombre Descriptivo | Velocidad ($V_{\text{trafico}}$) | Motorizacion ($P_{\text{auto}}$) | Escenario de Uso |
-| :--- | :--- | :--- | :--- | :--- |
-| `canonical` | Flujo Libre (Oficial Colin) | $40\text{ km/h}$ | $1.00$ | Estandar oficial por defecto del juego. |
-| `moderate_traffic` | Trafico Moderado | $28\text{ km/h}$ | $0.55$ | Ciudades intermedias con horas pico definidas. |
-| `cdmx_peak` | Megaciudad Saturada | $18\text{ km/h}$ | $0.35$ | Horas punta en valles saturados (ZMVM, Guadalajara). |
-| `captive_transit` | Transporte Cautivo | $24\text{ km/h}$ | $0.20$ | Metropolis con baja tasa de vehiculo particular. |
-| `custom` | Personalizado | Libre en YAML | Libre en YAML | Calibracion manual directa de parametros. |
-
-> **Nota de Compatibilidad:** Por defecto, `modal_experiment.enabled = false`. Esto garantiza que los mapas compilados sigan rigurosamente el canon de simulacion a flujo libre de Colin Miller a menos que el usuario active explicitamente el experimento.
-
----
-
-## 9. Ruteo Vial Canonico con OSRM (Open Source Routing Machine) y WSL 2
-
-### 9.1. El Estandar Oficial de Subway Builder
-Para metropolis con anomalias topologicas severas (como Cancun y la Laguna Nichupte, o bahias como Acapulco y Puerto Vallarta), una simple aproximacion euclidiana ignora las barreras de agua, calculando viajes en linea recta a traves de lagunas y arruinando la demanda del metro.
-
-Para solucionar esto de raiz sin caer en aproximaciones arbitrarias, la documentacion oficial de *Subway Builder* estipula el uso de **OSRM (`osrm/osrm-backend`) con el perfil de automovil `car.lua`**:
-
-```bash
-docker run -t -p 5000:5000 -v "${PWD}:/data" osrm/osrm-backend osrm-routed --algorithm mld /data/city.osrm
-```
-
-Y la consulta de rutas mediante el API REST oficial:
-```
-GET /route/v1/driving/{originLon},{originLat};{destLon},{destLat}?overview=false
-```
-
-De esta respuesta oficial se extraen:
-* `drivingSeconds = round(routes[0].duration)`: Segundos reales de conduccion sobre la red vial mixta a flujo libre (~40 km/h), considerando sentidos de circulacion, giros permitidos y limites segun la clasificacion vial de OSM.
-* `drivingDistance = round(routes[0].distance)`: Metros de pavimento real transitado.
-* `drivingPath = routes[0].geometry.coordinates`: Traza vectorial GeoJSON opcional (unicamente cuando `include_driving_path = true`).
-
-### 9.2. Arquitectura de Compilacion Rapida y Resiliencia en WSL 2
-En cumplimiento con el estandar de la **Regla 10 (WSL 2 y Puente Cartografico)** y **Regla 12 (Resiliencia de Microservicios)**, el motor implementa:
-
-1. **Recorte BBOX con `osmium extract`:** Si el archivo OSM PBF es de escala nacional o regional, se recorta al rectangulo metropolitano de la ciudad antes de compilar. Esto reduce el tiempo de indexacion de ~15 minutos a solo **1.2 segundos**.
-2. **Compilacion en Particion Nativa Linux (ext4):** La generacion del grafo MLD (`osrm-extract`, `osrm-partition`, `osrm-customize`) se ejecuta en `~/osrm_<city>` dentro de WSL 2, eliminando la degradacion de I/O de Windows NTFS.
-3. **Supervisor Persistente contra WSL 2 Idle Standby:** Para impedir que Windows suspenda la maquina virtual WSL 2 y envie un `SIGTERM (signal 15)` al contenedor Docker tras 15–20 segundos de inactividad de consola, el pipeline mantiene abierto el handle de proceso mediante `subprocess.Popen(["wsl.exe", ...])` durante toda la fase de consultas y lo termina de forma limpia en bloques `finally`.
-4. **Renovacion de Sockets Keep-Alive (`max=512`):** El daemon OSRM cierra la conexion tras 512 peticiones. Las consultas masivas se dirigen a `http://127.0.0.1:5000` con `urllib3.util.Retry(total=2, backoff_factor=0.05)` para renovar sockets de forma transparente.
-5. **Fail-Fast ante Caidas:** Monitoreo activo de errores de conexion; tras 5 fallos consecutivos, el enriquecimiento aborta de inmediato las peticiones HTTP y aplica el fallback canonico de Colin en memoria, evitando tiempos de espera acumulativos ($N \times 4\text{s}$).
-
-### 9.3. Desacoplamiento de `drivingPath` y Proteccion contra Limites de V8 en Electron
-Un principio fundamental derivado de la arquitectura nativa de *Subway Builder* es que **las ciudades oficiales creadas por Colin Miller (como Nueva York o Seattle) nunca incluyen geometrias de ruta `drivingPath` en sus archivos de demanda**:
-* **El limite de 512 MB de V8 en Electron:** El motor JavaScript V8 sobre el que corre Electron posee un limite maximo inmutable de 512 megabytes para la longitud de una cadena de texto en memoria (`ERR_STRING_TOO_LONG`).
-* En conurbaciones medianas y grandes (> 15,000 cohortes `pops`), incluir la lista completa de coordenadas GeoJSON de cada trayecto incrementa el tamano de `demand_data.json` por encima de 500 MB. Al intentar parsear o serializar este archivo, el juego colapsa por desbordamiento de memoria o descarta la totalidad de la demanda.
-* **Canon Oficial de Subway Builder Mexico:** El campo `drivingPath` se desacopla y permanece **desactivado por defecto (`include_driving_path: false`)**, consultando OSRM con `overview=false`. Esto reduce el tamano del JSON final a tan solo **1 a 3 MB** y acelera las consultas OSRM en mas de un 400%.
-* Para analisis SIG, visualizacion en QGIS o visores externos, el modelador puede activar explicitamente `include_driving_path: true` en la seccion `routing` de su archivo YAML o mediante la bandera `--include-driving-path` en el CLI.
-
-### 9.4. Huella Criptografica de Red (SHA-256), Cortafuegos de Snapping y Auditoria Espacial
-Para garantizar robustez cientifica ante cambios cartograficos o anomalias topologicas complejas:
-
-1. **Huella Criptografica (SHA-256):**
-   El sistema calcula una firma criptografica compuesta:
-   $$\text{Hash} = \operatorname{SHA-256}\left(\text{BBOX} \,||\, \text{mtime}(PBF) \,||\, \text{size}(PBF) \,||\, \text{hash}(\text{car.lua})\right)$$
-   Si la huella almacenada en `fingerprint.txt` difiere de la ejecucion actual, el grafo MLD en WSL 2 se recompila automaticamente, garantizando que nunca se utilicen grafos desactualizados.
-2. **Cortafuegos de Snapping Extremo (`MAX_WAYPOINT_SNAPPING_METERS = 1500m`):**
-   Si una coordenada de origen o destino se proyecta a mas de 1,500 metros del segmento vial transitable mas cercano (ej. islas, manglares o zonas sin red vial), el ruteo OSRM puede generar atajos aberrantes a traves de cuerpos de agua. El cortafuegos detecta la condicion y desvia automaticamente la cohorte al fallback canonico de Colin.
-3. **Invariantes Fisicas de Circuidad y Distancia Minima:**
-   * **Piso de circuidad:** Se valida que $\text{drivingDistance} \ge d_{\text{euclid}} \times 0.70$. Cualquier valor inferior (imposible en una red de calles reales) es neutralizado.
-   * **Piso de distancia vial:** Todo viaje inter-nodo debe satisfacer $\text{drivingDistance} \ge 150\text{ metros}$.
-4. **Auditoria de Integridad Espacial (`validate_cohort_spatial_integrity`):**
-   Durante la fase de empaquetado, el motor audita al 100% de las cohortes `pops`, certificando que satisfagan los limites fisicos de velocidad promedio ($5\text{ km/h} \le V_{\text{media}} \le 120\text{ km/h}$) y tiempos minimos antes de autorizar la generacion del paquete final.
-
----
-
-## 10. Zonas Topologicas Aisladas (`isolated_zones`)
-
-### 10.1. Tratamiento Hermetico de Islas y Barreras Hidricas Infranqueables
-En conurbaciones costeras que incluyen islas habitadas sin puente vehicular (ej. Isla Mujeres frente a Cancun, Cozumel frente a Playa del Carmen):
-* Un automovilista no puede conducir desde la isla hacia el continente ni viceversa.
-* Si el modelo gravitatorio tratara el espacio como un plano continuo, generaria miles de viajes en automovil sobre las aguas del mar Caribe, distorsionando la demanda y creando viajes imposibles.
-
-Para erradicar esto, el archivo de configuracion de la ciudad (`cities/<city>.yaml`) permite declarar poligonos o bounding boxes de zonas aisladas:
-
-```yaml
-isolated_zones:
-  - id: isla_mujeres
-    name: "Isla Mujeres"
-    bbox: [-86.76, 21.20, -86.68, 21.28]
-```
-
-### 10.2. Ejecucion Estanca del Modelo Gravitatorio por Zona
-El motor clasifica cada coordenada en su zona topologica ($z = 0$ para tierra continental, $z \ge 1$ para cada isla independiente):
-1. **Balanceo de Furness / IPFP Estanco:** El equilibrio bidireccional de la Capa 2 se corre de forma aislada e independiente dentro de cada sub-espacio zonal. Los residentes de Isla Mujeres compiten exclusivamente por los puestos de trabajo existentes dentro de su propia isla.
-2. **Eliminacion de Viajes Trans-Maritimos en Auto:** Se garantiza formalmente que ningun objeto `pop` tenga un `residenceId` en una isla y un `jobId` en el continente (o viceversa), a menos que exista un generador especial de transporte multimodal interurbano (`TRA_Terminal Maritima`).
-
----
-
-## 11. Dimensionamiento Dinamico de Cohortes de Viaje (`Dynamic Cohort Sizing`)
-
-### 11.1. El Compromiso entre Fidelidad Estadistica y Rendimiento (60 FPS WebGL)
-El motor de *Subway Builder* simula a cada individuo de la simulacion agrupado en cohortes denominadas `pops`:
-* **El cuello de botella de rendimiento:** Si una metropoli grande como la ZMVM (6 millones de PEA) o Monterrey (2.5 millones de PEA) se compila con cohortes fijas pequenas (ej. tamano 20 o 35), el archivo resultante contiene entre 80,000 y 150,000 objetos `pop`. Al cargar el JSON en el juego, la simulacion sufre caidas severas de fotogramas (< 15 FPS) o colapso por saturacion de memoria en navegadores de gama media.
-* **El riesgo de sub-muestreo tosco:** Si una ciudad mediana se compila con cohortes gigantes (ej. tamano 150), se generan menos de 3,000 `pops`, lo que provoca que los trenes se llenen con pulsos toscos e intermitentes, vaciando estaciones intermedias y arruinando el realismo visual.
-
-### 11.2. Formulacion Adaptativa de Tamano de Cohorte
-Para garantizar una experiencia visual y de rendimiento optima en cualquier escala urbana, `sb_mexico` ajusta dinamicamente el tamano objetivo de cohorte en funcion de la masa total de PEA metropolitana:
-
-$$\text{target\_pop\_size} = \max\left(35, \ \operatorname{round}\left(\frac{\text{PEA}_{\text{total}}}{18{,}000}\right)\right)$$
-
-| Rango de PEA Metropolitana | Ejemplo de Ciudad | Tamano Objetivo de Cohorte | Total Estimado de Pops | Rendimiento WebGL |
-| :--- | :--- | :--- | :--- | :--- |
-| **< 600,000** | Cancun, Campeche, Pachuca | $35$ | 12,000 – 17,000 | 60 FPS Solido |
-| **600,000 – 1,500,000** | Queretaro, Merida, Tijuana | $40 – 75$ | 15,000 – 20,000 | 60 FPS Solido |
-| **1,500,000 – 3,000,000** | Guadalajara, Monterrey, Puebla | $85 – 150$ | 18,000 – 22,000 | 60 FPS Fluido |
-| **> 3,000,000** | Zona Metropolitana Valle de Mexico | $150 – 250$ | 20,000 – 25,000 | 60 FPS Estable |
-
-### 11.3. Limites Estrictos de Cohorte y Fusion de Viajes Idénticos
-Para erradicar micro-cohortes ineficientes generadas por la discretizacion estocastica de marginales residuales, el pipeline implementa la funcion `merge_identical_commutes`:
-1. **Piso Minimo (`min_pop_size = 25`):** Agrupa o fusiona viajes redundantes entre el mismo par `(residenceId, jobId)`. Si una cohorte residual no alcanza el umbral minimo de 25 personas, se redistribuye hacia la cohorte mas afin del mismo origen para no sobrecargar el hilo WebGL con paquetes minusculos de 1 a 5 personas.
-2. **Techo Canonico (`max_pop_size = 200`):** En estricto respeto a la arquitectura de Colin Miller, ninguna cohorte puede superar 200 personas. Si un par masivo acumula 650 personas, se divide limpiamente en cohortes discretas (`[200, 200, 200, 50]`).
-
----
-
-## 12. Metadatos del Escenario y Camara Inicial Centrada en Masa
-
-### 12.1. Esquema Canonico JSON de Subway Builder
-El archivo de demanda compilado `demand_data.json` cumple estrictamente con el esquema oficial del juego:
-
-* **Objeto `points` (Demand Points):** Exactamente 5 propiedades requeridas por el motor:
-  1. `id` (string): Identificador unico (ej. `"dp_0142"`, `"AIR_Cancun"`).
-  2. `location` (array de floats): `[longitud, latitud]`.
-  3. `jobs` (entero): Volumen de empleos asignados para dimensionar burbujas rojas.
-  4. `residents` (entero): Volumen de residentes asignados para dimensionar burbujas azules.
-  5. `popIds` (array de strings): Lista de identificadores de cohortes asociadas a este nodo.
-* **Objeto `pops` (Cohortes de Viaje Commuter):** Exactamente 6 propiedades requeridas:
-  1. `id` (string): Identificador unico de cohorte (ej. `"pop_004521"`).
-  2. `size` (entero): Cantidad exacta de pasajeros que integran la cohorte.
-  3. `residenceId` (string): Llave foranea al punto de origen residencial.
-  4. `jobId` (string): Llave foranea al punto de destino laboral o especial.
-  5. `drivingSeconds` (entero): Tiempo de manejo estimado sobre la red vial real.
-  6. `drivingDistance` (entero): Distancia de recorrido vehicular en metros.
-
-### 12.2. Camara Viewport Inicial: Modo Manual 16:9 y Baricentro de Masa
-Al abrir un mapa nuevo, el juego posiciona la vista en las coordenadas declaradas en los metadatos del escenario:
-* **Encuadre Manual Interactivo 16:9 (`initial_center` & `initial_zoom`):** En el Paso 1 del Wizard Studio, el modelador dispone de un marco de encuadre en proporcion cinematografica 16:9 con un boton de captura rapida. Al pulsar el boton, se guardan las coordenadas y nivel de zoom exactos que el jugador experimentara en su primer dia de partida.
-* **Fallback Automatico (Baricentro de Masa Humana):** Si no se configuran coordenadas manuales, el motor ancla la camara en el baricentro ponderado de la poblacion activa censal:
-  $$\text{cam\_lat} = \frac{\sum_i \text{PEA}_i \cdot \text{lat}_i}{\sum_i \text{PEA}_i}, \qquad \text{cam\_lon} = \frac{\sum_i \text{PEA}_i \cdot \text{lon}_i}{\sum_i \text{PEA}_i}$$
-  Esto previene que la camara aparezca sobre el oceano o en predios baldios despoblados.
-
----
-
-## 13. Zonificacion Concentrica (Urban Core AOI LOD) y Filtrado de Parques
-
-### 13.1. La Paradoja de los Horizontes Infinitos vs. Carga Grafica 3D
-En metropolis extensas o conurbaciones con amplias franjas de selva, montana o mar (como Cancun y Riviera Maya, Monterrey o el Valle de Mexico), compilar la totalidad del BBOX metropolitano con edificios 3D y calles menores residenciales satura las teselas vectoriales (`.pmtiles`), elevando su peso por encima de 150 MB y causando estrangulamiento de GPU o colapso por falta de memoria (OOM).
-
-Para resolver esta contradiccion, `sb_mexico` implementa **Zonificacion Concentrica de Nivel de Detalle (Urban Core AOI LOD)**:
-1. **Delimitacion del Poligono Nucleo (`urban_core_polygon`):** El usuario traza el perimetro de la mancha urbana densa en el mapa interactivo del Wizard o solicita el calculo automatico mediante envolvente concava (*Concave Hull*) sobre los microdatos censales de manzanas (`/api/auto-urban-polygon`).
-2. **Filtrado Concéntrico en WSL 2 (`apply_urban_lod_filtering`):**
-   * Sobre el **BBOX metropolitano completo**, `osmium tags-filter` conserva autopistas, carreteras primarias, secundarias, vias ferreas, lineas de costa y lagos para garantizar un horizonte continuo y red interurbana conectada, omitiendo etiquetas de lugares perifericos.
-   * Dentro del **poligono del nucleo urbano**, se preserva la totalidad de la red capilar (calles residenciales, peatonales, andadores) y la toponimia de asentamientos locales.
-3. **Restriccion de Edificios 3D (`patch_urban_core_lod`):** La generacion de volumenes tridimensionales se restringe estrictamente a las huellas contenidas dentro de `urban_core_polygon`, ahorrando hasta un 80% en tiempo de compilacion y tamano de teselas sin romper la estetica de la simulacion.
-4. **Supresion de Etiquetas Fuera del Nucleo (`patch_urban_core_labels`):** Parche cartografico que descarta etiquetas toponimicas de asentamientos (`cities`, `suburbs`, `neighborhoods`) que caigan fuera del contorno de `urban_core_polygon` (`SB_URBAN_CORE_GEOJSON`), asegurando una periferia limpia y libre de texto flotante innecesario.
-
-### 13.2. Filtrado de Macro-Parques Urbanos (`urban_parks_only`)
-En OpenStreetMap, gigantescas areas rurales, selvas virgenes, reservas de biosfera y sierras nacionales a menudo estan etiquetadas como `leisure=nature_reserve` o `boundary=protected_area`. Al renderizarse, tiñen arbitrariamente de verde oscuro cientos de kilometros cuadrados rurales.
-
-Cuando `urban_parks_only: true` (o mediante la opcion en el Wizard), el motor cartografico en WSL 2 aplica el parche `patch_urban_parks` (`SB_URBAN_PARKS_ONLY=1`), descartando reservas masivas no urbanizadas y preservando unicamente parques recreativos, plazas, jardines y camellones cívicos.
-
----
-
-## 14. Motor Cartografico Resiliente en WSL 2, Regla "Campus Wins" y Optimizaciones
-
-### 14.1. Regla Canonica "Campus Wins" y Etiquetado Dual
-En la cartografia de *Subway Builder*, los poligonos de zonificacion urbana (residencial, comercial, educativo) deben distinguirse sin artefactos visuales superpuestos:
-* **La Falla del Solapamiento Comercial/Universitario:** En muchas ciudades universitarias, los campus centrales contienen locales comerciales (bancos, librerias, cafeterias). Si el motor vectorial renderiza ambos poligonos en el mismo espacio, el estilo comercial sobrescribe el campus, desapareciendo la representacion visual de la universidad.
-* **Solucion Canonica "Campus Wins":** El parche `patch_campus_wins` en `tools/patch_depot_wsl.py` construye una mascara vectorial continua del campus (`college_mask = unary_union(college_geoms)`) y sustrae dicha mascara de todos los poligonos comerciales superpuestos (`geom.difference(college_mask)`).
-* **Etiquetado Dual:** Se inyectan explicitamente los pares `type: 'college', kind: 'college'` y `type: 'commercial', kind: final_kind`, asegurando que los estilos Mapbox GL / PMTiles rendericen el color cívico-educativo prioritario.
-
-### 14.2. Motor Resiliente de Edificios 3D y Salvaguardas de RAM
-* **Simplificacion Nativa en GeoPandas (`patch_resilient_buildings`):** depot.maps dependia originalmente de comandos CLI de Mapshaper ejecutados mediante Node.js, los cuales fallaban silenciosamente ante geometrias complejas o limites de argumentos en la consola de Linux. El parche sustituye la llamada por una rutina vectorial vectorizada en GeoPandas/Shapely, garantizando simplificacion geometrica robusta e inmune a fallos externos.
-* **Salvaguarda de RAM en MapGen (`patch_ram_safety`):** Corrige un desbordamiento numerico interno en MapGen donde la memoria disponible en gigabytes se multiplicaba dos veces consecutivas por 1024, provocando que procesos de compilacion en maquinas con 16 GB de RAM intentaran reservar terabytes virtuales y fueran eliminados por el OOM Killer del kernel de Linux.
-* **Aceleracion Oceanica y Mascara de Agua:** Desbloqueo del 100% de los nucleos de CPU para el procesamiento de batimetria marina y optimizacion de la mascara de agua a nivel de zoom $z=14$ (en lugar de $z=15$), acelerando el tiempo de procesamiento oceanico en mas de un 60%.
-* **Supresion de Etiquetas Fuera del Nucleo (`patch_urban_core_labels`):** Descarta etiquetas toponimicas de asentamientos perifericos fuera del perimetro urbano denso para mantener limpios los horizontes rurales.
-
----
-
-## 15. Cuadro Maestro de Estandares de Calidad S-Tier
-
-| Componente | Estandar Tecnico | Metodologia Implementada | Garantia de Calidad |
-| :--- | :--- | :--- | :--- |
-| **Conservacion de Masa** | $\sum \text{Pops} \equiv \sum \text{PEA}$ | Asignacion Multinomial Acotada a Priori y Deduccion de Presupuesto | $\Delta = 0$ personas (cero perdidas, cero inflacion) |
-| **Limites de Cohorte** | 60 FPS WebGL Continuos | Tamano adaptativo `target_pop_size`, piso `min_pop_size=25` y techo `max_pop_size=200` | Archivo liviano y eliminacion de micro-pops ineficientes |
-| **Generadores Especiales** | Cuotas Exactas de Demanda | Modelo en Dos Capas con Deduccion de Presupuesto ($\beta_{\text{esp}}=0.04$) | 100% de la cuota oficial en tooltips y flujos |
-| **Calibracion de Empleo** | Control Censal CE 2024 / SAIC | Ponderacion Territorial BBOX y Clamping Asimetrico acotado a $TIL_1$ | Grandes empresas intactas (1.0x), micro acotado a informalidad |
-| **Proyecciones Temporales** | Base 2024–2026 Homogenea | Factores oficiales CONAPO intercensales auditados por municipio en Wizard | Refleja dinamismo demografico sin desfase temporal |
-| **Georreferenciacion Censal** | Cero Megapuntos Artificiales | Cascada cuadruple (MGM $\to$ DENUE) y `dropna()` estricto | Cero imputacion arbitraria al centro de BBOX |
-| **Zonas de Alta Afluencia** | Atraccion Territorial Diferenciada | Modulacion de $\beta_j$ con reach_bonus y regla canonica MAX Priority | Reflejo de CBDs y corredores sin distorsionar POIs manuales |
-| **Zonas de Exclusion** | Cero Demanda en Zonas No Habitables | Supresion de celdas censales en lagunas/manglares preservando mapas 3D | Cero viajes imposibles sobre agua o reservas naturales |
-| **Zonificacion Concentrica** | Urban Core AOI LOD | Osmium extract, tags-filter, restriccion 3D y supresion de etiquetas perifericas | Horizontes continuos y reduccion de 80% en peso de teselas |
-| **Filtrado de Parques** | Espacios Publicos Civicos | Supresion de selvas y macro-reservas rurales (`urban_parks_only`) | Ciudades limpias sin saturacion de verde rural |
-| **Ruteo Vial OSRM** | Red Vial Real OSM | OSRM (`car.lua`) en WSL 2 a flujo libre (~40 km/h) + Fallback Colin | Tiempos y distancias viales exactos sobre pavimento real |
-| **Seguridad V8 en Electron** | Desacoplamiento de `drivingPath` | Desactivado por defecto (`include_driving_path: false`), OSRM `overview=false` | Total inmunidad contra el limite de 512 MB (`ERR_STRING_TOO_LONG`) |
-| **Salvaguardas Espaciales** | Cortafuegos y Huella SHA-256 | Huella SHA-256 de red, snapping firewall (1500m) e invariantes fisicas | Cero atajos aberrantes a traves de barreras de agua |
-| **Regla "Campus Wins"** | Disyuntividad Institucional | Sustraccion de `college_mask` y etiquetado dual `type: college, kind: college` | Representacion universitaria visible sin sobreescritura comercial |
-| **Resiliencia en WSL 2** | Estabilidad de Compilacion 3D | Simplificacion GeoPandas nativa, parches de RAM y supervisor persistente | Compilacion confiable y reproducible en Ubuntu WSL 2 |
-| **Aislamiento Insular** | Cero Conduccion sobre el Agua | Particionamiento zonal estanco (`isolated_zones`) | Cero viajes trans-maritimos en automovil |
-| **Encuadre Inicial Dia 1** | Viewport Centrado en Masa | Encuadre 16:9 interactivo con fallback automatico a baricentro de PEA | Camara siempre aterriza sobre el corazon civico poblado |
-| **Esquema JSON** | Canonico de Colin / Kronifer | 5 propiedades en points, 6 en pops, cero llaves espurias | Compatibilidad nativa sin cierres inesperados del juego |
-| **Suite de Pruebas** | Calidad Rigurosa Garantizada | **162 pruebas unitarias automatizadas aprobadas** | Cobertura integral de pipeline, algoritmos y codificacion |
-| **Integridad de Codificacion** | Universal UTF-8 sin BOM | Terminaciones LF, sin emojis SMP en cabeceras | Cero mojibake o errores de decodificacion en Windows |
-| **Ruteo de Pasajeros (Runtime)** | range-RAPTOR (rRAPTOR) | Delling, Pajor & Werneck (2012), ventana 30 min y transbordos a pie | Evaluacion inteligente de servicios locales vs. expres |
-| **Tiempo Percibido (Perceived Time)** | Metanalisis de Wardman et al. | Ponderaciones empiricas (1.0x tren, 1.39x caminata, 1.37x andén, 0.4x retardo) | Modelado exacto del costo generalizado |
-| **Eleccion Modal por Ingreso** | Modelo de Eleccion Discreta | Tao, Wu et al. (2020), VOT heterogeneo por nivel de ingreso barrial | Curva elastica y gradual de captacion de pasajeros |
-
----
-
-## 16. Referencias Bibliograficas y Fuentes Cientificas
-
-1. **Delling, D., Pajor, T., & Werneck, R. F. (2012).** *Round-based public transit routing (RAPTOR).* In Proceedings of the Fourteenth Workshop on Algorithm Engineering and Experiments (ALENEX), pp. 130–140. SIAM / Microsoft Research. [Enlace ALENEX](https://www.microsoft.com/en-us/research/wp-content/uploads/2012/01/raptor_alenex.pdf).
-2. **Wardman, M. et al. (2026).** *Values of travel time savings and perceived-time multipliers: A worldwide meta-analysis.* Transportation Research Part A / Part B. [Enlace ScienceDirect](https://www.sciencedirect.com/science/article/pii/S0965856426000662).
-3. **Tao, S., Wu, J., Liang, C., & Wang, W. (2020).** *Unraveling the impact of travel time, cost, and transit burdens on commute mode choice for different income and age groups.* Transportation Research Part A: Policy and Practice, 141, 360–377. [DOI: 10.1016/j.tra.2020.07.020](https://doi.org/10.1016/j.tra.2020.07.020).
-4. **Miller, C. (2026).** *How the game simulates commuters: Timetables, rRAPTOR routing, perceived time, and mode choice.* Redistricter, LLC. [Subway Builder Simulation](https://www.subwaybuilder.com/simulation).
-5. **Furness, K. P. (1965).** *Time Function Iteration.* Traffic Engineering & Control, 7(7), 458–460.
+# Metodología vigente de Subway Builder México
+
+Actualizada el 2026-10-05. Describe el camino predeterminado del pipeline y del
+Wizard. Las selecciones explícitas de métodos anteriores permiten reproducir
+proyectos históricos; no deben confundirse con este comportamiento.
+
+## Fuentes y significado de los conteos
+
+| Fuente | Uso actual | Límite |
+| --- | --- | --- |
+| CPV 2020, RESAGEBURB | POCUPADA publicada por manzana como origen residencial | Reconstrucción acotada de registros sin conteo utilizable |
+| Marco Geoestadístico | Colocación residencial con geometría oficial, por localidad | La cobertura retenida se registra; no se imputa el centro del BBOX |
+| CONAPO | Factores municipales de crecimiento demográfico al año seleccionado | Proyectar población no mide empleo nuevo ni su distribución real |
+| DENUE | Coordenadas, SCIAN y bandas de personal ocupado como atracción laboral | Las bandas no son headcounts exactos ni un registro exclusivamente formal |
+| CE / SAIC | Referencia histórica y medias municipales de sector/tamaño donde hay detalle utilizable | Comparabilidad temporal, cobertura y unidad de observación condicionan su uso |
+| ENOE | Indicadores estatales que el Wizard puede inspeccionar y guardar | El camino actual no añade empleos mediante TIL1 |
+| OSM / OSRM | Cartografía y métricas viales de los pares exportados | Perfil de automóvil en flujo libre; los respaldos estimados se reportan |
+
+Este pipeline no ingiere flujos O/D observados. Utiliza demanda gravitatoria
+sintética. Conservar objetivos del modelo no los convierte en mediciones.
+
+## Orígenes residenciales
+
+El método `census_employed` utiliza POCUPADA de 2020 cuando está publicada.
+Aplica reconstrucción acotada donde falta un conteo utilizable, dejando constancia
+de la cobertura y masa reconstruida. No deriva toda la distribución residencial
+de una tasa ENOE estatal uniforme. Esa fórmula pertenece a la selección `legacy`.
+
+Los factores municipales CONAPO se aplican como supuesto de proyección de la
+masa de origen al año del modelo. El reporte distingue año solicitado/efectivo,
+base del factor y masa excluida por filtros espaciales. La selección de geometría
+oficial respeta localidades, manzanas/AGEB, exclusiones y núcleo urbano.
+
+El presupuesto entero autorizado se fija sobre la demanda retenida y agregada
+por el grid. Se conserva su correspondencia con los puntos finales después del
+clustering; el display sincronizado no es la evidencia independiente del presupuesto.
+
+## Destinos laborales y referencia CE
+
+El método `auto` inspecciona las fuentes del proyecto mediante el mismo mecanismo
+para todas las ciudades. No exige una excepción específica para Cancún.
+
+Si existen celdas utilizables de personal ocupado y establecimientos por municipio,
+sector y tamaño, se construye un contrato ligado a esas fuentes. La transferencia
+histórica emplea la media personal ocupado / establecimientos en cada grupo,
+acotada por la banda DENUE aplicable. Se aplica sobre registros clasificados de
+DENUE antes del recorte espacial. Los registros o grupos no transferibles conservan
+sus priors acotados y se reportan como respaldo.
+
+En el CUR verificado, la referencia es actividad de 2023, con grupos municipales
+de sectores SCIAN 31–33, 43, 46, 53 y 72 y estratos de tamaño publicados. Tener
+SCIAN de seis dígitos en DENUE no significa disponer de controles CE de seis
+dígitos. La media histórica sobre establecimientos actuales no fuerza la suma
+actual a igualar el total CE de 2023.
+
+Sin ese detalle utilizable, el modo `ce_bounded` conserva estimaciones DENUE
+acotadas sin ajuste CE no autorizado. El reporte explica la razón del respaldo.
+La presencia de un archivo CE no certifica comparabilidad ni un ajuste a sus totales.
+
+No se crea una capa adicional de empleo informal mediante TIL1, ni se afirma
+completitud rural, empleo formal exacto o intensidad observada por establecimiento.
+La banda superior 251+ sigue abierta. Las ubicaciones iniciales provienen de
+DENUE; el grid, snapping y clustering producen puntos finales agregados, no
+necesariamente las coordenadas intactas de cada establecimiento. Los POIs
+especiales mantienen su política de cuotas separada.
+
+## Gravedad, soporte e integerización
+
+`balanced_integer_v1` es el método predeterminado compartido. La propuesta inicial
+conserva la gravedad, semilla, fricción, alcance, afluencia y asignación de POIs
+configurados. El ajuste de objetivos por presupuesto alcanzable ya existente se
+documenta con objetivos solicitados y efectivos; no es calibración estadística CE.
+
+Después de finalizar la geometría:
+
+1. Se agregan los presupuestos originales por ID final y se descuenta el consumo
+   realizado de POIs, conservando sus cuotas y ubicaciones.
+2. Se agregan objetivos de destino solicitados y efectivos. Solo se corrige ruido
+   acumulado de suma float32 dentro de un límite comprobado, antes de fijar objetivos.
+3. Se prohíben auto-viajes y cruces entre zonas aisladas. El respaldo preexistente
+   a cinco vecinos para filas/columnas sin soporte se registra y también excluye self.
+4. Se redondean conjuntamente los destinos a piso/techo, con suma exacta por zona
+   y factibilidad sobre el soporte permitido.
+5. Se repara la propuesta mediante flujo residual entero sobre soporte disperso,
+   ampliándolo con vecinos permitidos si hace falta. No se afirma optimalidad
+   global de costos. Una incompatibilidad completa produce diagnóstico explícito.
+6. Se divide o fusiona cada par O/D por separado. El máximo de cohorte es obligatorio;
+   el mínimo es una preferencia. Un residuo pequeño nunca se mueve a otro par.
+
+Las cohortes conservan exactamente los presupuestos enteros de origen, objetivos
+enteros de destino y masas por par. Se comparan contra vectores independientes
+antes de retirar huérfanos, después de empaquetar y leyendo el JSON y ZIP finales.
+El error de redondeo fraccionario se reporta por separado del residual entero.
+
+El campo de display `jobs` representa llegadas realizadas del modelo, no empleo
+CE observado. Esta corrección no acredita automáticamente la categoría
+`synthetic_measured_marginals` ni aumenta un tier de calidad.
+
+## Rutas, exportación y Wizard
+
+OSRM enriquece los pares finales con distancia y tiempo vial sin alterar sus
+cantidades. Se usa respaldo canónico cuando corresponde y se registra su motivo.
+Las zonas aisladas, exclusiones, POIs, proyección y política de empleo conservan
+sus contratos independientes.
+
+El Wizard compila en una carpeta de build aislada y vincula la descarga a proyecto,
+configuración, resultado y hash. Su preview lee ese mismo artefacto y valida el
+contrato de asignación; no ejecuta un segundo simulador distinto. Los diagnósticos
+permanecen en sidecars y no añaden campos al esquema de demanda del juego.
+
+## Evidencia de la revisión CUR y MID
+
+CUR conserva 898,658 viajeros (848,780 continente y 49,878 Cozumel), con 2,710
+puntos y 27,966 cohortes. Cero diferencias contra los márgenes enteros autorizados,
+auto-viajes o cruces de zonas. Las cuotas de los 13 POIs permanecen conservadas.
+La prueba adicional MID conserva 799,587 viajeros y usa el respaldo DENUE.
+
+La comparación de fases CUR midió 91.51 s frente a 105.74 s de referencia y
+prácticamente el mismo pico de memoria. Pasaron 103 pruebas de corrección y las
+comprobaciones de preview/descarga de ambos paquetes. El usuario confirmó que el
+candidato funciona en el juego; esa evidencia es reportada por el usuario, no
+una prueba automatizada de importación, guardado o recarga.
+
+Estos resultados corresponden a builds locales verificados. Actualizar el código
+del pipeline no sustituye automáticamente un paquete publicado en el registry.
+
+La implementación y contrato detallados están en [docs/od-integer-allocation.md](docs/od-integer-allocation.md).
+Los reportes reproducibles locales están en `reports/od-marginals-correction/`.

@@ -425,6 +425,9 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
     if 'workplace_employment' in macro_cfg:
         from sb_mexico.workplace_employment import validate_workplace_mode
         lines.append(f'  workplace_employment: {_yaml_quote(validate_workplace_mode(macro_cfg["workplace_employment"]))}')
+    if 'od_allocation' in macro_cfg:
+        from sb_mexico.config_defaults import validate_od_allocation_mode
+        lines.append(f'  od_allocation: {_yaml_quote(validate_od_allocation_mode(macro_cfg["od_allocation"]))}')
     if 'workplace_control_contract' in macro_cfg:
         from sb_mexico.historical_benchmark import validate_historical_contract
         validate_historical_contract(macro_cfg['workplace_control_contract'])
@@ -1987,6 +1990,16 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                     points = demand_json.get("points", [])
                     demand_json["distance_distribution"] = calculate_commute_distance_distribution(pops, points)
                     demand_json.setdefault('metadata', {})['package_available'] = package_available
+                    allocation_path = os.path.join(os.path.dirname(target_path), 'od_allocation_report.json')
+                    if os.path.isfile(allocation_path):
+                        with open(allocation_path, encoding='utf-8') as stream:
+                            allocation = json.load(stream)
+                        if allocation.get('mode') == 'balanced_integer_v1':
+                            from sb_mexico.od_allocation import validate_integer_margins
+                            validation = validate_integer_margins(pops, allocation)
+                            demand_json['metadata']['od_allocation'] = dict(
+                                mode=allocation['mode'], semantics=allocation['semantics'],
+                                validation=validation, small_cohorts=allocation['small_cohorts'])
                     self.serve_json(demand_json)
                 except Exception as e:
                     self.serve_error(f"Error al leer demand_data.json de {city_base}: {e}", 500)

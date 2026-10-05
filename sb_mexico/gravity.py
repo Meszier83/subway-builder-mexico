@@ -1713,7 +1713,8 @@ def cluster_demand_points(
     buffer_meters: Optional[List[float]] = None,
     isolated_zones: Optional[List[Dict]] = None,
     exclusion_zones: Optional[List[Dict]] = None,
-    urban_core_polygon: Optional[Any] = None
+    urban_core_polygon: Optional[Any] = None,
+    mapping_diagnostics: Optional[Dict] = None
 ) -> Tuple[List[Dict], List[Dict]]:
     """
     Agrupa y fusiona espacialmente puntos de demanda contiguos según el método de clustering
@@ -1721,6 +1722,8 @@ def cluster_demand_points(
     Protege 100% de los POIs especiales (aeropuertos, universidades, estadios).
     """
     if not demand_points or not pops:
+        if mapping_diagnostics is not None:
+            mapping_diagnostics.update({p['id']: p['id'] for p in demand_points})
         return demand_points, pops
 
     if max_pop_threshold is None:
@@ -1732,6 +1735,8 @@ def cluster_demand_points(
     regular_pts = [p for p in demand_points if not p.get("is_special", False)]
 
     if not regular_pts:
+        if mapping_diagnostics is not None:
+            mapping_diagnostics.update({p['id']: p['id'] for p in demand_points})
         return demand_points, pops
 
     # A cluster must never contain both endpoints of a positive commute.
@@ -1744,8 +1749,10 @@ def cluster_demand_points(
             commute_neighbors[residence].add(job)
             commute_neighbors[job].add(residence)
 
-    res_by_id = {p["id"]: sum(pop["size"] for pop in pops if pop["residenceId"] == p["id"]) for p in regular_pts}
-    jobs_by_id = {p["id"]: sum(pop["size"] for pop in pops if pop["jobId"] == p["id"]) for p in regular_pts}
+    res_by_id, jobs_by_id = defaultdict(int), defaultdict(int)
+    for pop in pops:
+        res_by_id[pop['residenceId']] += pop['size']
+        jobs_by_id[pop['jobId']] += pop['size']
     sizes = np.array([res_by_id[p["id"]] + jobs_by_id[p["id"]] for p in regular_pts], dtype=np.float64)
 
     isort = np.argsort(sizes)[::-1]
@@ -1839,6 +1846,9 @@ def cluster_demand_points(
         })
 
     merged_pts.extend(special_pts)
+    if mapping_diagnostics is not None:
+        mapping_diagnostics.update(point_mapping)
+        mapping_diagnostics.update({p['id']: p['id'] for p in special_pts})
     return merged_pts, updated_pops
 
 
