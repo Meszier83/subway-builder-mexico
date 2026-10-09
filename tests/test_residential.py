@@ -86,6 +86,21 @@ class TestResidentialPlacement(unittest.TestCase):
             placed = self.cpv(marco_paths=['test.shp'])
         self.assertTrue(placed.empty)
 
+    def test_localityless_fallback_preserves_matches_ambiguity_and_row_order(self):
+        from sb_mexico.residential import _match_points, BLOCK_KEYS
+        census = pd.DataFrame(dict(cve_mun_clean=['23001','23002','23002','23003','23003','23004','23005'],
+                                   loc_clean=['0001','0001','0001','0001','0002',None,'0001'],
+                                   ageb_clean=['0001']*7, mza_clean=['001']*7), index=[21,14,30,2,88,9,65])
+        targets = pd.DataFrame(dict(cve_mun_clean=['23001','23002','23003','23004','23005'],
+                                   loc_clean=['0001',None,None,None,None],
+                                   ageb_clean=['0001']*5, mza_clean=['001']*5,
+                                   lon_geo=[-86.7,-86.8,-86.9,-86.6,-86.5],
+                                   lat_geo=[21.1,21.2,21.3,21.4,float('nan')]))
+        matched = _match_points(census, targets, BLOCK_KEYS)
+        expected = pd.DataFrame(dict(lon=[-86.7,-86.8,-86.8,float('nan'),float('nan'),-86.6,float('nan')],
+                                     lat=[21.1,21.2,21.2,float('nan'),float('nan'),21.4,float('nan')]), index=census.index)
+        pd.testing.assert_frame_equal(matched, expected)
+
     def test_full_cvegeo_preferred(self):
         frame = self.layer(localities=['0002'])
         frame['CVEGEO'] = '2300500010001001'

@@ -279,13 +279,10 @@ def save_city_data(
     new_places_block = ""
     if new_places is not None and len(new_places) > 0:
         places_yaml_lines = ["# Toponimia y Colonias Curadas (Inyección de etiquetas en .pmtiles)", "places:"]
-        for pl in new_places:
-            pl_name = pl.get("name", "Colonia")
-            pl_loc = pl.get("loc", [0.0, 0.0])
-            pl_type = pl.get("type", "suburb")
-            places_yaml_lines.append(f'  - name: {_safe_q(pl_name)}')
-            places_yaml_lines.append(f'    loc: [{pl_loc[0]:.5f}, {pl_loc[1]:.5f}]')
-            places_yaml_lines.append(f'    type: {_safe_q(pl_type)}')
+        from sb_mexico.place_identity import serialize_places
+        for place in serialize_places(new_places):
+            places_yaml_lines.extend('  ' + line for line in yaml.safe_dump(
+                [place], allow_unicode=True, sort_keys=False).rstrip().splitlines())
         new_places_block = "\n".join(places_yaml_lines) + "\n"
 
     # 3. Preservación modular de bloques evitando cualquier truncamiento destructivo
@@ -439,9 +436,25 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "", ignore_urb
                 "raw_jobs": int(round(raw_j)) if raw_j is not None else int(round(p.get("jobs", 0))),
                 "residents": float(p.get("residents", 0)),
                 **({'employed_residents': float(p['employed_residents'])}
-                   if 'employed_residents' in p else {})
+                   if 'employed_residents' in p else {}),
+                **({'labor_commuters': float(p['labor_commuters'])}
+                   if 'labor_commuters' in p else {})
             })
         return clean_pts
+
+    if (cdata or {}).get('demand', {}).get('engine') == 'v2':
+        import copy
+        from sb_mexico.demand_v2.integration import preview_candidate
+        candidate_config = copy.deepcopy(cdata)
+        if ignore_urban_core:
+            candidate_config['city']['restrict_demand_to_urban_core'] = False
+        if bbox:
+            candidate_config['city']['bbox'] = bbox
+        preview = preview_candidate(candidate_config, ROOT_DIR, target_data_dir,
+            os.path.join(ROOT_DIR, 'dist', city_base, 'roads.geojson'))
+        diagnostics.update(engine='v2', identity=preview['identity'], candidate_report=preview['report'])
+        # Existing reference layers intentionally omit POIs; the adapter still applies their rules.
+        return _clean_and_filter(preview['points'], bbox)
 
     # Detectar archivos DENUE y Censo en target_data_dir
     denue_files = []
@@ -489,11 +502,14 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "", ignore_urb
                                 for path in signature_files], version=3,
                          code=[hashlib.sha256((Path(ROOT_DIR) / source).read_bytes()).hexdigest()
                                for source in ('sb_mexico/inegi.py', 'sb_mexico/residential.py',
-                                              'sb_mexico/residential_employment.py', 'sb_mexico/source_identity.py', 'sb_mexico/config_defaults.py',
+                                              'sb_mexico/residential_employment.py', 'sb_mexico/demographic_reference.py', 'sb_mexico/source_identity.py', 'sb_mexico/config_defaults.py',
                                               'sb_mexico/workplace_employment.py',
                                               'sb_mexico/ce_controls.py', 'sb_mexico/historical_benchmark.py', 'sb_mexico/historical_transfer.py', 'sb_mexico/automatic_workplace.py',
                                               'sb_mexico/population_projection.py', 'tools/poi_studio.py')
                                if (Path(ROOT_DIR) / source).exists()])
+        if (cdata or {}).get('macroeconomics', {}).get('demographic_reference') is not None:
+            from sb_mexico.demographic_reference import reference_identity
+            signature['demographic_reference_sources'] = reference_identity(cdata['macroeconomics'], ROOT_DIR)
         if workplace_mode != 'legacy':
             from sb_mexico.residential_employment import file_sha256
             workplace_sources = sorted(set(denue_files + select_sources(target_data_dir, national_dir, 'ce', exclusions)))
@@ -577,26 +593,31 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "", ignore_urb
                 patterns = ('*pobproy*.csv', '*quinq*.csv', '*pob_proy*.csv',
                             '*conapo*.csv', 'data-*.csv', '*proyeccion*.csv')
                 projection_files = select_sources(target_data_dir, national_dir, 'conapo', exclusions)
-                if projection_files:
+                if projection_files and macro.get('demographic_reference') is None:
                     projections = resolve_population_factors(projection_files[0], cpv_files, macro, projection_report)
                 df_cpv = load_cpv_demography(
                     cpv_files, df_denue if df_denue is not None else pd.DataFrame(),
                     dict(zip(('min_lon', 'min_lat', 'max_lon', 'max_lat'), bbox)),
                     tasa_pea=macro.get('tasa_pea', .62),
-                    growth_factors={**(projections or {}), **macro.get('growth_factors', {})},
+                    growth_factors={**(projections or {}), **macro.get('growth_factors', {})} if macro.get('demographic_reference') is None else {},
                     conapo_projections=None,
-                    default_growth=macro.get('default_growth_factor', 1.0),
+                    default_growth=macro.get('default_growth_factor', 1.0) if macro.get('demographic_reference') is None else 1.0,
                     marco_paths=(discover_marco_layers(target_data_dir)
                                  if city_dict.get('residential_placement', 'legacy') == 'official_blocks'
                                  else select_sources(target_data_dir, national_dir, 'marco', exclusions)),
                     placement_mode=city_dict.get('residential_placement', 'legacy'),
                     employment_mode=employment_mode, projection_year=resolve_projection_year(macro))
+                if macro.get('demographic_reference') is not None:
+                    from sb_mexico.demographic_reference import apply_reference
+                    df_cpv = apply_reference(df_cpv, cpv_files, macro, ROOT_DIR)
+                    projection_report.update(effective_year=2025, year_basis='observed_reference',
+                        demographic_reference=df_cpv.attrs['residential_employment']['demographic_reference'])
                 if diagnostics is not None:
                     diagnostics['residential_placement'] = df_cpv.attrs.get('residential_placement')
                     diagnostics['population_projection'] = projection_report
                     diagnostics['residential_employment'] = df_cpv.attrs.get('residential_employment')
                     attach_source_context(diagnostics['residential_employment'], city_file,
-                                          projection_report, projection_files[:1])
+                                          projection_report, projection_files[:1] if macro.get('demographic_reference') is None else [])
                 if projection_report.get('year_basis') == 'unverified':
                     automatic = set(df_cpv.cve_mun_clean) & set(projections or {}) - set(macro.get('growth_factors', {}))
                     if automatic:
@@ -621,15 +642,20 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "", ignore_urb
             # Joining on a job centroid would relocate the residential preview.
             raw_points = []
             if grp_d is not None:
-                for i, row in grp_d.iterrows():
-                    raw_points.append(dict(id=f'ref_jobs_{i}', location=[float(row.lon), float(row.lat)],
+                for row in grp_d.itertuples():
+                    raw_points.append(dict(id=f'ref_jobs_{row.Index}', location=[float(row.lon), float(row.lat)],
                                            jobs=int(round(row.jobs)), raw_jobs=int(round(row.raw_jobs)), residents=0))
             if df_cpv is not None:
-                for i, row in df_cpv.reset_index(drop=True).iterrows():
+                columns = ['lon', 'lat', 'pobtot_adj'] + (['pea_real'] if employment_mode == 'census_employed' else [])
+                if 'occupied_residents' in df_cpv:
+                    columns.append('occupied_residents')
+                for i, row in enumerate(df_cpv[columns].itertuples(index=False)):
                     raw_points.append(dict(id=f'ref_residential_{i}', location=[float(row.lon), float(row.lat)],
                                            jobs=0, raw_jobs=0, residents=float(row.pobtot_adj),
-                                           **({'employed_residents': float(row.pea_real)}
+                                           **({'employed_residents': float(getattr(row,'occupied_residents',row.pea_real))}
                                               if employment_mode == 'census_employed' else {})))
+                    if 'occupied_residents' in df_cpv:
+                        raw_points[-1]['labor_commuters'] = float(row.pea_real)
             try:
                 import uuid
                 temporary = cache_path.with_name(cache_path.name + '.' + uuid.uuid4().hex + '.tmp')
@@ -702,41 +728,13 @@ class PoiStudioRequestHandler(BaseHTTPRequestHandler):
                 self.serve_error(str(e), 404)
         elif path == "/api/settlement_suggestions":
             try:
+                from sb_mexico.toponymy import city_settlement_suggestions
                 city_file = query.get("file", [""])[0]
-                bbox = None
-                city_base = ""
-                if city_file:
-                    try:
-                        cdata = load_city_data(city_file)
-                        bbox = cdata.get("city", {}).get("bbox")
-                        city_base = os.path.splitext(os.path.basename(city_file))[0]
-                    except Exception as e:
-                        print(f"[WARN] Error cargando city_data en suggestions: {e}")
+                resolved = _resolve_city_path(city_file)
+                self.serve_json(city_settlement_suggestions(resolved))
+            except Exception as error:
+                self.serve_json({"suggestions": [], "error": str(error)})
 
-                from sb_mexico.toponymy import extract_settlement_suggestions
-                denue_candidates = []
-                if city_base:
-                    denue_candidates.extend(glob.glob(os.path.join(ROOT_DIR, "data", city_base, "*denue*.csv")))
-                    denue_candidates.extend(glob.glob(os.path.join(ROOT_DIR, "dist", city_base, "*denue*.csv")))
-                denue_candidates.extend(glob.glob(os.path.join(ROOT_DIR, "data", "*", "*denue*.csv")))
-                denue_candidates.extend(glob.glob(os.path.join(ROOT_DIR, "data", "*denue*.csv")))
-                denue_candidates.extend(glob.glob(os.path.join(ROOT_DIR, "*denue*.csv")))
-
-                seen = set()
-                valid_denue = []
-                for c in denue_candidates:
-                    if c not in seen and os.path.isfile(c):
-                        seen.add(c)
-                        valid_denue.append(c)
-
-                if valid_denue and bbox:
-                    suggs = extract_settlement_suggestions(valid_denue[0], bbox, min_count=10)
-                else:
-                    suggs = []
-                self.serve_json({"suggestions": suggs})
-            except Exception as e:
-                print(f"[ERROR] En /api/settlement_suggestions: {e}")
-                self.serve_json({"suggestions": [], "error": str(e)})
         elif path == "/api/density":
             city_file = query.get("file", [""])[0]
             bbox = None

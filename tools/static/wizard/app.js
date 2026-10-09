@@ -2637,31 +2637,95 @@
       }, 4000);
     }
 
+    let autoUrbanCoreController = null;
+
+    function setAutoUrbanCoreState(state, message = '') {
+      const running = state === 'running';
+      const button = document.getElementById('btnAutoUrbanCore');
+      if (button) {
+        button.disabled = running;
+        button.setAttribute('aria-busy', String(running));
+      }
+      const label = document.getElementById('btnAutoUrbanCoreText');
+      if (label) label.textContent = running ? 'Calculando…' : 'Auto Censo';
+      const status = document.getElementById('autoUrbanCoreStatus');
+      if (status) {
+        status.hidden = !message;
+        status.dataset.state = state;
+        status.textContent = message;
+      }
+    }
+
+    function cancelAutoUrbanCore() {
+      if (autoUrbanCoreController) autoUrbanCoreController.abort();
+      autoUrbanCoreController = null;
+      setAutoUrbanCoreState('idle');
+    }
+
     async function autoDetectUrbanCore() {
       if (!currentCityFile) {
         showToast("Selecciona o crea un proyecto primero", "warning");
         return;
       }
+      if (autoUrbanCoreController) return;
+      const file = currentCityFile;
+      const version = cityLoadVersion;
+      const controller = new AbortController();
+      autoUrbanCoreController = controller;
+      const isCurrent = () => currentCityFile === file && cityLoadVersion === version && autoUrbanCoreController === controller;
       const reachInput = document.getElementById('cfg_urban_core_reach');
       const reachKm = reachInput ? reachInput.value : '15';
-
-      showToast(`Consultando censo y calculando núcleo urbano (alcance: ${reachKm} km)...`, "info");
+      const started = Date.now();
+      let phase = 'Guardando configuración';
+      const updateProgress = () => {
+        if (isCurrent()) setAutoUrbanCoreState('running', `${phase} · ${Math.floor((Date.now() - started) / 1000)} s. Alcance: ${reachKm} km. La primera consulta puede tardar varios minutos.`);
+      };
+      updateProgress();
+      const progressTimer = setInterval(updateProgress, 1000);
       try {
-        const resp = await fetch(`/api/auto-urban-polygon?file=${encodeURIComponent(currentCityFile)}&reach_km=${encodeURIComponent(reachKm)}`);
-        const data = await resp.json();
-        if (data.status === 'ok' && data.polygon && data.polygon.length >= 3) {
-          if (urbanCoreReachPreviewCircle && mapBbox) {
-            mapBbox.removeLayer(urbanCoreReachPreviewCircle);
-            urbanCoreReachPreviewCircle = null;
-          }
-          setUrbanCorePolygon(data.polygon);
-          showToast(`¡Mancha urbana detectada (${data.reach_km} km, ${data.points_count} puntos censales, ${data.polygon.length - 1} vértices)! Guardando...`, "success");
-          saveCurrentCity(true);
-        } else {
-          showToast(data.message || "No se pudo autodetectar la mancha urbana", "error");
+        const savedConfig = await saveCurrentCity(true);
+        if (!isCurrent()) return;
+        if (!savedConfig) throw new Error('No se pudo guardar la configuración. Revisa Guardar YAML y vuelve a intentarlo.');
+        const previousPolygon = JSON.stringify(cityData.city.urban_core_polygon);
+        phase = 'Leyendo censo y calculando contorno';
+        updateProgress();
+        const data = await fetchStartupJson(`/api/auto-urban-polygon?file=${encodeURIComponent(file)}&reach_km=${encodeURIComponent(reachKm)}`, 'Auto Censo', 600000, controller.signal);
+        if (!isCurrent()) return;
+        if (data.status !== 'ok' || !Array.isArray(data.polygon) || data.polygon.length < 4 ||
+            !data.polygon.every(p => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite))) {
+          throw new Error(data.message || 'No se recibió un contorno válido. Se conservó el contorno anterior.');
         }
+        if (JSON.stringify(cityData.city.urban_core_polygon) !== previousPolygon) {
+          throw new Error('El contorno cambió durante el cálculo. Se conservó tu edición; vuelve a ejecutar Auto Censo.');
+        }
+        if (urbanCoreReachPreviewCircle && mapBbox) {
+          mapBbox.removeLayer(urbanCoreReachPreviewCircle);
+          urbanCoreReachPreviewCircle = null;
+        }
+        setUrbanCorePolygon(data.polygon);
+        if (urbanCoreLayer && mapBbox) mapBbox.fitBounds(urbanCoreLayer.getBounds(), {padding: [28, 28]});
+        phase = 'Contorno calculado; guardando YAML';
+        updateProgress();
+        const savedPolygon = await saveCurrentCity(true);
+        if (!isCurrent()) return;
+        if (!savedPolygon) throw new Error('Contorno calculado, pero no se pudo guardar. Quedó como borrador; pulsa Guardar YAML.');
+        const message = `Contorno guardado: ${data.points_count} puntos, ${data.polygon.length - 1} vértices, alcance ${data.reach_km} km · ${Math.round((Date.now() - started) / 1000)} s.`;
+        setAutoUrbanCoreState('success', message);
+        showToast(message, 'success');
       } catch (err) {
-        showToast(`Error de conexión al autodetectar: ${err.message}`, "error");
+        if (isCurrent()) {
+          setAutoUrbanCoreState('error', err.message);
+          showToast(err.message, 'error');
+        }
+      } finally {
+        clearInterval(progressTimer);
+        if (autoUrbanCoreController === controller) {
+          autoUrbanCoreController = null;
+          const button = document.getElementById('btnAutoUrbanCore');
+          if (button) { button.disabled = false; button.setAttribute('aria-busy', 'false'); }
+          const label = document.getElementById('btnAutoUrbanCoreText');
+          if (label) label.textContent = 'Auto Censo';
+        }
       }
     }
 
@@ -3924,7 +3988,12 @@
     }
 
     function resetProjectSession() {
+      activeZoneClustersData = null;
+      activeZoneClustersContext = null;
+      zoneCalculationVersion++;
       cancelConapoRequest();
+      cancelAutoUrbanCore();
+      cancelToponymyScan();
       densityPoints = [];
       densityLoadedCityFile = null;
       if (mapPoi) {
@@ -4187,6 +4256,7 @@
           ce_bounded:'DENUE acotado, selección manual', historical_transfer:'Transferencia CE manual'}
       };
       const summary = document.getElementById('demandMethodsSummary');
+      if (document.getElementById('cfg_demographic_reference')?.value === 'eic2025') labels.residential.census_employed = 'EIC 2025: población, ocupados y viajeros';
       if (summary) summary.textContent = [labels.placement[placement] || placement,
         labels.residential[residential] || residential, labels.workplace[workplace] || workplace].join(' · ');
       const usesCompatibility = placement !== 'official_blocks' || residential !== 'census_employed' || workplace !== 'auto';
@@ -4311,6 +4381,10 @@
       const mode = report?.mode || cityData.macroeconomics?.workplace_employment || 'auto';
       if (mode === 'auto') return 'Selección AUTOMÁTICA: inspección de fuentes pendiente. Se mostrará si hay transferencia CE o si falta detalle municipal por sector y tamaño.';
       if (mode === 'legacy') return 'Método anterior seleccionado: correcciones de empleo desactivadas.';
+      if (mode === 'historical_fine_transfer') {
+        const coverage = report.coverage.bbox;
+        return `CE histórico ${report.reference_year}: ${(100 * coverage.attraction_share).toFixed(2)}% del peso laboral dentro del BBOX con transferencia al nivel SCIAN compatible más fino; ${coverage.establishments - coverage.transferred_establishments} establecimientos conservan estimaciones DENUE. Antes del recorte urbano y POIs. Motivos de respaldo, universo completo: ${JSON.stringify(report.fallback_reasons || {})}. No son empleos actuales observados.`;
+      }
       if (mode === 'historical_transfer') {
         if (!report || report.transferred_establishments == null) return 'Transferencia histórica CE ACTIVADA por las fuentes seleccionadas. La compilación verificará las fuentes y mostrará cuántos establecimientos conservan estimaciones DENUE.';
         const reasons = {};
@@ -4356,12 +4430,164 @@
       }
     }
 
+    async function previewDemandV2() {
+      const file = currentCityFile;
+      const label = document.getElementById('demandV2Summary');
+      syncStateFromInputs();
+      const state = JSON.stringify(cityData);
+      label.textContent = 'Evaluando candidato…';
+      try {
+        if (!await saveCurrentCity(true)) throw new Error('No se pudo guardar la configuración para comparar.');
+        if (file !== currentCityFile || state !== JSON.stringify(cityData)) return;
+        const previewUrl = `/api/demand-v2-preview?file=${encodeURIComponent(file)}&stage=allocation&async=1`;
+        let response = await fetch(previewUrl);
+        let result = await response.json();
+        while (response.ok && result.status === 'running') {
+          if (file !== currentCityFile || state !== JSON.stringify(cityData)) return;
+          label.textContent = 'Evaluando fuentes y demanda del candidato…';
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          if (file !== currentCityFile || state !== JSON.stringify(cityData)) return;
+          response = await fetch(`${previewUrl}&job=${encodeURIComponent(result.job_id)}`);
+          result = await response.json();
+        }
+        if (file !== currentCityFile || state !== JSON.stringify(cityData)) return;
+        if (!response.ok) throw new Error(result.error || result.message || 'No se pudo evaluar el candidato.');
+        if (result.status === 'error') throw new Error(result.error || 'No se pudo evaluar el candidato.');
+        const territory = result.report.territory;
+        const allocation = result.report.allocation;
+        window.demandV2CohortMetadata = {file,state,commuters:territory.integer_commuters,report:allocation.cohorts};
+        updateCohortTelemetry();
+        const score = value => Number.isFinite(value?.conditional_kl) ? value.conditional_kl.toFixed(4) : 'sin observaciones comparables';
+        const quotas = allocation.poi_quotas || [];
+        const shortfall = quotas.reduce((sum, quota) => sum + (quota.shortfall || 0), 0);
+        const coverage = result.report.workplaces?.coverage?.bbox;
+        const employment = coverage ? `\nEmpleo dentro de la caja, antes de recortes y POIs: ${(100 * coverage.attraction_share).toFixed(2)}% del peso con transferencia histórica CE; el resto conserva estimaciones DENUE.` : '';
+        label.textContent = `Candidato ${result.report.target_year ?? cityData.demand?.target_year ?? 2025} · ${result.points.length} puntos · ${territory.integer_commuters.toLocaleString()} viajeros · ${allocation.cohorts?.actual_count ?? 0} cohortes\nBeta: ${allocation.beta} (${allocation.beta_basis})\nError de proporciones municipales (menor es mejor): continuo ${score(allocation.validation)} · enteros ${score(allocation.validation_integer)}\nPOIs: ${quotas.length} cuotas después de captura DENUE; faltan ${shortfall.toLocaleString()} viajeros.${employment}\nMotor activo: ${cityData.demand?.engine || 'actual'}.`;
+      } catch (error) {
+        if (file === currentCityFile) label.textContent = `Candidato pendiente: ${error.message}`;
+      }
+    }
+
+    function selectedDemandEngine() {
+      const toggle = document.getElementById('cfg_demand_engine');
+      return toggle ? (toggle.checked ? 'v2' : 'legacy') : (cityData.demand?.engine || 'legacy');
+    }
+
+    function updateDemandEngineControls(sources) {
+      const active = selectedDemandEngine() === 'v2';
+      for (const id of ['cfg_residential_placement', 'cfg_residential_employment', 'cfg_workplace_employment', 'cfg_demographic_reference', 'conapoYearSelect', 'btnAutoConapo', 'btnConapoYears', 'btnReplaceConapo']) {
+        const control = document.getElementById(id);
+        if (control) control.disabled = active;
+      }
+      const status = document.getElementById('demandEngineStatus');
+      if (status) status.textContent = active
+        ? 'Activado: nuevo motor · EIC 2025 · manzanas oficiales · empleo automático. Las fuentes se comprueban en Fuentes.'
+        : 'Desactivado: motor legado.';
+      if (status && active && sources) {
+        const labels = {denue:'DENUE', cpv:'Censo 2020', marco:'Marco Geoestadístico', eic:'EIC 2025'};
+        const missing = Object.keys(labels).filter(key => sources[key]?.status !== 'ok');
+        status.textContent += missing.length
+          ? ` Faltan fuentes utilizables: ${missing.map(key => labels[key]).join(', ')}. Ve a Fuentes y usa Preparar descargas.`
+          : ' Fuentes necesarias vinculadas; los datos se validarán al compilar.';
+      }
+    }
+
+    function syncDemandEngineFields() {
+      const macro = cityData.macroeconomics || {};
+      for (const [id, value] of Object.entries({cfg_residential_placement: cityData.city?.residential_placement || 'official_blocks',
+        cfg_residential_employment: macro.residential_employment || 'census_employed',
+        cfg_workplace_employment: macro.workplace_employment || 'auto',
+        cfg_demographic_reference: macro.demographic_reference?.mode || 'projected',
+        cfg_eic_indicators: macro.demographic_reference?.indicators || '',
+        cfg_eic_persons: (macro.demographic_reference?.persons || []).join('\n')})) {
+        const control = document.getElementById(id);
+        if (control) control.value = value;
+      }
+      const year = macro.projection_year || macro.target_year;
+      const yearSelect = document.getElementById('conapoYearSelect');
+      if (year && yearSelect) {
+        if (![...yearSelect.options].some(option => String(option.value) === String(year))) {
+          const option = document.createElement('option'); option.value = year; option.textContent = year;
+          yearSelect.appendChild(option);
+        }
+        yearSelect.value = year;
+      }
+      updateDemandEngineControls();
+    }
+
+    async function onDemandEngineChange() {
+      if (!currentCityFile || !wizardLifecycle.canSave(currentCityFile)) {
+        document.getElementById('cfg_demand_engine').checked = cityData.demand?.engine === 'v2';
+        return;
+      }
+      const active = selectedDemandEngine() === 'v2';
+      cancelConapoRequest();
+      const demand = cityData.demand ||= {};
+      const macro = cityData.macroeconomics ||= {};
+      const fields = ['residential_employment', 'workplace_employment', 'demographic_reference', 'projection_year', 'target_year'];
+      if (active) {
+        if (!demand.wizard_legacy_settings) demand.wizard_legacy_settings = JSON.parse(JSON.stringify({
+          residential_placement: cityData.city.residential_placement,
+          macro: Object.fromEntries(fields.filter(key => key in macro).map(key => [key, macro[key]])),
+          eic_sources: Object.fromEntries(['eic_indicators', 'eic_persons'].filter(key => key in (demand.sources || {})).map(key => [key, demand.sources[key]])),
+        }));
+        demand.engine = 'v2'; demand.target_year = 2025; demand.boundary_policy = 'closed';
+        const sources = demand.sources || {};
+        const previous = macro.demographic_reference;
+        macro.demographic_reference = {mode:'eic2025',
+          previous_projection_year: previous?.previous_projection_year || macro.projection_year || macro.target_year || 2026,
+          indicators: previous?.indicators || sources.eic_indicators?.[0] || '',
+          persons: previous?.persons?.length ? [...previous.persons] : [...(sources.eic_persons || [])]};
+        if (!macro.demographic_reference.indicators || !macro.demographic_reference.persons.length) macro.demographic_reference.pending_download = true;
+        if (demand.sources) { delete demand.sources.eic_indicators; delete demand.sources.eic_persons; }
+        cityData.city.residential_placement = 'official_blocks';
+        macro.residential_employment = 'census_employed'; macro.workplace_employment = 'auto';
+        macro.projection_year = 2025; delete macro.target_year;
+      } else {
+        const previous = demand.wizard_legacy_settings;
+        if (previous) {
+          if (previous.residential_placement === undefined) delete cityData.city.residential_placement;
+          else cityData.city.residential_placement = previous.residential_placement;
+          for (const key of fields) {
+            if (key in previous.macro) macro[key] = JSON.parse(JSON.stringify(previous.macro[key]));
+            else delete macro[key];
+          }
+          if (previous.eic_sources && Object.keys(previous.eic_sources).length) Object.assign(demand.sources ||= {}, previous.eic_sources);
+          delete demand.wizard_legacy_settings;
+        }
+        demand.engine = 'legacy';
+      }
+      syncDemandEngineFields();
+      updateCohortTelemetry();
+      triggerAutoSave();
+      const file = currentCityFile;
+      if (await saveCurrentCity(true)) {
+        if (file === currentCityFile && selectedDemandEngine() === (active ? 'v2' : 'legacy')) refreshDataStatus();
+      } else if (file === currentCityFile) {
+        document.getElementById('demandEngineStatus').textContent = 'No se pudo guardar el motor. Reintenta el guardado antes de compilar.';
+      }
+    }
+
     function syncStateFromInputs() {
       if (!cityData) cityData = { city: {}, macroeconomics: {}, pois: [], places: [], isolated_zones: [], exclusion_zones: [] };
       if (!cityData.city) cityData.city = {};
       if (!cityData.macroeconomics) cityData.macroeconomics = {};
       if (!cityData.isolated_zones) cityData.isolated_zones = [];
       if (!cityData.exclusion_zones) cityData.exclusion_zones = [];
+      const demandEngine = selectedDemandEngine();
+      if (demandEngine === 'v2') cityData.demand = {...(cityData.demand || {}), engine:'v2', target_year:2025, boundary_policy:'closed'};
+      else if (demandEngine === 'legacy' && cityData.demand) cityData.demand.engine = 'legacy';
+      if (demandEngine === 'v2') {
+        document.getElementById('cfg_residential_placement').value = 'official_blocks';
+        document.getElementById('cfg_residential_employment').value = 'census_employed';
+        document.getElementById('cfg_workplace_employment').value = 'auto';
+        document.getElementById('cfg_demographic_reference').value = 'eic2025';
+        const sources = cityData.demand.sources || {};
+        if (!document.getElementById('cfg_eic_indicators').value && sources.eic_indicators?.length === 1) document.getElementById('cfg_eic_indicators').value = sources.eic_indicators[0];
+        if (!document.getElementById('cfg_eic_persons').value && sources.eic_persons?.length) document.getElementById('cfg_eic_persons').value = sources.eic_persons.join('\n');
+        delete sources.eic_indicators; delete sources.eic_persons;
+      }
+      syncCohortCount();
 
       const nameEl = document.getElementById('cfg_city_name');
       if (nameEl) cityData.city.name = nameEl.value;
@@ -4369,6 +4595,27 @@
       cityData.city.residential_placement = document.getElementById('cfg_residential_placement').value;
       cityData.macroeconomics = cityData.macroeconomics || {};
       cityData.macroeconomics.residential_employment = document.getElementById('cfg_residential_employment').value;
+      const demographicMode = document.getElementById('cfg_demographic_reference')?.value;
+      if (demographicMode === 'eic2025') {
+        const previous = cityData.macroeconomics.demographic_reference;
+        cityData.macroeconomics.demographic_reference = {
+          mode: 'eic2025',
+          previous_projection_year: previous?.previous_projection_year || cityData.macroeconomics.projection_year || cityData.macroeconomics.target_year || 2026,
+          indicators: document.getElementById('cfg_eic_indicators').value.trim(),
+          persons: document.getElementById('cfg_eic_persons').value.split(/\r?\n/).map(p => p.trim()).filter(Boolean),
+        };
+        if (!cityData.macroeconomics.demographic_reference.indicators || !cityData.macroeconomics.demographic_reference.persons.length) {
+          cityData.macroeconomics.demographic_reference.pending_download = true;
+        }
+        cityData.macroeconomics.projection_year = 2025;
+        delete cityData.macroeconomics.target_year;
+        cityData.macroeconomics.residential_employment = 'census_employed';
+        document.getElementById('cfg_residential_employment').value = 'census_employed';
+      } else if (demographicMode === 'projected' && cityData.macroeconomics.demographic_reference) {
+        const previousYear = cityData.macroeconomics.demographic_reference.previous_projection_year;
+        delete cityData.macroeconomics.demographic_reference;
+        if (previousYear) cityData.macroeconomics.projection_year = previousYear;
+      }
       const requestedWorkplaceMode = document.getElementById('cfg_workplace_employment')?.value || 'auto';
       const workplaceLabel = document.getElementById('workplaceCoverage');
       if (requestedWorkplaceMode === 'historical_transfer' && !cityData.macroeconomics.historical_workplace_transfer) {
@@ -4555,7 +4802,13 @@
       // Paso 1
       document.getElementById('cfg_city_name').value = c.name || "";
       document.getElementById('cfg_residential_placement').value = c.residential_placement || 'official_blocks';
+      if (document.getElementById('cfg_demand_engine')) document.getElementById('cfg_demand_engine').checked = cityData.demand?.engine === 'v2';
+      updateDemandEngineControls();
       document.getElementById('cfg_residential_employment').value = m.residential_employment || 'census_employed';
+      const demographic = m.demographic_reference;
+      if (document.getElementById('cfg_demographic_reference')) document.getElementById('cfg_demographic_reference').value = demographic?.mode || 'projected';
+      if (document.getElementById('cfg_eic_indicators')) document.getElementById('cfg_eic_indicators').value = demographic?.indicators || '';
+      if (document.getElementById('cfg_eic_persons')) document.getElementById('cfg_eic_persons').value = (demographic?.persons || []).join('\n');
       const workplaceSelect = document.getElementById('cfg_workplace_employment');
       if (workplaceSelect) workplaceSelect.value = m.workplace_employment || 'auto';
       const historical = m.historical_workplace_benchmark || null;
@@ -4669,6 +4922,7 @@
       document.getElementById('cfg_min_pop_size').value = m.min_pop_size || 25;
       document.getElementById('cfg_target_pop_size').value = m.target_pop_size || 150;
       document.getElementById('cfg_max_pop_size').value = m.max_pop_size || 200;
+      if (document.getElementById('cfg_cohort_count')) document.getElementById('cfg_cohort_count').value = cityData.demand?.cohort_count ?? '';
       updateCohortUIFromData();
 
       const stEl = document.getElementById('cfg_sample_threshold');
@@ -4736,13 +4990,13 @@
 
       // Adjuntar listeners de auto-guardado a los campos de formulario
       const inputIds = [
-        'cfg_residential_placement', 'cfg_residential_employment', 'cfg_workplace_employment', 'cfg_conapo_source_year', 'cfg_city_name', 'cfg_city_code', 'cfg_city_creator', 'cfg_city_desc',
+        'cfg_residential_placement', 'cfg_residential_employment', 'cfg_demographic_reference', 'cfg_eic_indicators', 'cfg_eic_persons', 'cfg_workplace_employment', 'cfg_conapo_source_year', 'cfg_city_name', 'cfg_city_code', 'cfg_city_creator', 'cfg_city_desc',
         'cfg_grid_size', 'cfg_initial_zoom', 'cfg_initial_lon', 'cfg_initial_lat', 'cfg_include_ocean', 'cfg_urban_parks_only',
         'cfg_min_residents', 'cfg_min_jobs',
         'cfg_building_filter_size', 'cfg_building_simplification',
         'cfg_bbox_0', 'cfg_bbox_1', 'cfg_bbox_2', 'cfg_bbox_3',
         'cfg_tasa_pea', 'cfg_til_1', 'cfg_gravity_beta',
-        'cfg_max_distance_km', 'cfg_min_pop_size', 'cfg_target_pop_size', 'cfg_max_pop_size',
+        'cfg_max_distance_km', 'cfg_min_pop_size', 'cfg_target_pop_size', 'cfg_max_pop_size', 'cfg_cohort_count',
         'cfg_fixed_pop_size', 'cfg_fixed_pop_range', 'cfg_seed',
         'cfg_sample_threshold', 'cfg_furness_iterations', 'cfg_furness_tol',
         'cfg_modal_experiment_enabled', 'cfg_modal_experiment_preset',
@@ -4824,6 +5078,10 @@
         const json = await pending;
         if (file !== currentCityFile) return json.status === 'ok';
         if (json.status === 'ok') {
+          if (body === JSON.stringify({file, ...cityData}) && json.demographic_reference && cityData.demand?.engine === 'v2') {
+            cityData.macroeconomics.demographic_reference = json.demographic_reference;
+            syncDemandEngineFields();
+          }
           // Limpiar borrador temporal al guardar con éxito en disco
           try {
             localStorage.removeItem(`sb_draft_${currentCityFile}`);
@@ -4865,18 +5123,169 @@
       }
     }
 
-    function openDataSourcesModal() { document.getElementById('modalDataSources').classList.remove('hidden'); }
+    function openDataSourcesModal(sourceKey = '') {
+      const modal = document.getElementById('modalDataSources');
+      modal.classList.remove('hidden');
+      const context = document.getElementById('dataSourceGuideContext');
+      if (context) context.textContent = `${cityData.city?.name || 'Proyecto'} · Carpeta: ${cityData.data_dir || document.getElementById('activeDataFolderBadge')?.textContent || 'data/'}. Selecciona las entidades y periodos correspondientes.`;
+      modal.querySelectorAll('.source-guide-block').forEach(block => {
+        block.open = sourceKey ? block.id === `guide-${sourceKey}` : ['guide-denue', 'guide-cpv'].includes(block.id);
+      });
+      if (sourceKey) document.getElementById(`guide-${sourceKey}`)?.scrollIntoView({block: 'nearest'});
+    }
     function closeDataSourcesModal() { document.getElementById('modalDataSources').classList.add('hidden'); }
+
+    let sourceDownloadPlan = null;
+    let sourceDownloadBusy = false;
+    function updateSourceDownloadEnoeOptions() {
+      const options = document.getElementById('sourceDownloadEnoeOptions');
+      if (options) options.hidden = ![...document.querySelectorAll('#sourceDownloadChoices input:checked')].some(input => input.value === 'enoe');
+    }
+    async function sourceDownloadRequest(url, body, timeout = 120000) {
+      const response = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body), signal: AbortSignal.timeout(timeout)});
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || result.message || 'Error al preparar descargas');
+      return result;
+    }
+    async function prepareSourceDownloads() {
+      if (sourceDownloadBusy || !currentCityFile) return;
+      const file = currentCityFile;
+      sourceDownloadBusy = true;
+      sourceDownloadPlan = null;
+      document.getElementById('sourceDownloadPlan').classList.add('hidden');
+      const message = document.getElementById('sourceDownloadProgress');
+      message.textContent = 'Consultando geografía oficial INEGI…';
+      document.getElementById('sourceDownloadPrepare').disabled = true;
+      try {
+        if (!await saveCurrentCity(true) || file !== currentCityFile) return;
+        let preparation = await sourceDownloadRequest('/api/sources/plan', {file}, 30000);
+        while (preparation.status === 'running') {
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          const response = await fetch(`/api/sources/plan-job?id=${encodeURIComponent(preparation.id)}`, {signal: AbortSignal.timeout(15000)});
+          preparation = await response.json();
+          if (!response.ok) throw new Error(preparation.error || preparation.message || 'No se pudo consultar la preparación');
+        }
+        if (preparation.status === 'error') throw new Error(preparation.message);
+        const plan = preparation.plan || preparation;
+        if (file !== currentCityFile) return;
+        sourceDownloadPlan = {...plan, requestedFile: file};
+        document.getElementById('sourceDownloadGeography').textContent =
+          `${plan.geography.states.map(s => `${s.code} ${s.name}`).join(', ')}. ` +
+          `${plan.geography.municipalities.length} municipios. Carpeta: ${plan.folder}`;
+        const choices = document.getElementById('sourceDownloadChoices');
+        choices.replaceChildren();
+        for (const source of plan.sources) {
+          const label = document.createElement('label');
+          label.className = 'block';
+          const input = document.createElement('input');
+          input.type = 'checkbox'; input.value = source.kind;
+          input.checked = source.conflicts.length === 0 && source.recommended !== false;
+          input.disabled = source.conflicts.length > 0;
+          if (source.kind === 'enoe') input.addEventListener('change', updateSourceDownloadEnoeOptions);
+          label.append(input, document.createTextNode(' ' + source.label +
+            (source.conflicts.length ? (source.kind === 'eic' ? ' · archivos existentes: conserva sus rutas; no se sobrescriben archivos manuales' : ' · fuentes existentes: conserva su selección o exclúyelas y prepara de nuevo') : '')));
+          if (source.conflicts.length) label.title = source.conflicts.join('\n');
+          choices.append(label);
+        }
+        updateSourceDownloadEnoeOptions();
+        const state = document.getElementById('sourceDownloadEnoeState');
+        state.replaceChildren(new Option('Elige una entidad', ''));
+        for (const s of plan.geography.states) state.add(new Option(`${s.code} ${s.name}`, s.code));
+        if (plan.geography.states.length === 1) state.value = plan.geography.states[0].code;
+        document.getElementById('sourceDownloadPlan').classList.remove('hidden');
+        message.textContent = 'Revisa las fuentes y el periodo. OSM descarga el extracto nacional (~600 MB); se comparte entre proyectos.';
+      } catch (error) {
+        if (file === currentCityFile) message.textContent = error.message + ' · La guía manual sigue disponible en «¿Dónde descargar?».';
+      } finally {
+        sourceDownloadBusy = false;
+        document.getElementById('sourceDownloadPrepare').disabled = false;
+      }
+    }
+    async function startSourceDownloads() {
+      if (sourceDownloadBusy || !sourceDownloadPlan || sourceDownloadPlan.requestedFile !== currentCityFile) return;
+      const file = currentCityFile;
+      const eicReferenceAtStart = JSON.stringify(cityData.macroeconomics?.demographic_reference);
+      const eicBboxAtStart = JSON.stringify(cityData.city?.bbox);
+      const demandAtStart = JSON.stringify({engine: cityData.demand?.engine || 'legacy', year: cityData.demand?.target_year ?? 2025});
+      const kinds = [...document.querySelectorAll('#sourceDownloadChoices input:checked')].map(i => i.value);
+      const state = document.getElementById('sourceDownloadEnoeState').value;
+      const message = document.getElementById('sourceDownloadProgress');
+      if (!kinds.length || (kinds.includes('enoe') && !state)) {
+        message.textContent = 'Selecciona fuentes y, para ENOE, una entidad de referencia.';
+        return;
+      }
+      sourceDownloadBusy = true;
+      document.getElementById('sourceDownloadStart').disabled = true;
+      document.getElementById('sourceDownloadPrepare').disabled = true;
+      try {
+        let job = await sourceDownloadRequest('/api/sources/start', {plan_id: sourceDownloadPlan.id, kinds,
+          enoe_state: state, enoe_year: Number(document.getElementById('sourceDownloadEnoeYear').value),
+          enoe_quarter: Number(document.getElementById('sourceDownloadEnoeQuarter').value),
+          refresh: document.getElementById('sourceDownloadRefresh').checked}, 30000);
+        while (true) {
+          if (file === currentCityFile) message.textContent = job.message + '\n' + job.results.map(r =>
+            `${r.kind}: ${r.status === 'ok' ? `${r.files.length} archivos preparados` : r.message}` +
+            (r.warnings?.length ? '\n' + r.warnings.join('\n') : '')).join('\n');
+          if (job.status !== 'running') break;
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          const response = await fetch(`/api/sources/job?id=${encodeURIComponent(job.id)}`, {signal: AbortSignal.timeout(15000)});
+          job = await response.json();
+          if (!response.ok) throw new Error(job.error || job.message || 'No se pudo consultar la descarga');
+        }
+        sourceDownloadPlan = null;
+        if (file === currentCityFile) {
+          const eicResult = job.results.find(r => r.kind === 'eic' && r.status === 'ok' && r.demographic_reference);
+          const demandNow = {engine: cityData.demand?.engine || 'legacy', year: cityData.demand?.target_year ?? 2025};
+          const requiresEic = cityData.macroeconomics?.demographic_reference?.mode === 'eic2025' || (demandNow.engine === 'v2' && Number(demandNow.year) === 2025);
+          if (eicResult && requiresEic) {
+            if (JSON.stringify(cityData.macroeconomics?.demographic_reference) !== eicReferenceAtStart || JSON.stringify(cityData.city?.bbox) !== eicBboxAtStart || JSON.stringify(demandNow) !== demandAtStart) {
+              message.textContent += '\nEIC descargada; la referencia cambió durante la descarga. Conserva tu selección y revisa las rutas.';
+            } else {
+              cityData.macroeconomics ||= {};
+              if (cityData.macroeconomics.demographic_reference?.mode !== 'eic2025') {
+                cityData.macroeconomics.demographic_reference = {previous_projection_year: cityData.macroeconomics.projection_year || cityData.macroeconomics.target_year || 2026};
+              }
+              cityData.macroeconomics.demographic_reference = {...cityData.macroeconomics.demographic_reference, ...eicResult.demographic_reference};
+              delete cityData.macroeconomics.demographic_reference.pending_download;
+              cityData.macroeconomics.projection_year = 2025;
+              delete cityData.macroeconomics.target_year;
+              cityData.macroeconomics.residential_employment = 'census_employed';
+              document.getElementById('cfg_demographic_reference').value = 'eic2025';
+              document.getElementById('cfg_residential_employment').value = 'census_employed';
+              document.getElementById('cfg_eic_indicators').value = eicResult.demographic_reference.indicators;
+              document.getElementById('cfg_eic_persons').value = eicResult.demographic_reference.persons.join('\n');
+              if (!await saveCurrentCity()) message.textContent += '\nArchivos EIC descargados; guarda el proyecto para vincular sus rutas.';
+            }
+          }
+          document.getElementById('sourceDownloadPlan').classList.add('hidden');
+          await refreshDataStatus(false);
+        }
+      } catch (error) {
+        if (file === currentCityFile) message.textContent = error.message + ' · Revisa «Detectar» y la guía manual. Si se perdió la conexión, la descarga puede seguir en el servidor.';
+      } finally {
+        sourceDownloadBusy = false;
+        document.getElementById('sourceDownloadStart').disabled = false;
+        document.getElementById('sourceDownloadPrepare').disabled = false;
+      }
+    }
 
     async function refreshDataStatus(isManual = false) {
       if (!currentCityFile) return;
+      if (sourceDownloadPlan && sourceDownloadPlan.requestedFile !== currentCityFile) {
+        sourceDownloadPlan = null;
+        document.getElementById('sourceDownloadPlan').classList.add('hidden');
+        document.getElementById('sourceDownloadProgress').textContent = sourceDownloadBusy ? 'Hay una descarga en curso para otro proyecto.' : '';
+      }
       const file = currentCityFile;
       const code = cityData.city ? (cityData.city.code || "") : "";
       const name = cityData.city ? (cityData.city.name || "") : "";
+      const state = JSON.stringify(cityData);
       try {
-        const status = await fetchStartupJson(`/api/data-status?city=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&file=${encodeURIComponent(file)}`, 'Fuentes de datos', 15000);
-        if (file !== currentCityFile) return;
+        const status = await fetchStartupJson(`/api/data-status?city=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&file=${encodeURIComponent(file)}`, 'Fuentes de datos', 30000);
+        if (file !== currentCityFile || state !== JSON.stringify(cityData)) return;
         wizardLifecycle.clearWarning('sources');
+        updateDemandEngineControls(status);
         refreshWorkplaceSourceStatus();
 
         const folderBadge = document.getElementById('activeDataFolderBadge');
@@ -4889,75 +5298,66 @@
         container.innerHTML = '';
 
         const sources = [
-          { key: 'denue', label: 'DENUE (Establecimientos Económicos)', icon: 'briefcase', desc: '*denue*.csv' },
-          { key: 'cpv', label: 'Censo CPV 2020 (Manzanas RESAGEBURB)', icon: 'users', desc: '*RESAGEBURB*.csv' },
-          { key: 'ce2024', label: 'Censos Económicos 2024 / H001A', icon: 'file-text', desc: '*SAIC*.csv o *tr_ce*.csv' },
-          { key: 'conapo', label: 'Proyecciones Demográficas CONAPO', icon: 'trending-up', desc: '*pobproy*.csv, *conapo*.csv o data-*.csv' },
-          { key: 'enoe', label: 'ENOE (Indicadores Laborales e Informalidad)', icon: 'activity', desc: '*trim*.csv, *enoe*.csv o *trim*.xls', optional: true },
-          { key: 'osm', label: 'Red Vial OpenStreetMap (PBF / GeoJSON)', icon: 'map-pin', desc: '*.osm.pbf o roads.geojson' }
+          { key: 'denue', label: 'DENUE', icon: 'briefcase', role: 'Establecimientos, actividad y estrato de empleo', requirement: 'Necesaria' },
+          { key: 'cpv', label: 'Censo CPV 2020', icon: 'users', role: 'Población y ocupación por manzana urbana', requirement: 'Necesaria' },
+          { key: 'marco', label: 'Marco Geoestadístico 2020', icon: 'map', role: 'Polígonos de manzanas y AGEB para ubicación oficial', requirement: 'Geometría oficial' },
+          { key: 'eic', label: 'Encuesta Intercensal 2025', icon: 'users', role: 'Controles municipales y traslado al trabajo; rutas explícitas de indicadores y personas', requirement: status.eic?.required ? 'Necesaria · referencia 2025' : 'Opcional · activar en Macroeconomía' },
+          { key: 'ce2024', label: 'Censos Económicos · SAIC', icon: 'file-text', role: 'Referencia municipal por sector y tamaño', requirement: 'Complementaria' },
+          { key: 'conapo', label: 'CONAPO municipal', icon: 'trending-up', role: status.eic?.active ? 'No se aplica con EIC; se conserva para proyectos con proyecciones' : 'Población municipal para el año objetivo', requirement: status.eic?.active ? 'Opcional · sin uso con EIC' : 'Según proyección' },
+          { key: 'enoe', label: 'ENOE', icon: 'activity', role: 'Participación laboral e informalidad por entidad', requirement: 'Complementaria' },
+          { key: 'osm', label: 'OpenStreetMap', icon: 'map-pin', role: 'Cartografía y red vial', requirement: 'Compilación cartográfica' }
         ];
 
         sources.forEach(s => {
           const item = status[s.key] || { status: 'missing', files: [] };
-          const isOk = item.status === 'ok';
           const files = item.files || [];
-          const count = files.length;
-
-          let fileDesc = s.desc;
-          if (count === 1) {
-            fileDesc = `${files[0].filename} (${files[0].size_mb} MB)`;
-          } else if (count > 1) {
-            fileDesc = `${count} archivos detectados en carpeta`;
-          }
-
-          let filesDetailHtml = '';
-          if (isOk && files.length > 0) {
-            filesDetailHtml = `
-              <div class="mt-2.5 pt-2.5 border-t border-emerald-200/80 space-y-1.5 w-full">
-                ${files.map(f => `
-                  <div class="flex items-center justify-between text-xs bg-white px-3 py-2 rounded-lg border border-stone-200 shadow-xs">
-                    <div class="flex items-center space-x-2 truncate mr-2">
-                      <span class="text-emerald-700 font-black text-sm">&bull;</span>
-                      <span class="truncate text-stone-900 font-mono font-bold" title="${f.path}">${f.filename}</span>
-                      <span class="text-stone-500 font-mono shrink-0">(${f.size_mb} MB)</span>
-                    </div>
-                    <div class="flex items-center space-x-1 shrink-0">
-                      <button onclick="openFileLocation('${(f.abs_path || f.path).replace(/\\/g, '/')}')" class="text-stone-500 hover:text-stone-800 p-1.5 rounded-md hover:bg-stone-100 transition" title="Abrir ubicación">
-                        <i data-lucide="folder-open" class="w-4 h-4"></i>
-                      </button>
-                      <button onclick="unlinkDataFile('${f.filename}')" class="text-stone-400 hover:text-rose-600 p-1.5 rounded-md hover:bg-rose-50 transition" title="Quitar archivo">
-                        <i data-lucide="trash-2" class="w-4 h-4"></i>
-                      </button>
-                    </div>
+          const archives = item.archives || [];
+          const isArchive = item.status === 'archive';
+          const stateLabel = item.status === 'inactive' ? 'Sin activar' : item.status === 'invalid' ? 'Revisar fuente' : item.status === 'ok' ? `${files.length} encontrado${files.length === 1 ? '' : 's'}` : isArchive ? 'Extraer ZIP' : 'No encontrado';
+          const detail = files.length ? `
+            <details class="source-file-details">
+              <summary>Ver ${files.length} archivo${files.length === 1 ? '' : 's'} y su selección</summary>
+              ${files.map((f, index) => `
+                <div class="source-file-row">
+                  <div class="source-file-info">
+                    <span class="source-file-name" title="${escapeHtml(f.path)}">${escapeHtml(f.filename)}</span>
+                    <span class="source-file-meta">${f.size_mb} MB · ${s.key === 'eic' ? 'Ruta explícita' : (f.shared ? 'Compartido en data/' : 'Proyecto')}${item.selection === 'first' ? (f.selected ? ' · Primero seleccionado' : ' · No seleccionado') : ''}</span>
                   </div>
-                `).join('')}
-              </div>
-            `;
-          }
-
+                  <div class="source-file-actions">
+                    <button data-open-file="${index}" title="Abrir ubicación del archivo" aria-label="Abrir ubicación"><i data-lucide="folder-open" class="w-4 h-4"></i></button>
+                    ${['marco', 'eic'].includes(s.key) ? '' : `<button data-exclude-file="${index}" title="Excluir del proyecto; conservar en disco">Excluir</button>`}
+                  </div>
+                </div>`).join('')}
+            </details>` : '';
+          const archiveNote = archives.length ? `<p class="source-preparation-note">${files.length ? 'ZIP conservados; no se procesan:' : 'Descomprime y coloca los datos extraídos en la carpeta del proyecto:'} ${archives.map(f => escapeHtml(f.filename)).join(', ')}</p>` : '';
+          const selectionNote = files.length > 1 && item.selection === 'first' && item.active !== false ? '<p class="source-selection-note">Solo se selecciona el primer archivo. Excluye los demás si no corresponden al periodo o cobertura que necesitas.</p>' : '';
+          const eicNote = s.key === 'eic' ? `<p class="source-selection-note">${escapeHtml(item.message || (item.active ? (item.missing_paths?.length ? 'Faltan archivos: ' + item.missing_paths.join(', ') : 'Se comprueba estructura de CSV. Los controles municipales se concilian al descargar y compilar; cambia las rutas en Macroeconomía.') : 'Activa EIC en Macroeconomía y prepara la descarga de las entidades del mapa.'))}</p>` : '';
+          const missingNote = !files.length && !isArchive ? ({
+            marco: item.placement === 'legacy' ? 'El proyecto conserva ubicación legacy. Consulta la guía para cambiar sus capas.' : 'Sin capas oficiales se usan fuentes de respaldo; revisa la cobertura de ubicación en la vista previa.',
+            ce2024: 'Sin detalle utilizable, el método automático conserva estimaciones DENUE.',
+            enoe: 'Revisa las tasas configuradas y su procedencia en Macroeconomía.',
+            conapo: status.eic?.active ? 'No necesitas descargar CONAPO para compilar con EIC 2025.' : 'Revisa el factor de crecimiento configurado antes de continuar.',
+            osm: 'Para un mapa nuevo necesitas PBF; para solo demanda, cartografía previa compatible.'
+          }[s.key] || 'Añade los datos extraídos de las entidades del proyecto.') : '';
           const card = document.createElement('div');
-          card.className = `p-4 rounded-xl border flex flex-col text-xs transition ${
-            isOk ? 'bg-emerald-50/70 border-emerald-300 text-stone-900 shadow-xs' : 'bg-white border-stone-200 text-stone-700 shadow-xs'
-          }`;
+          card.className = `source-data-card${isArchive ? ' source-needs-extraction' : ''}`;
           card.innerHTML = `
-            <div class="flex items-center justify-between w-full">
-              <div class="flex items-center space-x-3 overflow-hidden mr-2">
-                <span class="p-2 rounded-lg shrink-0 ${isOk ? 'bg-emerald-100 text-emerald-800' : 'bg-stone-100 text-stone-600'}">
-                  <i data-lucide="${s.icon}" class="w-4 h-4"></i>
-                </span>
-                <div class="overflow-hidden">
-                  <span class="font-bold text-stone-900 block text-sm truncate">${s.label}</span>
-                  <span class="text-[11px] ${isOk ? 'text-emerald-800 font-medium' : 'text-stone-500 font-mono'} block truncate" title="${fileDesc}">${fileDesc}</span>
-                </div>
-              </div>
-              <span class="px-2.5 py-1 rounded text-[10px] font-bold font-mono shrink-0 ${
-                isOk ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' : (s.optional ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-stone-100 text-stone-600 border border-stone-300')
-              }">
-                ${isOk ? (count > 1 ? `${count} ARCHIVOS &check;` : 'DETECTADO &check;') : (s.optional ? 'OPCIONAL (INFERIDO)' : 'PENDIENTE')}
-              </span>
+            <div class="source-card-heading">
+              <div class="source-card-title"><i data-lucide="${s.icon}" class="w-4 h-4"></i><strong>${s.label}</strong></div>
+              <span class="source-state${isArchive ? ' source-state-warning' : ''}">${stateLabel}</span>
             </div>
-            ${filesDetailHtml}
-          `;
+            <p class="source-card-purpose">${s.role}</p>
+            <div class="source-card-tools"><span class="source-guide-tag">${s.requirement}</span><button data-source-help>Cómo conseguirlo ↗</button></div>
+            ${detail}${selectionNote}${archiveNote}${eicNote}
+            ${missingNote ? `<p class="source-selection-note">${missingNote}</p>` : ''}`;
+          card.querySelector('[data-source-help]').addEventListener('click', () => openDataSourcesModal(s.key));
+          card.querySelectorAll('[data-open-file]').forEach(button => {
+            const f = files[Number(button.dataset.openFile)];
+            button.addEventListener('click', () => openFileLocation(f.abs_path || f.path));
+          });
+          card.querySelectorAll('[data-exclude-file]').forEach(button => {
+            button.addEventListener('click', () => unlinkDataFile(files[Number(button.dataset.excludeFile)].filename));
+          });
           container.appendChild(card);
         });
 
@@ -4992,7 +5392,8 @@
         }
       } catch (e) {
         console.error("Error al obtener estado de datos:", e);
-        if (file === currentCityFile) wizardLifecycle.warn('sources', `Fuentes de datos: ${e.message}`, () => refreshDataStatus(true));
+        const message = e.message.startsWith('Fuentes de datos:') ? e.message : `Fuentes de datos: ${e.message}`;
+        if (file === currentCityFile) wizardLifecycle.warn('sources', message, () => refreshDataStatus(true));
       }
     }
 
@@ -5060,9 +5461,11 @@
                 const resp = JSON.parse(xhr.responseText || '{}');
                 const targetFolder = resp.target_dir ? `${resp.target_dir}/` : 'data/';
                 showToast(`Archivo '${file.name}' guardado en ${targetFolder}`, "success");
+                const isArchive = /\.zip$/i.test(file.name);
+                if (isArchive) showToast('ZIP guardado: descomprímelo en la carpeta del proyecto y pulsa Detectar.', 'warning');
                 const li = document.createElement('li');
                 li.className = "text-emerald-700 flex items-center space-x-1 font-medium";
-                li.innerHTML = `<span>&check;</span> <span>${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB) &rarr; ${targetFolder}</span>`;
+                li.textContent = `${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB) → ${targetFolder}${isArchive ? ' · Pendiente de extracción' : ''}`;
                 if (uploadedList.querySelector('li.italic')) uploadedList.innerHTML = '';
                 uploadedList.appendChild(li);
                 successCount++;
@@ -5248,6 +5651,7 @@
     function setCohortMode(mode, triggerSave = true) {
       if (!cityData.macroeconomics) cityData.macroeconomics = {};
       cityData.macroeconomics.cohort_mode = mode;
+      if (mode === 'adaptive' && cityData.demand?.fixed_cohort_size) delete cityData.demand.fixed_cohort_size;
 
       const isRigid = (mode === 'rigid');
       const rigidBox = document.getElementById('cohort_rigid_controls');
@@ -5340,11 +5744,17 @@
       cityData.macroeconomics.target_pop_size = targetVal;
       cityData.macroeconomics.max_pop_size = maxVal;
 
+      if (cityData.demand?.fixed_cohort_size) {
+        if (minVal === targetVal && targetVal === maxVal) cityData.demand.fixed_cohort_size = targetVal;
+        else delete cityData.demand.fixed_cohort_size;
+      }
+      syncCohortCount();
       updateCohortTelemetry();
       if (triggerSave) triggerAutoSave();
     }
 
     function onCohortParamChanged() {
+      syncCohortCount();
       const minVal = parseInt(document.getElementById('cfg_min_pop_size')?.value, 10) || 25;
       const targetVal = parseInt(document.getElementById('cfg_target_pop_size')?.value, 10) || 150;
       const maxVal = parseInt(document.getElementById('cfg_max_pop_size')?.value, 10) || 200;
@@ -5382,6 +5792,26 @@
       const minVal = parseInt(document.getElementById('cfg_min_pop_size')?.value || m.min_pop_size, 10) || 25;
       const maxVal = parseInt(document.getElementById('cfg_max_pop_size')?.value || m.max_pop_size, 10) || 200;
       const isRigid = (minVal === maxVal && minVal === targetVal) || (m.cohort_mode === 'rigid');
+
+      const engine = selectedDemandEngine();
+      const countInput = document.getElementById('cfg_cohort_count');
+      if (countInput) countInput.disabled = engine !== 'v2' || isRigid;
+      if (engine === 'v2') {
+        const requested = countInput?.value ? Number(countInput.value) : null;
+        const metadata = window.demandV2CohortMetadata?.file === currentCityFile ? window.demandV2CohortMetadata : null;
+        const options = metadata?.report?.options;
+        const matching = options && metadata.state === JSON.stringify(cityData) && options.target_pop_size === targetVal && options.max_pop_size === maxVal && options.min_pop_size === minVal && options.cohort_count === requested;
+        const count = matching ? metadata.report.actual_count : requested ?? (metadata ? (isRigid ? Math.ceil(metadata.commuters / targetVal) : Math.round(metadata.commuters / targetVal)) : null);
+        const estimated = document.getElementById('cohort_estimated_pops');
+        if (estimated) estimated.innerText = count === null ? 'Evalúa el candidato' : isRigid && !matching ? `Al menos ${count.toLocaleString()} cohortes; evalúa para incluir los restos locales` : `${matching ? '' : requested ? '' : '~'}${count.toLocaleString()} cohortes ${matching ? 'calculadas' : requested ? 'solicitadas' : 'estimadas'}`;
+        const badge = document.getElementById('cohort_fps_badge');
+        if (badge) { badge.innerText = 'Rendimiento pendiente de medir'; badge.className = 'text-[10px] text-stone-500'; }
+        const recommendation = document.getElementById('cohort_recommendation_text');
+        if (recommendation) recommendation.innerText = isRigid ? `Tamaño objetivo: ${targetVal} personas. Agrupamiento máximo de 500 m dentro del mismo municipio, zona aislada y componente vial. Conserva restos locales adicionales, el reparto municipal y las cuotas de POIs. Evalúa para obtener el conteo real.` : matching ? `Total calculado: ${metadata.report.actual_count.toLocaleString()}. Mínimo factible: ${metadata.report.minimum_feasible.toLocaleString()} con este máximo. Todos los viajeros se conservan.` : 'Evalúa el candidato para comprobar el total y los límites por origen. No se modifican destinos durante el empaquetado.';
+        const dynamics = document.getElementById('cohort_dynamics_text');
+        if (dynamics) dynamics.innerText = isRigid ? `Hasta ${targetVal} personas por cohorte, con restos locales` : requested ? `Total exacto solicitado: ${requested}` : `Objetivo: ${targetVal} personas por cohorte`;
+        return;
+      }
 
       // Calcular PEA de referencia
       let estPEA = 600000;
@@ -5428,13 +5858,26 @@
       }
     }
 
+    function syncCohortCount() {
+      const input = document.getElementById('cfg_cohort_count');
+      const m = cityData.macroeconomics || {};
+      if (cityData.demand?.engine === 'v2' && (cityData.demand.fixed_cohort_size || Number.isInteger(m.target_pop_size) && m.target_pop_size > 0 && m.min_pop_size === m.target_pop_size && m.target_pop_size === m.max_pop_size)) {
+        if (input) input.value = '';
+        cityData.demand.cohort_count = null;
+      }
+      if (input && (cityData.demand || input.value !== '')) {
+        cityData.demand = {...(cityData.demand || {}),cohort_count:input.value === '' ? null : Number(input.value)};
+      }
+    }
+
     function updateCohortUIFromData() {
       const m = (cityData && cityData.macroeconomics) || {};
-      const minVal = m.min_pop_size !== undefined ? m.min_pop_size : 25;
-      const targetVal = m.target_pop_size !== undefined ? m.target_pop_size : 150;
-      const maxVal = m.max_pop_size !== undefined ? m.max_pop_size : 200;
+      const fixed = cityData.demand?.fixed_cohort_size;
+      const minVal = fixed ?? (m.min_pop_size !== undefined ? m.min_pop_size : 25);
+      const targetVal = fixed ?? (m.target_pop_size !== undefined ? m.target_pop_size : 150);
+      const maxVal = fixed ?? (m.max_pop_size !== undefined ? m.max_pop_size : 200);
 
-      let mode = m.cohort_mode;
+      let mode = fixed ? 'rigid' : m.cohort_mode;
       if (!mode) {
         mode = (minVal === maxVal && minVal === targetVal) ? 'rigid' : 'adaptive';
       }
@@ -5604,7 +6047,7 @@
     function setConapoBusy(busy) {
       ['btnAutoConapo', 'conapoYearSelect', 'btnConapoYears', 'btnReplaceConapo'].forEach(id => {
         const element = document.getElementById(id);
-        if (element) element.disabled = busy;
+        if (element) element.disabled = busy || cityData.demand?.engine === 'v2';
       });
     }
 
@@ -5624,6 +6067,11 @@
 
     async function loadConapoYears() {
       if (!currentCityFile || conapoCommitPromise) return;
+      if (cityData.demand?.engine === 'v2') {
+        setConapoStatus('Nuevo motor: referencia EIC 2025. CONAPO no se aplica.');
+        setConapoBusy(false);
+        return;
+      }
       cancelConapoRequest();
       const version = conapoRequestVersion;
       const file = currentCityFile;
@@ -5683,6 +6131,10 @@
 
     async function autoCalculateConapo(selectedYear = null, replaceSaved = false) {
       if (!currentCityFile || conapoCommitPromise) return;
+      if (cityData.demand?.engine === 'v2') {
+        setConapoStatus('Nuevo motor: referencia EIC 2025. CONAPO no se aplica.');
+        return;
+      }
       const select = document.getElementById('conapoYearSelect');
       const reqYear = Number(selectedYear || select?.value);
       if (!Number.isInteger(reqYear) || reqYear < 1900 || reqYear > 2100) {
@@ -6347,7 +6799,7 @@
 
       const baseInput = document.getElementById('editPoiBaseName');
       if (baseInput) {
-        baseInput.placeholder = val === 'AIR' ? 'Cancún' : (val === 'UNI' ? 'Universidad del Caribe' : 'Nombre del lugar');
+        baseInput.placeholder = val === 'AIR' ? 'Nombre de la ciudad o terminal' : (val === 'UNI' ? 'Nombre de la universidad' : 'Nombre del lugar');
       }
 
       if (meta.defaultRadius !== undefined) {
@@ -6366,7 +6818,7 @@
       const baseInput = document.getElementById('editPoiBaseName');
       let baseVal = baseInput ? baseInput.value : '';
 
-      // Si el usuario pegó el ID completo con prefijo (ej. AIR_Cancún), extraer solo la base
+      // Si el usuario pegó el ID completo con prefijo (ej. AIR_Nombre), extraer solo la base
       if (meta.prefix && baseVal.startsWith(meta.prefix)) {
         baseVal = baseVal.substring(meta.prefix.length);
         if (baseInput) baseInput.value = baseVal;
@@ -7181,6 +7633,9 @@
     function undoPlacesLastAction() {
       if (!placesHistorySnapshot) return;
       cityData.places = JSON.parse(JSON.stringify(placesHistorySnapshot));
+      cityData.deleted_places = (cityData.deleted_places || []).filter(deleted =>
+        !cityData.places.some(p => typeof deleted === 'string' ?
+          toponymyNameKey(deleted) === toponymyNameKey(p.name) : sameToponymyPlace(deleted, p)));
       placesHistorySnapshot = null;
       updateUndoButtonUI();
       selectedPlaceIndices.clear();
@@ -7403,6 +7858,7 @@
       }
       placesHistorySnapshot = JSON.parse(JSON.stringify(cityData.places));
       updateUndoButtonUI();
+      if (!cityData.places[idx].original_name) cityData.places[idx].original_name = cityData.places[idx].name;
       cityData.places[idx].name = newName;
 
       // Sincronizar input en la tarjeta de la lista lateral si está visible
@@ -7523,6 +7979,7 @@
       updateUndoButtonUI();
 
       const microSet = new Set(microIndices);
+      cityData.deleted_places = [...(cityData.deleted_places || []), ...places.filter((_, idx) => microSet.has(idx))];
       cityData.places = places.filter((_, idx) => !microSet.has(idx));
       selectedPlaceIndices.clear();
 
@@ -7644,6 +8101,12 @@
       if (!cont) return;
 
       if (totalPill) totalPill.innerText = places.length;
+      const delivery = document.getElementById('toponymyDeliveryMode');
+      if (delivery) delivery.value = cityData.toponymy_mode || 'replace';
+      const deliveryNote = document.getElementById('toponymyDeliveryNote');
+      if (deliveryNote) deliveryNote.textContent = cityData.toponymy_mode === 'merge' ?
+        'Conserva OSM y aplica tus nombres y descartes locales. La vista de esta lista muestra solo los nombres guardados.' :
+        'Una lista incompleta sustituye las etiquetas OSM de cada capa con nombres guardados. Complementar OSM evita esa pérdida.';
 
       // Actualizar contadores por categoría jerárquica
       let catCityCount = 0;
@@ -7686,13 +8149,14 @@
             <div class="px-2.5 py-1 bg-white border border-emerald-200 rounded-lg flex items-center justify-between text-[11px] shadow-2xs">
               <div class="flex items-center space-x-1.5 min-w-0">
                 <span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
-                <span class="font-bold text-emerald-900">Toponimia Curada</span>
+                <span class="font-bold text-emerald-900">Nombres guardados</span>
                 <span class="text-[10px] font-mono text-stone-500">(${places.length})</span>
               </div>
               <button type="button" onclick="resetToNativeOsmMode()" class="text-[10px] text-stone-500 hover:text-rose-600 hover:underline transition flex items-center space-x-1 cursor-pointer shrink-0" title="Vaciar lista curada y usar etiquetas estándar de OSM">
                 <i data-lucide="rotate-ccw" class="w-2.5 h-2.5"></i>
                 <span>Volver a OSM</span>
               </button>
+              <button type="button" onclick="previewNativeOsmPlacesOnMap()" class="text-[10px] text-sky-700 cursor-pointer" title="Alternar etiquetas OSM para comparar cobertura">Comparar OSM</button>
             </div>
           `;
         }
@@ -7700,11 +8164,12 @@
 
       cont.innerHTML = '';
 
-      const textQuery = (placeFilterText || '').trim().toLowerCase();
+      const textQuery = toponymyNameKey(placeFilterText || '');
       const typeQuery = placeFilterType || 'all';
 
       const filtered = places.map((pl, idx) => ({ ...pl, originalIndex: idx })).filter(item => {
-        const matchesText = !textQuery || (item.name && item.name.toLowerCase().includes(textQuery));
+        const matchesText = !textQuery || toponymyNameKey(
+          [item.name, ...(item.aliases || []), item.municipality || '', item.locality || ''].join(' ')).includes(textQuery);
         const scale = getPlaceScale(item.type);
 
         let matchesCategory = true;
@@ -7723,6 +8188,10 @@
           matchesType = isMicroPlace(item);
         } else if (typeQuery === 'denue') {
           matchesType = (item.source || '').toUpperCase().includes('DENUE');
+        } else if (typeQuery === 'manual') {
+          matchesType = item.source === 'YAML_CURATED';
+        } else if (typeQuery === 'unknown') {
+          matchesType = !item.source || item.source === 'UNKNOWN';
         } else if (typeQuery === 'osm') {
           matchesType = (item.source || '').toUpperCase().includes('OSM');
         } else {
@@ -7751,7 +8220,7 @@
             <div class="flex flex-col sm:flex-row justify-center items-center gap-2 pt-2">
               <button type="button" onclick="quickScanAndPopulateToponymy(this)" id="btnEmptyStateScan" class="w-full sm:w-auto px-4 py-2 bg-sky-700 hover:bg-sky-600 text-white font-bold rounded-lg shadow transition flex items-center justify-center space-x-1.5 text-xs cursor-pointer">
                 <i data-lucide="scan" class="w-4 h-4"></i>
-                <span>Escanear e incorporar toponimia</span>
+                <span>Escanear y revisar nombres</span>
               </button>
               <div class="flex items-center gap-1.5">
                 <button type="button" onclick="openScanToponymyDialog()" class="px-2.5 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 font-semibold rounded-lg border border-stone-200 text-[11px] transition cursor-pointer" title="Opciones avanzadas de escaneo">
@@ -7833,7 +8302,7 @@
 
             <div class="flex items-center space-x-1.5">
               ${isMicro ? '<span class="px-1.5 py-0.5 bg-rose-50 text-rose-700 rounded text-[9px] font-bold border border-rose-200">Cerrada</span>' : ''}
-              ${item.source ? `<span class="px-1.5 py-0.5 bg-stone-100 text-stone-500 rounded text-[9px] font-mono border border-stone-200" title="Fuente de origen">${escapeHtml(item.source)}</span>` : ''}
+              <span class="place-source-badge" title="${escapeHtml([placeSourceLabel(item),item.municipality,item.locality,item.hierarchy_note,...(item.aliases || [])].filter(Boolean).join(' · '))}">${escapeHtml(placeSourceLabel(item))}${item.hierarchy_inferred ? ' · revisar escala' : ''}</span>
               <button type="button" onclick="flyToPlaceOnMap(${idx})" class="font-mono text-[10px] text-stone-600 hover:text-sky-700 bg-stone-50 hover:bg-sky-50 border border-stone-200 px-1.5 py-0.5 rounded flex items-center space-x-1 transition cursor-pointer" title="Coordenadas (arrastrable en mapa)">
                 ${SVG_PLACE_PIN}
                 <span id="placeCoordBadge_${idx}">${loc[0].toFixed(3)}, ${loc[1].toFixed(3)}</span>
@@ -8227,7 +8696,7 @@
       if (!cityData.deleted_places) cityData.deleted_places = [];
       cityData.places.forEach((p, idx) => {
         if (selectedPlaceIndices.has(idx) && p.name) {
-          cityData.deleted_places.push(p.name.trim());
+          cityData.deleted_places.push(JSON.parse(JSON.stringify(p)));
         }
       });
 
@@ -8252,6 +8721,8 @@
 
     function updatePlaceName(idx, val) {
       if (cityData.places && cityData.places[idx]) {
+        if (!String(val).trim()) { renderPlacesList(); showToast('El nombre no puede estar vacío.', 'warning'); return; }
+        if (!cityData.places[idx].original_name) cityData.places[idx].original_name = cityData.places[idx].name;
         cityData.places[idx].name = val;
         renderPlacesMarkersOnMap();
         triggerAutoSave();
@@ -8273,7 +8744,7 @@
         const delName = (cityData.places[idx].name || '').trim();
         if (delName) {
           if (!cityData.deleted_places) cityData.deleted_places = [];
-          cityData.deleted_places.push(delName);
+          cityData.deleted_places.push(JSON.parse(JSON.stringify(cityData.places[idx])));
         }
         cityData.places.splice(idx, 1);
         selectedPlaceIndices.delete(idx);
@@ -8287,9 +8758,11 @@
       if (!cityData.places) cityData.places = [];
       const center = mapPoi ? mapPoi.getCenter() : { lng: -86.85, lat: 21.16 };
       cityData.places.push({
+        id: 'place_' + crypto.randomUUID(),
         name: "Nueva Colonia",
         loc: [parseFloat(center.lng.toFixed(5)), parseFloat(center.lat.toFixed(5))],
-        type: "suburb"
+        type: "suburb",
+        source: 'YAML_CURATED'
       });
       renderPlacesList();
       renderPlacesMarkersOnMap();
@@ -8301,220 +8774,444 @@
     // FLUJO DE ESCANEO RÁPIDO 1-CLIC Y DIÁLOGO AVANZADO (OSM + DENUE)
     // -------------------------------------------------------------------------
 
-    async function quickScanAndPopulateToponymy(btnElement = null) {
-      if (!currentCityFile) {
-        showToast("Selecciona un proyecto de ciudad primero", "error");
-        return;
-      }
+    let toponymyScanController = null;
+    let scanReviewRows = [], scanReviewSelected = new Set(), scanReviewLimit = 60;
+    let scanImportSaving = false;
+    let scannedPlacesContext = null;
 
-      // Guardar snapshot para deshacer
-      if (cityData.places && cityData.places.length > 0) {
-        placesHistorySnapshot = JSON.parse(JSON.stringify(cityData.places));
-        updateUndoButtonUI();
+    function setToponymyScanStatus(message, state = 'running') {
+      for (const id of ['toponymyScanStatus', 'scanSourceSummary']) {
+        const el = document.getElementById(id);
+        if (el) { el.textContent = message; el.hidden = !message; el.dataset.state = state; }
       }
+    }
 
-      // Estado de carga en el botón
-      const originalHtml = btnElement ? btnElement.innerHTML : null;
-      if (btnElement) {
-        btnElement.disabled = true;
-        btnElement.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin inline mr-1"></i><span>Escaneando...</span>`;
-        if (window.lucide) lucide.createIcons();
+    function cancelToponymyScan() {
+      if (toponymyScanController) toponymyScanController.abort();
+      toponymyScanController = null;
+      scannedPlacesCatalog = null;
+      scannedPlacesContext = null;
+      scanReviewRows = [];
+      scanReviewSelected.clear();
+      setToponymyScanStatus('');
+      for (const id of ['btnScanPlaces', 'btnEmptyStateScan', 'btnExecuteScan']) {
+        const button = document.getElementById(id);
+        if (button) { button.disabled = false; button.setAttribute('aria-busy', 'false'); }
       }
-      showToast("🔍 Escaneando toponimia urbana desde OpenStreetMap y DENUE...", "info");
+      const confirm = document.getElementById('btnConfirmImportScan');
+      if (confirm) confirm.disabled = true;
+      document.getElementById('scanLoadingIndicator')?.classList.add('hidden');
+    }
 
+    function toponymyNameKey(name) {
+      let s = String(name || '').normalize('NFC').toLowerCase().replaceAll('ñ', '\u0001');
+      s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replaceAll('\u0001', 'ñ');
+      s = s.replace(/^(?:super\s*manzana|s\.?\s*m\.?)(?=\s|\d|$)\s*/, 'supermanzana ');
+      s = s.replace(/^(?:region|reg\.?)(?=\s|\d|$)\s*/, 'region ');
+      s = s.replace(/^(?:colonia|col\.?|fraccionamiento|fracc\.?)\s+/, '');
+      if (/^\d+[a-z]?$/.test(s.trim())) s = 'supermanzana ' + s;
+      return s.replace(/[^\p{L}\p{N}]/gu, '');
+    }
+
+    function sameToponymyPlace(a, b) {
+      if (['cve_ent', 'cve_mun', 'cve_loc'].some(k => a[k] && b[k] && String(a[k]) !== String(b[k]))) return false;
+      if (a.id && b.id && a.id === b.id) return true;
+      const keys = p => [p.name,p.original_name].filter(Boolean).map(toponymyNameKey);
+      if (!keys(a).some(key=>keys(b).includes(key))) return false;
+      if (!a.loc || !b.loc || ![...a.loc, ...b.loc].every(Number.isFinite)) return false;
+      const rad = x => x * Math.PI / 180;
+      const h = Math.sin(rad(b.loc[1] - a.loc[1]) / 2) ** 2 +
+        Math.cos(rad(a.loc[1])) * Math.cos(rad(b.loc[1])) * Math.sin(rad(b.loc[0] - a.loc[0]) / 2) ** 2;
+      const distance = 12742000 * Math.asin(Math.min(1, Math.sqrt(h)));
+      const radius = ['city', 'town'].includes(a.type) && ['city', 'town'].includes(b.type) ? 7500 : 500;
+      return distance <= radius;
+    }
+
+    function mergeScannedToponymy(existing, scanned) {
+      const places = JSON.parse(JSON.stringify(existing || []));
+      const buckets = new Map(), identities = new Map();
+      for (const p of places) {
+        const key = toponymyNameKey(p.name);
+        if (!buckets.has(key)) buckets.set(key, []);
+        buckets.get(key).push(p);
+        if (p.original_name) {
+          const originalKey = toponymyNameKey(p.original_name);
+          if (!buckets.has(originalKey)) buckets.set(originalKey, []);
+          buckets.get(originalKey).push(p);
+        }
+        if (p.id) identities.set(p.id, p);
+      }
+      for (const item of scanned) {
+        const deleted = (cityData.deleted_places || []).some(p =>
+          typeof p === 'string' ? toponymyNameKey(p) === toponymyNameKey(item.name) : sameToponymyPlace(p, item));
+        if (deleted) continue;
+        const key = toponymyNameKey(item.name);
+        const choices = [...(buckets.get(key) || [])];
+        if (item.id && identities.has(item.id)) choices.unshift(identities.get(item.id));
+        const old = choices.find(p => sameToponymyPlace(p, item));
+        if (!old) {
+          const fresh = JSON.parse(JSON.stringify(item));
+          places.push(fresh);
+          if (!buckets.has(key)) buckets.set(key, []);
+          buckets.get(key).push(fresh);
+          if (fresh.id) identities.set(fresh.id, fresh);
+          continue;
+        }
+        for (const key of Object.keys(item)) {
+          if (!['name', 'loc', 'type', 'source'].includes(key) && old[key] === undefined && item[key] !== undefined) {
+            old[key] = JSON.parse(JSON.stringify(item[key]));
+          }
+        }
+        old.establishments = Math.max(old.establishments || 0, item.establishments || 0);
+        old.source_files = [...new Set([...(old.source_files || []), ...(item.source_files || [])])].sort();
+        if (!old.source && item.source) old.source = item.source;
+        if (old.source === 'UNKNOWN') {
+          const matched = item.matched_source || (item.source !== 'UNKNOWN' ? item.source : null);
+          if (matched) old.matched_source = matched;
+        }
+      }
+      return places;
+    }
+
+    function toponymyScanSummary(cat) {
+      const files = (cat.sources || []).map(s => {
+        const name = (s.path || '').split(/[\\/]/).pop() || s.kind;
+        return name + ': ' + (s.status === 'ok' ? (s.cached ? 'caché válida' : 'consultado') : (s.message || s.status));
+      }).join(' · ');
+      const municipalities = (cat.coverage || []).map(m => m.municipality || m.cve_mun).filter(Boolean);
+      return (cat.partial ? 'Resultado parcial. ' : 'Fuentes consultadas. ') + files +
+        (municipalities.length ? '. Municipios: ' + municipalities.join(', ') : '') +
+        '. ' + cat.total + ' nombres; ' + (cat.preserved || 0) + ' existentes conservados.';
+    }
+
+    function toponymyInputsSignature() {
+      return JSON.stringify([cityData.city?.bbox, cityData.data_dir, cityData.data_exclusions || []]);
+    }
+
+    function ensureToponymyPlaceIds() {
+      for (const place of cityData.places || []) {
+        if (!place.id) place.id = 'place_' + crypto.randomUUID();
+      }
+    }
+
+    async function runToponymyScan(minCount, consume) {
+      if (!currentCityFile || toponymyScanController) return;
+      const file = currentCityFile, version = cityLoadVersion, controller = new AbortController();
+      toponymyScanController = controller;
+      scannedPlacesCatalog = null;
+      scannedPlacesContext = null;
+      const current = () => currentCityFile === file && cityLoadVersion === version && toponymyScanController === controller;
+      const started = Date.now();
+      let phase = 'Guardando configuración';
+      const progress = () => { if (current()) setToponymyScanStatus(phase + ' · ' + Math.floor((Date.now() - started) / 1000) + ' s. La primera extracción OSM puede tardar varios minutos.'); };
+      for (const id of ['btnScanPlaces', 'btnEmptyStateScan', 'btnExecuteScan', 'btnConfirmImportScan']) {
+        const button = document.getElementById(id);
+        if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); }
+      }
+      document.getElementById('scanLoadingIndicator')?.classList.remove('hidden');
+      document.getElementById('scanResultsSection')?.classList.add('hidden');
+      progress();
+      const timer = setInterval(progress, 1000);
       try {
-        const res = await fetch(`/api/toponymy/scan?file=${encodeURIComponent(currentCityFile)}&min_count=8`);
-        const data = await res.json();
-        if (data.status === 'ok' && data.catalog && data.catalog.places) {
-          const scanned = data.catalog.places;
-          if (!cityData.places) cityData.places = [];
-
-          let added = 0;
-          const existingMap = new Set(cityData.places.map(p => (p.name || '').trim().toLowerCase()));
-          scanned.forEach(p => {
-            const nm = (p.name || '').trim().toLowerCase();
-            if (!existingMap.has(nm)) {
-              existingMap.add(nm);
-              cityData.places.push({
-                name: p.name,
-                loc: p.loc,
-                type: p.type || 'suburb',
-                source: p.source,
-                is_micro: p.is_micro || false,
-                category: p.category || ''
-              });
-              added++;
-            }
-          });
-
-          renderPlacesList();
-          renderPlacesMarkersOnMap();
-          triggerAutoSave();
-
-          const diag = data.catalog.diagnosis ? data.catalog.diagnosis.categories : {};
-          const smCount = (diag.SUPERMANZANA || 0) + (diag.REGION || 0);
-          const fraccCount = diag.FRACCIONAMIENTO || 0;
-          const colCount = (diag.COLONIA || 0) + (diag.GENERIC || 0);
-
-          showToast(`🎉 ¡Escaneo exitoso! Se incorporaron ${added} colonias (${smCount} Supermanzanas, ${fraccCount} Fraccionamientos, ${colCount} Colonias)`, "success");
-        } else {
-          showToast(`Error al escanear toponimia: ${data.message || 'Sin resultados'}`, "error");
+        ensureToponymyPlaceIds();
+        const saved = await saveCurrentCity(true);
+        if (!current()) return;
+        if (!saved) throw new Error('No se pudo guardar la configuración antes del escaneo.');
+        const snapshot = JSON.stringify(cityData.places || []);
+        const inputsSnapshot = toponymyInputsSignature();
+        phase = 'Consultando OpenStreetMap y todas las fuentes DENUE';
+        progress();
+        const data = await fetchStartupJson('/api/toponymy/scan?file=' + encodeURIComponent(file) +
+          '&min_count=' + encodeURIComponent(minCount), 'Toponimia', 600000, controller.signal);
+        if (!current()) return;
+        const cat = data.catalog;
+        if (toponymyInputsSignature() !== inputsSnapshot) {
+          throw new Error('El área o las fuentes cambiaron durante el escaneo. Ejecuta Escanear nuevamente.');
         }
-      } catch (err) {
-        showToast(`Fallo de conexión al escanear toponimia: ${err.message}`, "error");
+        if (!cat || !Array.isArray(cat.places) || !cat.places.every(p =>
+          typeof p.name === 'string' && p.name.trim() && Array.isArray(p.loc) && p.loc.length === 2 && p.loc.every(Number.isFinite))) {
+          throw new Error('El escaneo no devolvió nombres y coordenadas válidos.');
+        }
+        clearInterval(timer);
+        setToponymyScanStatus(toponymyScanSummary(cat), cat.partial ? 'warning' : 'success');
+        await consume(cat, current, {file, version, snapshot, inputsSnapshot});
+      } catch (error) {
+        if (current()) { setToponymyScanStatus(error.message, 'error'); showToast(error.message, 'error'); }
       } finally {
-        if (btnElement && originalHtml) {
-          btnElement.disabled = false;
-          btnElement.innerHTML = originalHtml;
-          if (window.lucide) lucide.createIcons();
+        clearInterval(timer);
+        if (toponymyScanController === controller) {
+          toponymyScanController = null;
+          for (const id of ['btnScanPlaces', 'btnEmptyStateScan', 'btnExecuteScan']) {
+            const button = document.getElementById(id);
+            if (button) { button.disabled = false; button.setAttribute('aria-busy', 'false'); }
+          }
+          document.getElementById('scanLoadingIndicator')?.classList.add('hidden');
         }
       }
+    }
+
+    async function quickScanAndPopulateToponymy(btnElement = null) {
+      // Both entry points now use the same review; scanning never imports silently.
+      openScanToponymyDialog();
     }
 
     function openScanToponymyDialog() {
       const modal = document.getElementById('modalScanToponymy');
       if (modal) modal.classList.remove('hidden');
-      executeCityToponymyScan();
+      document.getElementById('scanMinCount')?.focus?.();
+      if (scannedPlacesCatalog && scannedPlacesContext &&
+          scannedPlacesContext.file === currentCityFile && scannedPlacesContext.version === cityLoadVersion &&
+          scannedPlacesContext.inputsSnapshot === toponymyInputsSignature()) {
+        renderScanResultsUI(scannedPlacesCatalog);
+      } else {
+        executeCityToponymyScan();
+      }
       lucide.createIcons();
     }
 
     function closeScanToponymyDialog() {
+      if (toponymyScanController) cancelToponymyScan();
       const modal = document.getElementById('modalScanToponymy');
       if (modal) modal.classList.add('hidden');
     }
 
     async function executeCityToponymyScan() {
-      if (!currentCityFile) {
-        showToast("Selecciona una ciudad primero para escanear toponimia", "error");
-        return;
-      }
       const minCount = document.getElementById('scanMinCount')?.value || 8;
-      const loader = document.getElementById('scanLoadingIndicator');
-      const resultsSec = document.getElementById('scanResultsSection');
-      const btnConfirm = document.getElementById('btnConfirmImportScan');
-
-      if (loader) loader.classList.remove('hidden');
-      if (resultsSec) resultsSec.classList.add('hidden');
-      if (btnConfirm) btnConfirm.disabled = true;
-
-      try {
-        const res = await fetch(`/api/toponymy/scan?file=${encodeURIComponent(currentCityFile)}&min_count=${minCount}`);
-        const data = await res.json();
-        if (data.status === 'ok' && data.catalog) {
-          scannedPlacesCatalog = data.catalog;
-          renderScanResultsUI(data.catalog);
-        } else {
-          showToast(`Error al escanear: ${data.message || 'Sin resultados'}`, "error");
-        }
-      } catch (err) {
-        showToast(`Fallo de conexión al escanear: ${err.message}`, "error");
-      } finally {
-        if (loader) loader.classList.add('hidden');
-      }
+      await runToponymyScan(minCount, async (cat, current, context) => {
+        scannedPlacesCatalog = cat;
+        scannedPlacesContext = context;
+        prepareScanReview(cat);
+        renderScanResultsUI(cat);
+      });
     }
 
-    function renderScanResultsUI(cat) {
-      const resultsSec = document.getElementById('scanResultsSection');
-      const btnConfirm = document.getElementById('btnConfirmImportScan');
-      if (!resultsSec) return;
+    function placeSourceLabel(place) {
+      const source = String(place.source || 'UNKNOWN');
+      const labels = {UNKNOWN:'Origen no registrado', YAML_CURATED:'Añadido manualmente',
+        OSM_NODE:'OSM · punto', OSM_POLYGON:'OSM · polígono',
+        INEGI_DENUE:'DENUE · asentamiento', INEGI_DENUE_LOCALIDAD:'DENUE · localidad sugerida'};
+      return labels[source] || source;
+    }
 
-      resultsSec.classList.remove('hidden');
-      if (btnConfirm) btnConfirm.disabled = (cat.total === 0);
-
-      document.getElementById('scanTotalCount').innerText = cat.total || 0;
-      const diag = cat.diagnosis ? cat.diagnosis.categories : {};
-      document.getElementById('scanSmCount').innerText = (diag.SUPERMANZANA || 0) + (diag.REGION || 0);
-      document.getElementById('scanFraccCount').innerText = diag.FRACCIONAMIENTO || 0;
-      document.getElementById('scanColCount').innerText = (diag.COLONIA || 0) + (diag.GENERIC || 0);
-
-      let microCount = 0;
-      (cat.places || []).forEach(p => {
-        if (isMicroPlace(p)) microCount++;
-      });
-      const elMic = document.getElementById('scanMicroCount');
-      if (elMic) elMic.innerText = microCount;
-
-      const listCont = document.getElementById('scanCandidatesList');
-      const candCount = document.getElementById('scanCandidateCount');
-      if (candCount) candCount.innerText = `${cat.total} elementos detectados`;
-      if (listCont) {
-        listCont.innerHTML = '';
-        (cat.places || []).slice(0, 150).forEach(p => {
-          const item = document.createElement('div');
-          item.className = "px-3 py-1.5 flex items-center justify-between hover:bg-white transition";
-          const isMicro = isMicroPlace(p);
-          const srcBadge = p.source === 'OSM_POLYGON' ? '<span class="text-[9px] bg-cyan-100 text-cyan-800 font-bold px-1 rounded">OSM Polígono</span>' :
-                           (p.source === 'OSM_NODE' ? '<span class="text-[9px] bg-blue-100 text-blue-800 font-bold px-1 rounded">OSM Nodo</span>' :
-                           '<span class="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-1 rounded">DENUE</span>');
-          const microBadge = isMicro ? '<span class="text-[9px] bg-rose-100 text-rose-800 font-bold px-1 rounded">🚪 Cerrada</span>' : '';
-          item.innerHTML = `
-            <div class="flex items-center space-x-2">
-              <span class="font-bold text-stone-900">${p.name}</span>
-              ${microBadge}
-              ${srcBadge}
-            </div>
-            <div class="font-mono text-[10px] text-stone-500">[${p.loc[0].toFixed(3)}, ${p.loc[1].toFixed(3)}]</div>
-          `;
-          listCont.appendChild(item);
-        });
-        if (cat.total > 150) {
-          const moreEl = document.createElement('div');
-          moreEl.className = "p-2 text-center text-stone-400 text-[10px] font-bold";
-          moreEl.innerText = `... y ${cat.total - 150} asentamientos adicionales`;
-          listCont.appendChild(moreEl);
+    function prepareScanReview(cat) {
+      const byId = new Map(), byName = new Map();
+      for (const p of cityData.places || []) {
+        if (p.id) byId.set(p.id, p);
+        const key = toponymyNameKey(p.name);
+        if (!byName.has(key)) byName.set(key, []);
+        byName.get(key).push(p);
+        if (p.original_name) {
+          const originalKey = toponymyNameKey(p.original_name);
+          if (!byName.has(originalKey)) byName.set(originalKey, []);
+          byName.get(originalKey).push(p);
         }
+      }
+      const deleted = cityData.deleted_places || [];
+      scanReviewRows = cat.places.map((p, index) => {
+        const choices = [...(byName.get(toponymyNameKey(p.name)) || [])];
+        if (p.id && byId.has(p.id)) choices.push(byId.get(p.id));
+        const old = choices.find(a => sameToponymyPlace(a, p));
+        const discarded = deleted.some(a => typeof a === 'string' ?
+          toponymyNameKey(a) === toponymyNameKey(p.name) : sameToponymyPlace(a, p));
+        return {p, index, old, status:discarded ? 'discarded' : old ? 'kept' : 'new'};
+      });
+      scanReviewSelected = new Set(scanReviewRows.filter(r => r.status !== 'discarded').map(r => r.index));
+      scanReviewLimit = 60;
+      for (const id of ['scanReviewSearch', 'scanReviewSource', 'scanReviewMunicipality']) {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+      }
+      const replace = document.getElementById('scanConfirmReplace');
+      if (replace) replace.checked = false;
+      const municipalities = [...new Set(cat.places.map(p => p.municipality).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
+      const municipality = document.getElementById('scanReviewMunicipality');
+      if (municipality) municipality.innerHTML = '<option value="">Todos los municipios</option>' +
+        municipalities.map(n => '<option value="' + escapeHtml(n) + '">' + escapeHtml(n) + '</option>').join('');
+      const sources = [...new Set(cat.places.map(p => p.source || 'UNKNOWN'))].sort();
+      const source = document.getElementById('scanReviewSource');
+      if (source) source.innerHTML = '<option value="">Todas las fuentes</option>' +
+        sources.map(n => '<option value="' + escapeHtml(n) + '">' + escapeHtml(placeSourceLabel({source:n})) + '</option>').join('');
+    }
+
+    function scanReviewFiltered() {
+      const query = toponymyNameKey(document.getElementById('scanReviewSearch')?.value || '');
+      const source = document.getElementById('scanReviewSource')?.value || '';
+      const municipality = document.getElementById('scanReviewMunicipality')?.value || '';
+      const status = document.getElementById('scanReviewStatus')?.value || 'new';
+      return scanReviewRows.filter(r => (!query || toponymyNameKey(
+        [r.p.name, ...(r.p.aliases || []), r.p.municipality || '', r.p.locality || ''].join(' ')).includes(query)) &&
+        (!source || (r.p.source || 'UNKNOWN') === source) &&
+        (!municipality || r.p.municipality === municipality) &&
+        (status === 'all' || r.status === status));
+    }
+
+    function scanImportPreview() {
+      const mode = document.querySelector('input[name="scanImportMode"]:checked')?.value || 'merge';
+      const excludeMicro = document.getElementById('scanExcludeMicro')?.checked || false;
+      const smallInferred = document.getElementById('scanInferSmall')?.checked || false;
+      const scanned = scanReviewRows.filter(r => scanReviewSelected.has(r.index) &&
+        r.status !== 'discarded' && (!excludeMicro || !isMicroPlace(r.p))).map(r =>
+          smallInferred && r.p.hierarchy_inferred && r.status === 'new' ?
+          {...r.p, type:'village', category:'LOCALIDAD'} : r.p);
+      const before = cityData.places || [];
+      // Merge also preserves manual edits when strict replacement is selected.
+      const merged = mergeScannedToponymy(before, scanned);
+      const selectedIds = new Set(scanned.map(p=>p.id).filter(Boolean)), selectedNames = new Map();
+      for (const p of scanned) {
+        const key = toponymyNameKey(p.name);
+        if (!selectedNames.has(key)) selectedNames.set(key, []);
+        selectedNames.get(key).push(p);
+      }
+      const isSelected = p => selectedIds.has(p.id) ||
+        (selectedNames.get(toponymyNameKey(p.name)) || []).some(s=>sameToponymyPlace(p,s));
+      const places = mode === 'replace' ? merged.filter(isSelected) : merged;
+      const ids = new Set(before.map(p=>p.id).filter(Boolean));
+      const added = places.filter(p => p.id ? !ids.has(p.id) : !before.some(a=>sameToponymyPlace(a,p))).length;
+      const retainedIds = new Set(places.map(p=>p.id).filter(Boolean));
+      const removed = mode === 'replace' ? before.filter(p=>p.id ? !retainedIds.has(p.id) :
+        !places.some(a=>sameToponymyPlace(a,p))) : [];
+      return {places, added, removed, selected:scanned.length};
+    }
+
+    function toggleScanReviewCandidate(index, checked) {
+      if (scanImportSaving) return;
+      if (checked) scanReviewSelected.add(index); else scanReviewSelected.delete(index);
+      renderScanReview();
+    }
+
+    function selectScanReviewFiltered(checked) {
+      if (scanImportSaving) return;
+      for (const row of scanReviewFiltered()) {
+        if (row.status === 'discarded') continue;
+        if (checked) scanReviewSelected.add(row.index); else scanReviewSelected.delete(row.index);
+      }
+      renderScanReview();
+    }
+
+    function loadMoreScanReview() {
+      scanReviewLimit += 60;
+      renderScanReview();
+    }
+
+    function showScanCandidateOnMap(index) {
+      const row = scanReviewRows[index];
+      if (!row || !mapPoi) return;
+      document.getElementById('modalScanToponymy')?.classList.add('hidden');
+      mapPoi.flyTo([row.p.loc[1], row.p.loc[0]], 15);
+      showToast(row.p.name + ' · ' + placeSourceLabel(row.p) + '. Pulsa Escanear para volver a la revisión.', 'info');
+    }
+
+    function renderScanReview() {
+      if (!scannedPlacesCatalog) return;
+      const rows = scanReviewFiltered(), preview = scanImportPreview();
+      const count = document.getElementById('scanCandidateCount');
+      if (count) count.textContent = rows.length + ' coincidencias · mostrando ' + Math.min(rows.length,scanReviewLimit);
+      const summary = document.getElementById('scanImportDelta');
+      if (summary) summary.textContent = preview.added + ' nuevos · ' +
+        ((cityData.places || []).length - preview.removed.length) + ' existentes conservados · ' +
+        preview.removed.length + ' eliminaciones · ' + preview.selected + ' candidatos seleccionados';
+      const warning = document.getElementById('scanReplaceWarning');
+      if (warning) {
+        warning.hidden = !preview.removed.length;
+        const names = document.getElementById('scanReplaceNames');
+        if (names) names.textContent = preview.removed.slice(0,10).map(p=>p.name).join(', ') +
+          (preview.removed.length > 10 ? '…' : '');
+      }
+      const confirm = document.getElementById('btnConfirmImportScan');
+      if (confirm) {
+        confirm.disabled = scanImportSaving || preview.selected === 0 ||
+          (preview.removed.length > 0 && !document.getElementById('scanConfirmReplace')?.checked);
+        confirm.setAttribute('aria-busy', String(scanImportSaving));
+      }
+      const list = document.getElementById('scanCandidatesList');
+      if (list) {
+        list.innerHTML = rows.slice(0,scanReviewLimit).map(({p,index,old,status}) =>
+          '<div class="scan-review-row"><label><input type="checkbox" aria-label="Incorporar ' + escapeHtml(p.name) +
+          '" ' + (scanReviewSelected.has(index) ? 'checked ' : '') + (status === 'discarded' || scanImportSaving ? 'disabled ' : '') +
+          'onchange="toggleScanReviewCandidate(' + index + ',this.checked)"><span><strong>' + escapeHtml(p.name) +
+          '</strong><small>' + escapeHtml([placeSourceLabel(p),p.municipality || p.cve_mun,
+          status === 'new' ? 'Nuevo' : status === 'kept' ? 'Conservado: ' + old.name : 'Descartado previamente',
+          p.hierarchy_inferred ? 'Escala inferida, revisar' : '',
+          p.establishments ? p.establishments + ' establecimientos; no es población' : '',
+          isMicroPlace(p) ? 'Micro-asentamiento' : ''].filter(Boolean).join(' · ')) +
+          '</small></span></label><button type="button" onclick="showScanCandidateOnMap(' + index +
+          ')" title="Ver ubicación">Mapa</button></div>').join('') ||
+          '<p class="scan-review-empty">Sin coincidencias. Cambia los filtros.</p>';
+        if (rows.length > scanReviewLimit) list.innerHTML +=
+          '<button type="button" class="scan-review-more" onclick="loadMoreScanReview()">Mostrar 60 más</button>';
       }
       lucide.createIcons();
     }
 
-    function importScannedPlaces() {
-      if (!scannedPlacesCatalog || !scannedPlacesCatalog.places) return;
-      const mode = document.querySelector('input[name="scanImportMode"]:checked')?.value || 'merge';
-      const excludeMicro = document.getElementById('scanExcludeMicro')?.checked || false;
-      let scanned = scannedPlacesCatalog.places;
-      if (excludeMicro) {
-        scanned = scanned.filter(p => !isMicroPlace(p));
-      }
-
-      if (!cityData.places) cityData.places = [];
-      placesHistorySnapshot = JSON.parse(JSON.stringify(cityData.places));
-      updateUndoButtonUI();
-
-      let added = 0;
-      if (mode === 'replace') {
-        cityData.places = scanned.map(p => ({
-          name: p.name,
-          loc: p.loc,
-          type: p.type || 'suburb',
-          source: p.source,
-          is_micro: p.is_micro || false,
-          category: p.category || ''
-        }));
-        added = cityData.places.length;
-      } else {
-        const existingMap = new Set(cityData.places.map(p => (p.name || '').trim().toLowerCase()));
-        scanned.forEach(p => {
-          const nm = (p.name || '').trim().toLowerCase();
-          if (!existingMap.has(nm)) {
-            existingMap.add(nm);
-            cityData.places.push({
-              name: p.name,
-              loc: p.loc,
-              type: p.type || 'suburb',
-              source: p.source,
-              is_micro: p.is_micro || false,
-              category: p.category || ''
-            });
-            added++;
-          }
-        });
-      }
-
+    function setToponymyDeliveryMode(mode) {
+      if (!['merge','replace'].includes(mode)) return;
+      cityData.toponymy_mode = mode;
       renderPlacesList();
-      renderPlacesMarkersOnMap();
       triggerAutoSave();
-      closeScanToponymyDialog();
-      showToast(`Se incorporaron ${added} colonias a la ciudad`, "success");
+    }
+
+    function renderScanResultsUI(cat) {
+      const resultsSec = document.getElementById('scanResultsSection');
+      if (!resultsSec) return;
+      resultsSec.classList.remove('hidden');
+      document.getElementById('scanTotalCount').innerText = cat.total || 0;
+      const diag = cat.diagnosis?.categories || {};
+      document.getElementById('scanSmCount').innerText = (diag.SUPERMANZANA || 0) + (diag.REGION || 0);
+      document.getElementById('scanFraccCount').innerText = diag.FRACCIONAMIENTO || 0;
+      document.getElementById('scanColCount').innerText = (diag.COLONIA || 0) + (diag.GENERIC || 0);
+      document.getElementById('scanMicroCount').innerText = (cat.places || []).filter(isMicroPlace).length;
+      renderScanReview();
+    }
+
+    async function importScannedPlaces() {
+      if (!scannedPlacesCatalog || !scannedPlacesContext || scanImportSaving) return;
+      const {file, version, snapshot, inputsSnapshot} = scannedPlacesContext;
+      if (file !== currentCityFile || version !== cityLoadVersion) return;
+      if (toponymyInputsSignature() !== inputsSnapshot) {
+        setToponymyScanStatus('El área o las fuentes cambiaron. Escanea nuevamente antes de importar.', 'warning');
+        return;
+      }
+      const mode = document.querySelector('input[name="scanImportMode"]:checked')?.value || 'merge';
+      if (mode === 'replace' && JSON.stringify(cityData.places || []) !== snapshot) {
+        setToponymyScanStatus('La lista cambió durante la revisión. Escanea nuevamente antes de reemplazarla.', 'warning');
+        return;
+      }
+      const preview = scanImportPreview();
+      if (preview.removed.length && !document.getElementById('scanConfirmReplace')?.checked) {
+        setToponymyScanStatus('Revisa las eliminaciones y marca la confirmación de reemplazo.', 'warning');
+        return;
+      }
+      const before = cityData.places || [], cat = scannedPlacesCatalog;
+      scanImportSaving = true;
+      const confirm = document.getElementById('btnConfirmImportScan');
+      if (confirm) confirm.disabled = true;
+      try {
+        placesHistorySnapshot = JSON.parse(JSON.stringify(before));
+        updateUndoButtonUI();
+        cityData.places = preview.places;
+        // Persist explicit removals so a later scan/OSM merge respects this review.
+        cityData.deleted_places = [...(cityData.deleted_places || []), ...preview.removed];
+        selectedPlaceIndices.clear();
+        renderPlacesList();
+        renderPlacesMarkersOnMap();
+        setToponymyScanStatus(toponymyScanSummary(cat) + ' Guardando nombres…', 'running');
+        const saved = await saveCurrentCity(true);
+        if (file !== currentCityFile || version !== cityLoadVersion) return;
+        if (!saved) throw new Error('La importación quedó como borrador. Pulsa Guardar YAML para reintentar.');
+        scannedPlacesCatalog = null;
+        scannedPlacesContext = null;
+        closeScanToponymyDialog();
+        setToponymyScanStatus(toponymyScanSummary(cat) + ' ' + preview.added + ' nombres nuevos guardados.', cat.partial ? 'warning' : 'success');
+        showToast(preview.added + ' nombres nuevos guardados; ' + preview.removed.length + ' retirados.', cat.partial ? 'warning' : 'success');
+      } catch (error) {
+        if (file === currentCityFile && version === cityLoadVersion) {
+          setToponymyScanStatus(error.message, 'error');
+          showToast(error.message, 'error');
+        }
+      } finally {
+        scanImportSaving = false;
+        if (scannedPlacesCatalog && file === currentCityFile && version === cityLoadVersion) renderScanReview();
+      }
     }
 
     // -------------------------------------------------------------------------
@@ -8722,6 +9419,13 @@
     // =========================================================================
     let isPlacesBoxSelectActive = false;
     let activeZoneClustersData = null;
+    let activeZoneClustersContext = null, zoneCalculationVersion = 0;
+    function zoneScoreExplanation(candidate) {
+      const names = {source:'Procedencia', scale:'Escala', commerce:'Comercio', taxonomy:'Taxonomía', length:'Longitud'};
+      return 'Puntuación ' + candidate.score + ': ' + Object.entries(candidate.score_components || {})
+        .map(([key,value])=>(names[key] || key) + ' ' + value).join(' · ') +
+        '. Es una sugerencia de rotulación; no mide población.';
+    }
     let mapZonePreview = null;
     let zonePreviewLayerGroup = null;
     let zoneClusterRadiusTimer = null;
@@ -8981,10 +9685,13 @@
       const status = document.getElementById('zoneThinningStatus');
 
       const radius = slider ? parseFloat(slider.value) : 1000.0;
-      const heuristic = heuristicSelect ? heuristicSelect.value : 'density';
+      const heuristic = heuristicSelect ? heuristicSelect.value : 'balanced';
       const excludeMicro = chkMicro ? chkMicro.checked : true;
 
       if (status) status.innerText = "Calculando zonas de proximidad y puntuaciones...";
+      const ownVersion = ++zoneCalculationVersion;
+      const context = {file:currentCityFile, version:cityLoadVersion, snapshot:JSON.stringify(places)};
+      activeZoneClustersContext = null;
 
       try {
         const res = await fetch('/api/toponymy/cluster-zones', {
@@ -8999,8 +9706,11 @@
           })
         });
         const data = await res.json();
+        if (ownVersion !== zoneCalculationVersion || context.file !== currentCityFile ||
+            context.version !== cityLoadVersion || context.snapshot !== JSON.stringify(cityData.places || [])) return;
         if (data.status === 'ok') {
           activeZoneClustersData = data;
+          activeZoneClustersContext = context;
           currentDeckIndex = 0;
           updateZoneMetricsUI(data);
           renderZoneClustersUI();
@@ -9313,7 +10023,7 @@
               <div class="flex items-start justify-between gap-1">
                 <label class="flex items-center space-x-1.5 cursor-pointer min-w-0 flex-1">
                   <input type="checkbox" ${isSelected ? 'checked' : ''} onchange="onToggleZoneCandidate('${z.zone_id}', ${c.original_index}, this.checked)" class="rounded text-indigo-600 focus:ring-0 shrink-0 cursor-pointer">
-                  <span class="text-xs font-semibold text-stone-900 truncate ${!isSelected ? 'line-through text-stone-400' : ''}">${scaleIcon} ${escapeHtml(c.name)}</span>
+                  <span title="${escapeHtml(zoneScoreExplanation(c))}" class="text-xs font-semibold text-stone-900 truncate ${!isSelected ? 'line-through text-stone-400' : ''}">${scaleIcon} ${escapeHtml(c.name)}</span>
                 </label>
                 <button type="button" onclick="deckSetChampion('${z.zone_id}', ${c.original_index})" class="px-1.5 py-0.5 bg-stone-100 hover:bg-emerald-50 text-stone-500 hover:text-emerald-700 hover:border-emerald-300 border border-stone-200 rounded text-[9px] font-bold transition shrink-0" title="Hacer a este el ganador único de la zona">
                   👑 Ganador
@@ -9392,7 +10102,7 @@
             <div class="flex items-center justify-between">
               <div class="flex items-center space-x-1.5 text-emerald-800 text-xs font-extrabold">
                 <span class="text-sm">👑</span>
-                <span>GANADOR SUGERIDO (Mayor Actividad / Prestigio)</span>
+                <span>CANDIDATO SUGERIDO (criterio seleccionado)</span>
               </div>
               <div class="flex items-center space-x-1">
                 ${isRecSelected ? '<span class="px-2 py-0.5 bg-emerald-600 text-white rounded-md text-[10px] font-bold shadow-2xs flex items-center space-x-1"><i data-lucide="check" class="w-3 h-3"></i><span>Campeón Activo</span></span>' : `<button onclick="deckSetChampion('${z.zone_id}', ${recCand.original_index})" class="px-2 py-0.5 bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-md text-[10px] font-bold transition">Reelegir Campeón</button>`}
@@ -9596,7 +10306,7 @@
                 <input type="checkbox" ${isSelected ? 'checked' : ''} onchange="onToggleZoneCandidate('${z.zone_id}', ${c.original_index}, this.checked)" class="rounded text-emerald-600 focus:ring-0 shrink-0 cursor-pointer">
                 <div class="truncate flex items-center space-x-1.5 text-xs">
                   <span>${scaleIcon}</span>
-                  <span class="truncate ${!isSelected ? 'line-through text-stone-400' : ''}">${escapeHtml(c.name || 'Sin nombre')}</span>
+                  <span title="${escapeHtml(zoneScoreExplanation(c))}" class="truncate ${!isSelected ? 'line-through text-stone-400' : ''}">${escapeHtml(c.name || 'Sin nombre')}</span>
                   ${isRec ? '<span class="px-1.5 py-0.2 bg-emerald-600 text-white rounded text-[9px] font-bold shrink-0">★ Sugerido</span>' : ''}
                   ${isExtra ? '<span class="px-1.5 py-0.2 bg-indigo-600 text-white rounded text-[9px] font-bold shrink-0">+ Conservada</span>' : ''}
                 </div>
@@ -9767,6 +10477,12 @@
     async function applyZoneThinningSelections() {
       if (!activeZoneClustersData || !activeZoneClustersData.zones) return;
       const places = cityData.places || [];
+      const context = activeZoneClustersContext;
+      if (!context || context.file !== currentCityFile || context.version !== cityLoadVersion ||
+          context.snapshot !== JSON.stringify(places)) {
+        showToast('La lista o el proyecto cambió. Recalcula la poda antes de aplicar.', 'warning');
+        return;
+      }
       const zones = activeZoneClustersData.zones;
 
       const btn = document.getElementById('btnApplyZoneThinning');
@@ -9789,18 +10505,26 @@
           body: JSON.stringify({ places: places, zones: payloadZones })
         });
         const data = await res.json();
+        if (context.file !== currentCityFile || context.version !== cityLoadVersion ||
+            context.snapshot !== JSON.stringify(cityData.places || [])) return;
         if (data.status === 'ok') {
           if (places.length > 0) {
             placesHistorySnapshot = JSON.parse(JSON.stringify(places));
             updateUndoButtonUI();
           }
 
+          const kept = new Set((data.places || []).map(p=>p.id));
+          const removed = places.filter(p=>p.id ? !kept.has(p.id) : !(data.places || []).some(a=>sameToponymyPlace(a,p)));
+          cityData.deleted_places = [...(cityData.deleted_places || []), ...removed];
           cityData.places = data.places || [];
           selectedPlaceIndices.clear();
           lastSelectedPlaceIndex = null;
           renderPlacesList();
           renderPlacesMarkersOnMap();
-          triggerAutoSave();
+          const saved = await saveCurrentCity(true);
+          if (context.file !== currentCityFile || context.version !== cityLoadVersion) return;
+          if (!saved) throw new Error('La poda quedó como borrador. Pulsa Guardar YAML para reintentar.');
+          activeZoneClustersContext = null;
           closeZoneThinningModal();
           showToast(`¡Poda exitosa! Se conservaron ${data.total_kept} colonias y se podaron ${data.total_pruned}`, "success");
         } else {
@@ -10076,6 +10800,7 @@
         if (requestId !== densityRequestId || requestedFile !== currentCityFile || requestedState !== JSON.stringify(cityData)) return;
         if (!res.ok) throw new Error(data.error || data.message || 'No se pudo cargar la referencia de demanda');
         if (cityData.macroeconomics?.residential_employment === 'census_employed' && data.diagnostics?.employment_mode !== 'census_employed') throw new Error('La referencia de demanda no coincide con el método de ocupados seleccionado.');
+        if (cityData.macroeconomics?.demographic_reference?.mode === 'eic2025' && data.diagnostics?.residential_employment?.demographic_reference?.mode !== 'eic2025') throw new Error('La vista previa no corresponde a la referencia EIC 2025 seleccionada.');
         if (['auto','ce_bounded','historical_transfer'].includes(cityData.macroeconomics?.workplace_employment) && data.diagnostics?.workplace_mode !== cityData.macroeconomics.workplace_employment) throw new Error('La referencia de empleo no coincide con el método seleccionado.');
         const workplace = data.diagnostics?.workplace_employment;
         const workplaceLabel = document.getElementById('workplaceCoverage');
@@ -10092,6 +10817,9 @@
           const retained = employment?.placement?.retained;
           const estimated = Object.entries(retained?.by_source || {}).filter(([source]) => source !== 'published_block').reduce((sum, [, values]) => sum + values.blocks, 0);
           employmentLabel.textContent = employment ? `${retained?.blocks || 0} manzanas: ${estimated} con ocupados estimados. Ocupados proyectados tras ubicación y BBOX, antes de filtros de demanda: ${Math.round(retained?.projected_employed || 0).toLocaleString('es-MX')}.` : '';
+          if (employment?.demographic_reference?.mode === 'eic2025') {
+            employmentLabel.textContent = `Referencia EIC 2025. Ocupados residentes: ${Math.round(retained?.projected_employed || 0).toLocaleString('es-MX')}. Viajeros laborales: ${Math.round(retained?.projected_commuters || 0).toLocaleString('es-MX')}. Antes de filtros de demanda; distribución espacial CPV 2020.`;
+          }
         }
         const rawPoints = data.points || [];
         const declaredPoiIds = new Set((cityData?.pois || []).map(p => p.id));
@@ -10944,13 +11672,25 @@
       showToast("Iniciando pipeline de compilación...", "info");
 
       try {
+        const file = currentCityFile;
         if (await saveCurrentCity(true) === false) throw new Error('Guarda la configuración antes de compilar.');
+        const state = JSON.stringify(cityData);
+        if (file !== currentCityFile) throw new Error('El proyecto cambió; vuelve a compilar.');
+        if (cityData.demand?.engine === 'v2') {
+          const sources = await fetchStartupJson(`/api/data-status?file=${encodeURIComponent(file)}`, 'Fuentes del nuevo motor', 30000);
+          if (file !== currentCityFile || state !== JSON.stringify(cityData)) throw new Error('La configuración cambió; vuelve a compilar.');
+          updateDemandEngineControls(sources);
+          const names = {denue:'DENUE', cpv:'Censo 2020', marco:'Marco Geoestadístico', eic:'EIC 2025'};
+          const missing = Object.keys(names).filter(key => sources[key]?.status !== 'ok');
+          if (missing.length) throw new Error(`Faltan fuentes del nuevo motor: ${missing.map(key => names[key]).join(', ')}. Ve a Fuentes y usa Preparar descargas.`);
+        }
         const sourceReport = await refreshWorkplaceSourceStatus(true);
+        if (file !== currentCityFile || state !== JSON.stringify(cityData)) throw new Error('La configuración cambió; vuelve a compilar.');
         appendTerminalLog({timestamp: new Date().toLocaleTimeString(), line: workplaceSourceStatus(sourceReport)});
         const res = await fetch('/api/build/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ file: currentCityFile, skip_map: skipMap })
+          body: JSON.stringify({ file, skip_map: skipMap })
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "No se pudo iniciar");
@@ -11197,7 +11937,7 @@
         warning: 'bg-amber-600 text-white border-amber-500',
         info: 'bg-stone-900 text-white border-stone-700'
       };
-      toast.className = `fixed bottom-6 right-6 ${colors[type] || colors.info} border px-4 py-2.5 rounded-lg text-xs font-semibold shadow-2xl z-50 transition transform duration-300 flex items-center space-x-3`;
+      toast.className = `wizard-toast fixed bottom-6 right-6 ${colors[type] || colors.info} border px-4 py-2.5 rounded-lg text-xs font-semibold shadow-2xl z-50 transition transform duration-300 flex items-center space-x-3`;
       toast.innerHTML = `<span>${msg}</span>`;
 
       let timer = null;

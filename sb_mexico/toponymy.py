@@ -115,96 +115,11 @@ def extract_settlement_suggestions(
     Extrae sugerencias deduplicadas de colonias y supermanzanas desde el DENUE
     para asistir al usuario en POI Studio.
     """
+    from .toponymy_sources import read_denue_sources, denue_places
+    from .toponymy_sources import read_denue_sources, denue_places
     if not os.path.exists(denue_path) or not bbox or len(bbox) != 4:
         return []
-
-    df = None
-    for enc in ['latin1', 'utf-8-sig', 'utf-8', 'cp1252']:
-        try:
-            df = pd.read_csv(denue_path, encoding=enc, low_memory=False, dtype=str)
-            break
-        except Exception:
-            continue
-
-    if df is None:
-        return []
-
-    lat_cols = [c for c in df.columns if 'latitud' in c.lower()]
-    lon_cols = [c for c in df.columns if 'longitud' in c.lower()]
-    if not lat_cols or not lon_cols:
-        return []
-
-    df['lat'] = pd.to_numeric(df[lat_cols[0]], errors='coerce')
-    df['lon'] = pd.to_numeric(df[lon_cols[0]], errors='coerce')
-
-    df_box = df[
-        (df['lon'] >= bbox[0]) & (df['lon'] <= bbox[2]) &
-        (df['lat'] >= bbox[1]) & (df['lat'] <= bbox[3])
-    ].dropna(subset=['lat', 'lon']).copy()
-
-    col_nomb = 'nomb_asent' if 'nomb_asent' in df_box.columns else 'asentamiento'
-    col_tipo = 'tipo_asent' if 'tipo_asent' in df_box.columns else 'tipo_asentamiento'
-
-    if col_nomb not in df_box.columns:
-        return []
-
-    df_box['nomb_clean'] = df_box[col_nomb].fillna('').astype(str).str.strip().str.upper()
-    df_box['tipo_clean'] = df_box[col_tipo].fillna('').astype(str).str.strip().str.upper() if col_tipo in df_box.columns else 'COLONIA'
-
-    invalid_names = {'', 'NAN', 'NINGUNO', 'OTRO', 'SIN NOMBRE', 'DESCONOCIDO', 'NULL', 'NO APLICA', 'CENTRO'}
-    df_valid = df_box[~df_box['nomb_clean'].isin(invalid_names)].copy()
-
-    suggestions = []
-    # Normalización de claves para agrupar variantes (ej. '97' y 'SUPERMANZANA 97')
-    grouped_data = {}
-
-    for raw_name, group in df_valid.groupby('nomb_clean'):
-        count = int(len(group))
-        if count < min_count:
-            continue
-
-        lon_med = float(group['lon'].median())
-        lat_med = float(group['lat'].median())
-
-        tipo_mode = str(group['tipo_clean'].mode().iloc[0]) if not group['tipo_clean'].empty else 'COLONIA'
-        clean_name, place_type = format_clean_place_name(str(raw_name), tipo_mode)
-
-        # Clave canónica de deduplicación: si es Supermanzana/Región/número puro, aislar el número.
-        # Si es fraccionamiento o colonia general, usar el nombre completo alfanumérico normalizado.
-        clean_upper = clean_name.upper()
-        if any(w in clean_upper for w in ["SUPERMANZANA", "SM", "REGION", "REG"]) or clean_name.isdigit():
-            num_match = re.findall(r'\d+', clean_name)
-            if num_match:
-                norm_key = f"sm_{num_match[0]}"
-            else:
-                norm_key = re.sub(r'[^a-zA-Z0-9]', '', clean_name.lower())
-        else:
-            norm_key = re.sub(r'[^a-zA-Z0-9]', '', clean_name.lower())
-
-        if norm_key in grouped_data:
-            # Si ya existe, nos quedamos con el que tenga mayor cantidad de comercios
-            if count > grouped_data[norm_key]['establishments']:
-                grouped_data[norm_key] = {
-                    'name': str(clean_name),
-                    'type': str(place_type),
-                    'loc': [float(round(lon_med, 5)), float(round(lat_med, 5))],
-                    'establishments': int(count),
-                    'tipo_asent': str(tipo_mode)
-                }
-            else:
-                grouped_data[norm_key]['establishments'] = int(grouped_data[norm_key]['establishments'] + count)
-        else:
-            grouped_data[norm_key] = {
-                'name': str(clean_name),
-                'type': str(place_type),
-                'loc': [float(round(lon_med, 5)), float(round(lat_med, 5))],
-                'establishments': int(count),
-                'tipo_asent': str(tipo_mode)
-            }
-
-    suggestions = list(grouped_data.values())
-    suggestions.sort(key=lambda x: int(x['establishments']), reverse=True)
-    return suggestions
+    return denue_places(read_denue_sources([denue_path], bbox), min_count=min_count)
 
 
 def extract_city_localities_from_denue(
@@ -217,64 +132,11 @@ def extract_city_localities_from_denue(
     a partir de la columna 'localidad' del DENUE del INEGI dentro del BBOX.
     Calcula la mediana de coordenadas de sus establecimientos para situar el nodo urbano.
     """
+    from .toponymy_sources import read_denue_sources, denue_places
+    from .toponymy_sources import read_denue_sources, denue_places
     if not os.path.exists(denue_path) or not bbox or len(bbox) != 4:
         return []
-
-    df = None
-    for enc in ['latin1', 'utf-8-sig', 'utf-8', 'cp1252']:
-        try:
-            df = pd.read_csv(denue_path, encoding=enc, low_memory=False, dtype=str)
-            break
-        except Exception:
-            continue
-
-    if df is None:
-        return []
-
-    lat_cols = [c for c in df.columns if 'latitud' in c.lower()]
-    lon_cols = [c for c in df.columns if 'longitud' in c.lower()]
-    loc_cols = [c for c in df.columns if c.lower() == 'localidad']
-    if not lat_cols or not lon_cols or not loc_cols:
-        return []
-
-    df['lat'] = pd.to_numeric(df[lat_cols[0]], errors='coerce')
-    df['lon'] = pd.to_numeric(df[lon_cols[0]], errors='coerce')
-
-    df_box = df[
-        (df['lon'] >= bbox[0]) & (df['lon'] <= bbox[2]) &
-        (df['lat'] >= bbox[1]) & (df['lat'] <= bbox[3])
-    ].dropna(subset=['lat', 'lon']).copy()
-
-    col_loc = loc_cols[0]
-    df_box['loc_clean'] = df_box[col_loc].fillna('').astype(str).str.strip()
-
-    invalid_names = {'', 'NAN', 'NINGUNO', 'OTRO', 'SIN NOMBRE', 'DESCONOCIDO', 'NULL', 'NO APLICA'}
-    df_valid = df_box[~df_box['loc_clean'].str.upper().isin(invalid_names)].copy()
-
-    from sb_mexico.toponymy_homogenizer import smart_title_case
-
-    cities = []
-    for raw_name, group in df_valid.groupby('loc_clean'):
-        count = int(len(group))
-        if count < min_count:
-            continue
-
-        clean_name = smart_title_case(str(raw_name))
-        lon_med = float(group['lon'].median())
-        lat_med = float(group['lat'].median())
-
-        cities.append({
-            "name": clean_name,
-            "type": "city",
-            "category": "CIUDAD",
-            "loc": [round(lon_med, 5), round(lat_med, 5)],
-            "establishments": count,
-            "source": "INEGI_DENUE_LOCALIDAD",
-            "is_micro": False
-        })
-
-    cities.sort(key=lambda x: x["establishments"], reverse=True)
-    return cities
+    return denue_places(read_denue_sources([denue_path], bbox), min_count=min_count, cities=True)
 
 
 def generate_denue_neighborhoods_geojson(
@@ -379,471 +241,250 @@ def generate_denue_neighborhoods_geojson(
     return output_geojson
 
 
-def run_osmium_places_filter(pbf_path: str, output_geojson: str, timeout: int = 45) -> bool:
-    """
-    Ejecuta osmium tags-filter y export para extraer lugares desde un .osm.pbf
-    hacia GeoJSON, usando osmium nativo o el puente WSL 2 en Windows.
-    """
-    import shutil, subprocess
-    abs_pbf = os.path.abspath(pbf_path)
-    abs_out = os.path.abspath(output_geojson)
-    os.makedirs(os.path.dirname(abs_out), exist_ok=True)
-
-    # 1. Intento nativo
-    if shutil.which("osmium"):
-        try:
-            tmp_pbf = abs_out + ".tmp.osm.pbf"
-            c1 = ["osmium", "tags-filter", abs_pbf, "nwr/place=city,town,suburb,neighbourhood,quarter,village,hamlet", "-o", tmp_pbf, "--overwrite"]
-            r1 = subprocess.run(c1, capture_output=True, text=True, timeout=timeout)
-            if r1.returncode == 0 and os.path.exists(tmp_pbf):
-                c2 = ["osmium", "export", tmp_pbf, "-o", abs_out, "--overwrite"]
-                r2 = subprocess.run(c2, capture_output=True, text=True, timeout=timeout)
-                try:
-                    os.remove(tmp_pbf)
-                except Exception:
-                    pass
-                if r2.returncode == 0 and os.path.exists(abs_out):
-                    return True
-        except Exception:
-            pass
-
-    # 2. Intento vía puente WSL 2
-    if shutil.which("wsl"):
-        try:
+def run_osmium_places_filter(pbf_path: str, output_geojson: str, timeout: int = 180,
+                            bbox=None, diagnostics=None) -> bool:
+    """Extract a bounded area and publish only a complete GeoJSON."""
+    import shutil, subprocess, uuid
+    from pathlib import Path
+    token = uuid.uuid4().hex
+    output = Path(output_geojson).resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    native = shutil.which("osmium")
+    wsl = shutil.which("wsl") if not native else None
+    if not native and not wsl:
+        if diagnostics is not None:
+            diagnostics.update(status="error", message="No se encontró osmium nativo ni WSL.")
+        return False
+    files = []
+    temporary = output.with_name(output.name + "." + token + ".tmp.geojson")
+    try:
+        if wsl:
             from sb_mexico.cartography import to_wsl_path
-            w_pbf = to_wsl_path(abs_pbf)
-            w_out = to_wsl_path(abs_out)
-            w_tmp = f"/tmp/places_tmp_{os.getpid()}.osm.pbf"
-            c1 = ["wsl", "osmium", "tags-filter", w_pbf, "nwr/place=city,town,suburb,neighbourhood,quarter,village,hamlet", "-o", w_tmp, "--overwrite"]
-            r1 = subprocess.run(c1, capture_output=True, text=True, timeout=timeout)
-            if r1.returncode == 0:
-                c2 = ["wsl", "osmium", "export", w_tmp, "-o", w_out, "--overwrite"]
-                r2 = subprocess.run(c2, capture_output=True, text=True, timeout=timeout)
-                subprocess.run(["wsl", "rm", "-f", w_tmp], capture_output=True)
-                if r2.returncode == 0 and os.path.exists(abs_out):
-                    return True
-        except Exception:
-            pass
-
-    return False
-
-
-def scan_city_settlements_catalog(
-    city_file: str,
-    min_count: int = 8
-) -> Dict[str, Any]:
-    """
-    Escanea y cataloga todos los asentamientos disponibles para una ciudad desde:
-    1. DENUE del INEGI (agrupados por asentamiento con mediana espacial).
-    2. Manifiesto toponímico dist/<city>/toponymy_manifest.json (si existe).
-    3. Archivo de configuración YAML de la ciudad (places existentes).
-
-    Devuelve un catálogo completo con diagnóstico taxonómico de prefijos.
-    """
-    from sb_mexico.toponymy_homogenizer import ToponymyAnalyzer
-
-    # Cargar archivo de configuración YAML de la ciudad
-    cdata = {}
-    if os.path.exists(city_file):
-        try:
-            import yaml
-            with open(city_file, "r", encoding="utf-8") as f:
-                cdata = yaml.safe_load(f) or {}
-        except Exception:
-            cdata = {}
-
-    city_cfg = cdata.get("city", {})
-    city_name = city_cfg.get("name", os.path.splitext(os.path.basename(city_file))[0])
-    city_code = str(city_cfg.get("code", "")).lower()
-    city_base = os.path.splitext(os.path.basename(city_file))[0].lower()
-    bbox = city_cfg.get("bbox")
-
-    discovered: List[Dict[str, Any]] = []
-    seen_keys: Set[str] = set()
-
-    # 1. Incorporar places ya curados en el YAML
-    existing_places = cdata.get("places", [])
-    if isinstance(existing_places, list):
-        for ep in existing_places:
-            name = ep.get("name", "").strip()
-            loc = ep.get("loc", [0.0, 0.0])
-            if name and len(loc) == 2:
-                norm_k = re.sub(r'[^a-zA-Z0-9]', '', name.lower())
-                seen_keys.add(norm_k)
-                cls_res = ToponymyAnalyzer.classify_name(name)
-                is_micro = (cls_res.get("category") == "PRIVADA_CERRADA")
-                category = "CIUDAD" if ep.get("type") in ("city", "town") else cls_res.get("category", "COLONIA")
-                discovered.append({
-                    "name": name,
-                    "loc": [float(loc[0]), float(loc[1])],
-                    "type": ep.get("type", "suburb"),
-                    "source": "YAML_CURATED",
-                    "category": category,
-                    "is_micro": is_micro,
-                    "establishments": 0
-                })
-
-    # 2. Revisar archivos de toponimia OSM (GeoJSON directo, PBF o manifiesto)
-    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    osm_geo_candidates = [
-        os.path.join(root_dir, "dist", city_base, f"{city_base}_places.geojson"),
-        os.path.join(root_dir, "dist", city_base, "osm_places.geojson"),
-        os.path.join(root_dir, "dist", city_code, "osm_places.geojson"),
-        os.path.join(root_dir, "dist", city_base, f"{city_code.lower()}_places.geojson")
-    ]
-    manifest_candidates = [
-        os.path.join(root_dir, "dist", city_base, "toponymy_manifest.json"),
-        os.path.join(root_dir, "dist", city_code, "toponymy_manifest.json")
-    ]
-
-    # 2a. Si no existe GeoJSON previo, buscar .osm.pbf para extraer lugares frescos con osmium
-    if not any(os.path.exists(p) for p in osm_geo_candidates):
-        import glob
-        pbf_cands = [
-            os.path.join(root_dir, "dist", city_base, f"{city_code.lower()}_lod_optimized.osm.pbf"),
-            os.path.join(root_dir, "dist", city_base, f"{city_base}.osm.pbf"),
-            os.path.join(root_dir, "dist", city_code, f"{city_code.lower()}.osm.pbf"),
-        ]
-        pbf_cands.extend(glob.glob(os.path.join(root_dir, "data", city_base, "*.osm.pbf")))
-        pbf_cands.extend(glob.glob(os.path.join(root_dir, "data", city_code, "*.osm.pbf")))
-        pbf_cands.extend(glob.glob(os.path.join(root_dir, "data", "*.osm.pbf")))
-
-        for p_cand in pbf_cands:
-            if os.path.exists(p_cand) and os.path.getsize(p_cand) > 1000:
-                gen_target = os.path.join(root_dir, "dist", city_base, "osm_places.geojson")
-                if run_osmium_places_filter(p_cand, gen_target):
-                    osm_geo_candidates.insert(0, gen_target)
-                    break
-
-    seen_city_names: Set[str] = set()
-    for ep in discovered:
-        if ep.get("type") in ("city", "town"):
-            seen_city_names.add(re.sub(r'[^a-zA-Z0-9]', '', ep["name"].lower()))
-
-    # 2b. Cargar desde GeoJSON de lugares de OSM si existe
-    osm_geo_loaded = False
-    for g_path in osm_geo_candidates:
-        if os.path.exists(g_path):
+            source = to_wsl_path(str(Path(pbf_path).resolve()))
+            target = to_wsl_path(str(temporary))
+            area = "/tmp/sb-toponymy-" + token + "-area.osm.pbf"
+            filtered = "/tmp/sb-toponymy-" + token + "-places.osm.pbf"
+            def run(args):
+                # GNU timeout kills the Linux child too; killing only wsl.exe does not.
+                command = [wsl, "--exec", "timeout", str(timeout) + "s", "osmium"] + args
+                result = subprocess.run(command, capture_output=True, text=True, timeout=timeout + 5)
+                if result.returncode:
+                    detail = result.stderr.strip()[-800:]
+                    if result.returncode == 124:
+                        detail = "Tiempo agotado (" + str(timeout) + " s) durante " + args[0]
+                    raise RuntimeError(detail or "osmium terminó con código " + str(result.returncode))
+        else:
+            source = str(Path(pbf_path).resolve())
+            target = str(temporary)
+            area = str(output.with_name(token + "-area.osm.pbf"))
+            filtered = str(output.with_name(token + "-places.osm.pbf"))
+            def run(args):
+                result = subprocess.run([native] + args, capture_output=True, text=True, timeout=timeout)
+                if result.returncode:
+                    raise RuntimeError(result.stderr.strip()[-800:] or "Error en osmium")
+        if bbox:
+            files.append(area)
+            run(["extract", source, "-b", ",".join(map(str, bbox)), "-s", "complete_ways",
+                 "-o", area, "--overwrite"])
+            source = area
+        files.append(filtered)
+        run(["tags-filter", source, "nwr/place=city,town,suburb,neighbourhood,quarter,village,hamlet",
+             "-o", filtered, "--overwrite"])
+        run(["export", filtered, "-o", target, "--overwrite"])
+        with temporary.open(encoding="utf-8") as stream:
+            document = json.load(stream)
+        if document.get("type") != "FeatureCollection":
+            raise ValueError("La extracción OSM no produjo un GeoJSON válido")
+        os.replace(temporary, output)
+        if diagnostics is not None:
+            diagnostics.update(status="ok", features=len(document.get("features", [])))
+        return True
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        if diagnostics is not None:
+            diagnostics.update(status="error", message=str(error))
+        return False
+    finally:
+        if wsl and files:
             try:
-                from shapely.geometry import shape
-                with open(g_path, "r", encoding="utf-8") as gf:
-                    gdata = json.load(gf)
-                feats = gdata.get("features", [])
-                for f in feats:
-                    props = f.get("properties", {})
-                    nm = props.get("name", "").strip()
-                    place_tag = props.get("place", "").strip().lower()
-                    if not nm or not place_tag:
-                        continue
-                    # Descartar vialidades, semáforos y fronteras administrativas
-                    if props.get("highway") or props.get("traffic_signals") or props.get("boundary") == "administrative" or props.get("admin_level"):
-                        continue
-                    if nm.upper() in ["NAN", "NULL", "DESCONOCIDO", "NINGUNO", "OTRO", "PREDIO SELECCIONADO", "CENTRO"]:
-                        continue
-
-                    geom = f.get("geometry", {})
-                    g_type = geom.get("type")
-                    if g_type == "Point":
-                        coords = geom.get("coordinates")
-                        if not coords or len(coords) != 2:
-                            continue
-                        lon, lat = coords[0], coords[1]
-                        src = "OSM_NODE"
-                    elif g_type in ("Polygon", "MultiPolygon", "LineString"):
-                        if place_tag in ("city", "town"):
-                            # Nunca convertir poligonos en ciudades
-                            continue
-                        try:
-                            s = shape(geom)
-                            if s.is_empty:
-                                continue
-                            c = s.centroid
-                            lon, lat = c.x, c.y
-                            src = "OSM_POLYGON"
-                        except Exception:
-                            continue
-                    else:
-                        continue
-
-                    if bbox and len(bbox) == 4:
-                        if not (bbox[0] <= lon <= bbox[2] and bbox[1] <= lat <= bbox[3]):
-                            continue
-
-                    # Mapear a tipología canónica
-                    if place_tag in ("city", "town", "borough"):
-                        p_type = "city"
-                    elif place_tag in ("suburb", "quarter"):
-                        p_type = "suburb"
-                    elif place_tag in ("neighbourhood", "neighborhood", "subdivision"):
-                        p_type = "neighbourhood"
-                    else:
-                        p_type = "village"
-
-                    norm_k = re.sub(r'[^a-zA-Z0-9]', '', nm.lower())
-                    if p_type == "city" and norm_k in seen_city_names:
-                        continue
-                    if norm_k in seen_keys:
-                        continue
-
-                    if p_type == "city":
-                        seen_city_names.add(norm_k)
-                    seen_keys.add(norm_k)
-
-                    cls_res = ToponymyAnalyzer.classify_name(nm)
-                    is_micro = (cls_res.get("category") == "PRIVADA_CERRADA")
-                    category = "CIUDAD" if p_type == "city" else cls_res.get("category", "COLONIA")
-
-                    discovered.append({
-                        "name": nm,
-                        "loc": [round(float(lon), 5), round(float(lat), 5)],
-                        "type": p_type,
-                        "source": src,
-                        "category": category,
-                        "is_micro": is_micro,
-                        "establishments": 0
-                    })
-                osm_geo_loaded = True
-                break
-            except Exception:
+                subprocess.run([wsl, "--exec", "rm", "-f", "--"] + files,
+                               capture_output=True, timeout=10)
+            except (OSError, subprocess.SubprocessError):
                 pass
+        elif native:
+            for path in files:
+                Path(path).unlink(missing_ok=True)
+        temporary.unlink(missing_ok=True)
 
-    # 2b. Respaldo: Revisar manifiesto toponímico si no hubo GeoJSON
-    if not osm_geo_loaded:
-        for mf_path in manifest_candidates:
-            if os.path.exists(mf_path):
+
+def _toponymy_context(city_file):
+    from pathlib import Path
+    import yaml
+    root = Path(__file__).resolve().parents[1]
+    path = Path(city_file)
+    with path.open(encoding="utf-8") as stream:
+        config = yaml.safe_load(stream) or {}
+    bbox = config.get("city", {}).get("bbox")
+    if not isinstance(bbox, list) or len(bbox) != 4 or not all(math.isfinite(float(x)) for x in bbox):
+        raise ValueError("Define un BBOX válido antes de escanear nombres.")
+    if bbox[0] >= bbox[2] or bbox[1] >= bbox[3]:
+        raise ValueError("El BBOX tiene límites invertidos.")
+    project = Path(config.get("data_dir") or "data/" + path.stem)
+    if not project.is_absolute():
+        project = root / project
+    return root, project, config, bbox
+
+
+def _load_osm_places(city_file, context, sources):
+    from pathlib import Path
+    import hashlib
+    from shapely.geometry import shape
+    from .place_identity import merge_places, place_id
+    from .toponymy_homogenizer import ToponymyAnalyzer
+    root, project, config, bbox = context
+    cfg = config.get("city", {})
+    base, code = Path(city_file).stem.lower(), str(cfg.get("code", "")).lower()
+    exclusions = {str(n).lower() for n in config.get("data_exclusions", [])}
+    pbfs = [p for folder in dict.fromkeys((project, root / "data"))
+            for p in sorted(folder.glob("*.osm.pbf")) if p.name.lower() not in exclusions]
+    prepared = [root / "dist" / base / name for name in
+                (base + "_places.geojson", "osm_places.geojson", code + "_places.geojson")]
+    prepared.append(root / "dist" / code / "osm_places.geojson")
+    item = dict(kind="OSM", status="missing", path="")
+    document = None
+    if pbfs:
+        pbf = pbfs[0]
+        signature = dict(path=str(pbf.resolve()), size=pbf.stat().st_size,
+                         mtime=pbf.stat().st_mtime_ns, bbox=bbox, version=2,
+                         code=[hashlib.sha256((root / p).read_bytes()).hexdigest()
+                               for p in ("sb_mexico/toponymy.py", "sb_mexico/place_identity.py")
+                               if (root / p).is_file()])
+        key = hashlib.sha256(json.dumps(signature, sort_keys=True).encode()).hexdigest()
+        cached = project / ".toponymy" / (key + ".geojson")
+        item.update(path=str(pbf), cached=False)
+        try:
+            if cached.exists():
+                document = json.loads(cached.read_text(encoding="utf-8"))
+                if document.get("type") != "FeatureCollection":
+                    raise ValueError("Caché OSM inválida")
+                item.update(status="ok", cached=True)
+            elif run_osmium_places_filter(str(pbf), str(cached), bbox=bbox, diagnostics=item):
+                document = json.loads(cached.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            item.update(status="error", message=str(error))
+    else:
+        for candidate in prepared:
+            if candidate.exists():
                 try:
-                    with open(mf_path, "r", encoding="utf-8") as mff:
-                        mf = json.load(mff)
-                    for n in mf.get("osm_nodes", []):
-                        nm = n.get("name", "").strip()
-                        lon = float(n.get("lon", 0.0))
-                        lat = float(n.get("lat", 0.0))
-                        norm_k = re.sub(r'[^a-zA-Z0-9]', '', nm.lower())
-                        if nm and norm_k not in seen_keys:
-                            seen_keys.add(norm_k)
-                            discovered.append({
-                                "name": nm,
-                                "loc": [round(lon, 5), round(lat, 5)],
-                                "type": n.get("place", "suburb"),
-                                "source": "OSM_NODE",
-                                "establishments": 0
-                            })
-                    for p in mf.get("osm_polygons", []):
-                        nm = p.get("name", "").strip()
-                        lon = float(p.get("lon", 0.0))
-                        lat = float(p.get("lat", 0.0))
-                        norm_k = re.sub(r'[^a-zA-Z0-9]', '', nm.lower())
-                        if nm and norm_k not in seen_keys:
-                            seen_keys.add(norm_k)
-                            discovered.append({
-                                "name": nm,
-                                "loc": [round(lon, 5), round(lat, 5)],
-                                "type": p.get("place", "suburb"),
-                                "source": "OSM_POLYGON",
-                                "establishments": 0
-                            })
-                except Exception:
-                    pass
-                break
-
-    # 3. Extraer desde DENUE si existe archivo CSV
-    denue_candidates = [
-        os.path.join(root_dir, "data", city_base),
-        os.path.join(root_dir, "data", city_code),
-        os.path.join(root_dir, "data")
-    ]
-    denue_file_found = None
-    for d_dir in denue_candidates:
-        if os.path.isdir(d_dir):
-            for fname in os.listdir(d_dir):
-                if fname.lower().startswith("denue") and fname.lower().endswith(".csv"):
-                    denue_file_found = os.path.join(d_dir, fname)
+                    document = json.loads(candidate.read_text(encoding="utf-8"))
+                    item.update(status="unverified", path=str(candidate),
+                                message="GeoJSON preparado sin huella del PBF original; cobertura sin verificar.")
                     break
-        if denue_file_found:
-            break
-
-    if denue_file_found and bbox and len(bbox) == 4:
-        # 3a. Detección Universal de Ciudades y Localidades Mayores desde DENUE
-        city_localities = extract_city_localities_from_denue(denue_file_found, bbox, min_count=80)
-        for cl in city_localities:
-            nm = cl.get("name", "").strip()
-            loc = cl.get("loc", [0.0, 0.0])
-            norm_k = re.sub(r'[^a-zA-Z0-9]', '', nm.lower())
-
-            # Si ya existía como suburb/neighbourhood, promoverlo a city
-            found_existing = False
-            for d_item in discovered:
-                if re.sub(r'[^a-zA-Z0-9]', '', d_item.get("name", "").lower()) == norm_k:
-                    d_item["type"] = "city"
-                    d_item["category"] = "CIUDAD"
-                    d_item["is_micro"] = False
-                    d_item["establishments"] = max(d_item.get("establishments", 0), cl.get("establishments", 0))
-                    found_existing = True
+                except (OSError, ValueError) as error:
+                    item.update(status="error", path=str(candidate), message=str(error))
+        if document is None and item["status"] == "missing":
+            item["message"] = "No hay PBF OSM autorizado disponible."
+    # Legacy manifests are a visible, spatially filtered fallback, never a full-source success.
+    if document is None:
+        for candidate in (root / "dist" / base / "toponymy_manifest.json",
+                          root / "dist" / code / "toponymy_manifest.json"):
+            if candidate.exists():
+                try:
+                    manifest = json.loads(candidate.read_text(encoding="utf-8"))
+                    document = dict(features=[
+                        dict(properties=dict(name=n.get("name", ""), place=n.get("place", "suburb")),
+                             geometry=dict(type="Point", coordinates=[n.get("lon"), n.get("lat")]))
+                        for n in manifest.get("osm_nodes", []) + manifest.get("osm_polygons", [])])
+                    item["fallback"] = str(candidate)
                     break
+                except (OSError, ValueError) as error:
+                    item.update(status="error", message=str(error))
+    sources.append(item)
+    places = []
+    for feature in (document or {}).get("features", []):
+        props, geom = feature.get("properties", {}), feature.get("geometry") or {}
+        name = str(props.get("name") or "").strip()
+        typ = str(props.get("place") or "").lower()
+        if not name or not typ or name.upper() in {"NAN", "NULL", "DESCONOCIDO", "NINGUNO", "OTRO", "PREDIO SELECCIONADO", "CENTRO"}:
+            continue
+        if props.get("highway") or props.get("traffic_signals") or props.get("boundary") == "administrative" or props.get("admin_level"):
+            continue
+        try:
+            if geom.get("type") == "Point":
+                lon, lat = map(float, geom["coordinates"])
+                source = "OSM_NODE"
+            elif geom.get("type") in ("Polygon", "MultiPolygon", "LineString"):
+                if typ in ("city", "town"):
+                    continue
+                polygon = shape(geom)
+                if polygon.is_empty:
+                    continue
+                point = polygon.representative_point()
+                lon, lat, source = point.x, point.y, "OSM_POLYGON"
+            else:
+                continue
+            if not all(math.isfinite(v) for v in (lon, lat)) or not (bbox[0] <= lon <= bbox[2] and bbox[1] <= lat <= bbox[3]):
+                continue
+        except (ValueError, TypeError, KeyError):
+            continue
+        ptype = "city" if typ in ("city", "town", "borough") else (
+            "suburb" if typ in ("suburb", "quarter") else (
+            "neighbourhood" if typ in ("neighbourhood", "neighborhood", "subdivision") else "village"))
+        cls = ToponymyAnalyzer.classify_name(name)
+        place = dict(name=name, loc=[round(lon, 5), round(lat, 5)], type=ptype,
+                     source=source, source_files=[item["path"] or item.get("fallback", "")],
+                     category="CIUDAD" if ptype == "city" else cls["category"],
+                     is_micro=cls["category"] == "PRIVADA_CERRADA", establishments=0)
+        place["id"] = place_id(place)
+        places.append(place)
+    return merge_places([], places)
 
-            if not found_existing:
-                seen_keys.add(norm_k)
-                discovered.append({
-                    "name": nm,
-                    "loc": [float(loc[0]), float(loc[1])],
-                    "type": "city",
-                    "source": "INEGI_DENUE_LOCALIDAD",
-                    "category": "CIUDAD",
-                    "is_micro": False,
-                    "establishments": int(cl.get("establishments", 0))
-                })
 
-        # 3b. Sugerencias de asentamientos/colonias DENUE
-        suggs = extract_settlement_suggestions(denue_file_found, bbox, min_count=min_count)
-        for s in suggs:
-            nm = s.get("name", "").strip()
-            loc = s.get("loc", [0.0, 0.0])
-            norm_k = re.sub(r'[^a-zA-Z0-9]', '', nm.lower())
-            if nm and norm_k not in seen_keys:
-                seen_keys.add(norm_k)
-                discovered.append({
-                    "name": nm,
-                    "loc": [float(loc[0]), float(loc[1])],
-                    "type": s.get("type", "neighbourhood"),
-                    "source": "INEGI_DENUE",
-                    "category": "POLO_COMERCIAL",
-                    "is_micro": False,
-                    "establishments": int(s.get("establishments", 0))
-                })
+def scan_city_settlements_catalog(city_file: str, min_count: int = 8) -> Dict[str, Any]:
+    from .demand_sources import select_sources
+    from .toponymy_sources import read_denue_sources, denue_places
+    from .place_identity import merge_places
+    from .toponymy_homogenizer import ToponymyAnalyzer
+    if not 1 <= min_count <= 1000:
+        raise ValueError("El mínimo de establecimientos debe estar entre 1 y 1000.")
+    context = _toponymy_context(city_file)
+    root, project, config, bbox = context
+    sources = []
+    osm = _load_osm_places(city_file, context, sources)
+    paths = select_sources(project, root / "data", "denue", config.get("data_exclusions", []))
+    frame = read_denue_sources(paths, bbox, sources)
+    if not paths:
+        sources.append(dict(kind="DENUE", status="missing", path="", message="No hay fuentes DENUE autorizadas."))
+    localities = denue_places(frame, min_count=80, cities=True)
+    settlements = denue_places(frame, min_count=min_count)
+    candidates = merge_places([], osm + localities + settlements, config.get("deleted_places", []))
+    discovered = merge_places(config.get("places", []), candidates, config.get("deleted_places", []))
+    coverage = []
+    if not frame.empty:
+        for (ent, mun, municipality), group in frame.groupby(["cve_ent", "cve_mun", "municipio"]):
+            coverage.append(dict(cve_ent=ent, cve_mun=str(ent).zfill(2) + str(mun).zfill(3),
+                                 municipality=municipality, establishments=len(group)))
+    warnings = [s.get("message", "Fuente no disponible") for s in sources if s["status"] != "ok"]
+    return dict(city=config.get("city", {}).get("name", ""), city_file=city_file, bbox=bbox,
+                total=len(discovered), places=discovered, diagnosis=ToponymyAnalyzer.analyze_collection(discovered),
+                sources=sources, coverage=coverage, warnings=warnings, partial=bool(warnings),
+                new_candidates=len(candidates), preserved=len(config.get("places") or []),
+                schema_version=2)
 
-    # Diagnóstico taxonómico
-    diagnosis = ToponymyAnalyzer.analyze_collection(discovered)
 
-    return {
-        "city": city_name,
-        "city_file": city_file,
-        "bbox": bbox,
-        "total": len(discovered),
-        "places": discovered,
-        "diagnosis": diagnosis
-    }
+def city_settlement_suggestions(city_file, min_count=10):
+    """Legacy suggestion endpoints use the same authorized DENUE set."""
+    from .demand_sources import select_sources
+    from .toponymy_sources import read_denue_sources, denue_places
+    root, project, config, bbox = _toponymy_context(city_file)
+    sources = []
+    paths = select_sources(project, root / 'data', 'denue', config.get('data_exclusions', []))
+    points = denue_places(read_denue_sources(paths, bbox, sources), min_count=min_count)
+    return dict(suggestions=points, sources=sources, partial=any(p['status'] != 'ok' for p in sources))
 
 
 def extract_native_osm_places_preview(city_file: str) -> List[Dict[str, Any]]:
-    """
-    Extrae las etiquetas nativas originales de OpenStreetMap para una ciudad
-    sin requerir guardarlas ni curarlas en el YAML, permitiendo previsualizarlas
-    en el Wizard cuando el usuario no define colonias curadas.
-    """
-    if not os.path.exists(city_file):
-        return []
-
-    cdata = {}
-    try:
-        import yaml
-        with open(city_file, "r", encoding="utf-8") as f:
-            cdata = yaml.safe_load(f) or {}
-    except Exception:
-        return []
-
-    city_cfg = cdata.get("city", {})
-    city_code = str(city_cfg.get("code", "")).lower()
-    city_base = os.path.splitext(os.path.basename(city_file))[0].lower()
-    bbox = city_cfg.get("bbox")
-
-    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    osm_geo_candidates = [
-        os.path.join(root_dir, "dist", city_base, f"{city_base}_places.geojson"),
-        os.path.join(root_dir, "dist", city_base, "osm_places.geojson"),
-        os.path.join(root_dir, "dist", city_code, "osm_places.geojson"),
-        os.path.join(root_dir, "dist", city_base, f"{city_code.lower()}_places.geojson")
-    ]
-
-    # Si no existe GeoJSON previo, buscar .osm.pbf para extraer lugares frescos con osmium
-    if not any(os.path.exists(p) for p in osm_geo_candidates):
-        import glob
-        pbf_cands = [
-            os.path.join(root_dir, "dist", city_base, f"{city_code.lower()}_lod_optimized.osm.pbf"),
-            os.path.join(root_dir, "dist", city_base, f"{city_base}.osm.pbf"),
-            os.path.join(root_dir, "dist", city_code, f"{city_code.lower()}.osm.pbf"),
-        ]
-        pbf_cands.extend(glob.glob(os.path.join(root_dir, "data", city_base, "*.osm.pbf")))
-        pbf_cands.extend(glob.glob(os.path.join(root_dir, "data", city_code, "*.osm.pbf")))
-        pbf_cands.extend(glob.glob(os.path.join(root_dir, "data", "*.osm.pbf")))
-
-        for p_cand in pbf_cands:
-            if os.path.exists(p_cand) and os.path.getsize(p_cand) > 1000:
-                gen_target = os.path.join(root_dir, "dist", city_base, "osm_places.geojson")
-                if run_osmium_places_filter(p_cand, gen_target):
-                    osm_geo_candidates.insert(0, gen_target)
-                    break
-
-    results = []
-    seen = set()
-    from sb_mexico.toponymy_homogenizer import normalize_place_scale
-
-    for g_path in osm_geo_candidates:
-        if os.path.exists(g_path):
-            try:
-                from shapely.geometry import shape
-                with open(g_path, "r", encoding="utf-8") as gf:
-                    gdata = json.load(gf)
-                feats = gdata.get("features", [])
-                for f in feats:
-                    props = f.get("properties", {})
-                    nm = props.get("name", "").strip()
-                    place_tag = props.get("place", "").strip().lower()
-                    if not nm or not place_tag:
-                        continue
-                    if props.get("highway") or props.get("traffic_signals") or props.get("boundary") == "administrative" or props.get("admin_level"):
-                        continue
-                    if nm.upper() in ["NAN", "NULL", "DESCONOCIDO", "NINGUNO", "OTRO", "PREDIO SELECCIONADO", "CENTRO"]:
-                        continue
-
-                    geom = f.get("geometry", {})
-                    g_type = geom.get("type")
-                    if g_type == "Point":
-                        coords = geom.get("coordinates")
-                        if not coords or len(coords) != 2:
-                            continue
-                        lon, lat = coords[0], coords[1]
-                    elif g_type in ("Polygon", "MultiPolygon", "LineString"):
-                        if place_tag in ("city", "town"):
-                            continue
-                        try:
-                            s = shape(geom)
-                            if s.is_empty:
-                                continue
-                            c = s.centroid
-                            lon, lat = c.x, c.y
-                        except Exception:
-                            continue
-                    else:
-                        continue
-
-                    if bbox and len(bbox) == 4:
-                        if not (bbox[0] <= lon <= bbox[2] and bbox[1] <= lat <= bbox[3]):
-                            continue
-
-                    norm_k = re.sub(r'[^a-zA-Z0-9]', '', nm.lower())
-                    if norm_k in seen:
-                        continue
-                    seen.add(norm_k)
-
-                    if place_tag in ("city", "town", "borough"):
-                        p_type = "city"
-                    elif place_tag in ("suburb", "quarter"):
-                        p_type = "suburb"
-                    else:
-                        p_type = "neighbourhood"
-
-                    results.append({
-                        "name": nm,
-                        "loc": [round(float(lon), 5), round(float(lat), 5)],
-                        "type": p_type,
-                        "scale": normalize_place_scale(p_type),
-                        "source": "OSM_NATIVE",
-                        "category": "CIUDAD" if p_type == "city" else "COLONIA"
-                    })
-                break
-            except Exception:
-                pass
-
-    return results
-
-
+    """Use the same source identity, extraction cache and bbox as the scanner."""
+    from .toponymy_homogenizer import normalize_place_scale
+    sources = []
+    return [dict(place, scale=normalize_place_scale(place["type"]))
+            for place in _load_osm_places(city_file, _toponymy_context(city_file), sources)]

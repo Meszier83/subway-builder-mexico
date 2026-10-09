@@ -167,21 +167,26 @@ def _match_points(census, candidates, keys):
     # If the target itself lacks locality, use it only if the census short key
     # also identifies one locality (or exclusively legacy locality-less records).
     missing_target = target.loc[target.loc_clean.isna() & ~target.duplicated(short, keep=False)]
+    if missing_target.empty:
+        return coords
     identities = census[keys].drop_duplicates()
     ambiguous = identities.loc[identities.duplicated(short, keep=False), short].drop_duplicates()
     safe_left = left.merge(ambiguous.assign(_ambiguous=True), on=short, how="left")
     safe_left = safe_left.loc[safe_left._ambiguous.isna()]
     matches = safe_left.merge(missing_target[short + ["lon_geo", "lat_geo"]], on=short,
                               how="left", validate="many_to_one")
-    for row, lon, lat in matches[["_row", "lon_geo", "lat_geo"]].itertuples(index=False, name=None):
-        if pd.isna(coords.iloc[row, 0]) and pd.notna(lon) and pd.notna(lat):
-            coords.iloc[row] = [lon, lat]
+    positions = matches["_row"].to_numpy()
+    fill = coords.iloc[positions, 0].isna().to_numpy() & matches[["lon_geo", "lat_geo"]].notna().all(axis=1).to_numpy()
+    if fill.any():
+        coords.iloc[positions[fill]] = matches.loc[fill, ["lon_geo", "lat_geo"]].to_numpy()
     return coords
 
 
 def mass_summary(frame):
     return {"blocks": len(frame), "population": float(frame.pobtot_adj.sum()),
-            "pea": float(frame.pea_real.sum())}
+            "pea": float(frame.pea_real.sum()),
+            **({'occupied_residents':float(frame.occupied_residents.sum()),
+                'labor_commuters':float(frame.pea_real.sum())} if 'occupied_residents' in frame else {})}
 
 
 def place_census(census, denue, blocks, areas, bbox, layer_diagnostics):

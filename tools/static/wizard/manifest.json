@@ -5,10 +5,10 @@
     "tailwindcss": "3.4.19"
   },
   "files": {
-    "app.js": "24161ddd4b9e8b179785578ef0c0c7e9cd38c5f7d7136be41f7e8e3300dd88f9",
-    "app.css": "08d2092ac8b87b545939a8ee45905caf49afc928258ff2ac99eb2b1de14e6b51",
+    "app.js": "cdeb5867a46ac6df81a569438b478ff35fe811e08b9cd5e010a8a7034b694699",
+    "app.css": "5ffcbbbb2b273c284affcb55d429340acd5872c73028aa3d8fda6516a902f0cf",
     "bootstrap.js": "9b2b13c90715ae18884759505829b27ad11b7011f0eb1dfc3ed9015cfacb6b60",
-    "tailwind.css": "a0fef78ac908fa6a1b8c005a5bfa32ada268eb82a6bed3fd881fb5c5ad43d3bf",
+    "tailwind.css": "7d42e6599f9f5f15a69e4c3a8aa0ac87c7360348d61828b67210225df3c53caa",
     "vendor/leaflet.js": "db49d009c841f5ca34a888c96511ae936fd9f5533e90d8b2c4d57596f4e5641a",
     "vendor/leaflet.css": "337bfca5cabd03b39815b2700febe2b3b7edf55921c59cd49f88ecb328212303",
     "vendor/lucide.min.js": "3411692820cb8d47543f69496aa25fd603a358f4498046f41c508a5a3342210e"

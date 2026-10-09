@@ -42,7 +42,7 @@ class HistoricalBenchmarkTests(unittest.TestCase):
     def write(self):
         pd.DataFrame(self.rows).to_csv(self.ce,index=False)
         # Force official integer text and actual export NUL padding.
-        text=self.ce.read_text().replace('.0,',',')
+        text=self.ce.read_text(encoding='utf-8').replace('.0,',',')
         self.ce.write_bytes(text.encode()+b'\x00'*16)
 
     def contract(self):

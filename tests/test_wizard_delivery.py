@@ -12,7 +12,7 @@ import zipfile
 import pandas as pd
 import yaml
 
-from sb_mexico.build_delivery import execute_wizard_build, resolve_download
+from sb_mexico.build_delivery import execute_wizard_build, resolve_download, resolve_preview_roads
 from sb_mexico.population_projection import resolve_population_factors
 from tools import wizard, poi_studio
 
@@ -109,6 +109,29 @@ class WizardDeliveryTests(unittest.TestCase):
         Path(result['package_path']).write_bytes(b'changed')
         with self.assertRaisesRegex(ValueError, 'changed since'):
             resolve_download(self.config, self.out)
+
+    def test_candidate_preview_uses_built_roads_and_route_cache_is_reused(self):
+        self.assets()
+        self.cfg['demand'] = {'engine': 'v2', 'target_year': 2020}
+        self.cfg['routing'] = {'osrm_url': 'http://127.0.0.1:9999',
+                               'network_identity': 'fixture', 'include_driving_path': False}
+        self.save()
+        wizard.save_full_city_data(str(self.config), self.cfg)
+        self.assertEqual(wizard.load_city_data(str(self.config))['routing'], self.cfg['routing'])
+        cache = {'network-coordinate-key': {'drivingDistance': 123, 'drivingSeconds': 45}}
+        (self.out / '.demand-v2-routes.json').write_text(json.dumps(cache))
+        def run(config_path, output_dir, **kwargs):
+            self.assertEqual(json.loads((Path(output_dir)/'.demand-v2-routes.json').read_text()), cache)
+            return self.fake_pipeline(config_path, output_dir, **kwargs)
+        with patch('sb_mexico.pipeline.execute_pipeline', side_effect=run):
+            result = execute_wizard_build(self.config, self.out, self.data, skip_map=True)
+        built = Path(result['output_dir'])/'roads.geojson'
+        self.assertEqual(resolve_preview_roads(self.config, self.out), built)
+        # A project with the same contents must not inherit this build's roads.
+        other=self.root/'other-preview.yaml'; other.write_bytes(self.config.read_bytes())
+        self.assertEqual(resolve_preview_roads(other,self.out),self.out/'roads.geojson')
+        with patch('sb_mexico.pipeline.execute_pipeline', side_effect=run):
+            execute_wizard_build(self.config, self.out, self.data, skip_map=True)
 
     def test_http_status_download_and_demand_only(self):
         server = ThreadingHTTPServer(('127.0.0.1', 0), wizard.WizardRequestHandler)

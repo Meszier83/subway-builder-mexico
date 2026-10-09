@@ -112,15 +112,18 @@ def _normalize(chunk):
 
 
 def employment_summary(frame):
+    occupied_column = 'occupied_residents' if 'occupied_residents' in frame else 'pea_real'
     return dict(blocks=len(frame), population_2020=float(frame.pobtot_num.sum()),
                 published_employed_2020=float(frame.published_employed_2020.sum()),
                 modeled_employed_2020=float(frame.employed_2020.sum()),
-                projected_employed=float(frame.pea_real.sum()) if 'pea_real' in frame else None,
+                projected_employed=float(frame[occupied_column].sum()) if occupied_column in frame else None,
+                **(dict(projected_commuters=float(frame.pea_real.sum())) if 'occupied_residents' in frame else {}),
                 capacity_basis={str(basis): len(group)
                                 for basis, group in frame.groupby('employment_capacity_basis')},
                 by_source={str(source): dict(blocks=len(group),
                            employed_2020=float(group.employed_2020.sum()),
-                           projected_employed=float(group.pea_real.sum()) if 'pea_real' in group else None)
+                           projected_employed=float(group[occupied_column].sum()) if occupied_column in group else None,
+                           **(dict(projected_commuters=float(group.pea_real.sum())) if 'occupied_residents' in group else {}))
                            for source, group in frame.groupby('employment_source')})
 
 

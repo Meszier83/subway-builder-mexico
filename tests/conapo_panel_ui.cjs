@@ -159,5 +159,15 @@ function harness() {
     assert.equal(c.cityData.macroeconomics.projection_year, 2024);
     assert(c.toasts.some(item => item.message.includes('cambió')));
   }
-  console.log('CONAPO UI: years, guarded/manual and automatic factors, pagination, rollback, errors, stale results: PASS');
+  {
+    const {context: c, element} = harness();
+    c.cityData.demand={engine:'v2'};
+    c.fetch=async()=>assert.fail('new engine must not fetch CONAPO');
+    await c.loadConapoYears(); await c.autoCalculateConapo(2026);
+    assert.equal(c.cityData.macroeconomics.projection_year,2024,'inactive CONAPO cannot mutate model year');
+    c.setConapoBusy(false);assert.equal(element('conapoYearSelect').disabled,true);
+    c.cityData.demand.engine='legacy';c.setConapoBusy(false);
+    assert.equal(element('conapoYearSelect').disabled,false);
+  }
+  console.log('CONAPO UI: years, guarded/manual and automatic factors, pagination, rollback, errors, stale results, candidate isolation: PASS');
 })().catch(error => {console.error(error); process.exitCode = 1;});

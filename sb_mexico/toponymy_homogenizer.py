@@ -337,11 +337,8 @@ class ToponymyHomogenizer:
         Genera una clave de normalización fonética y de texto para deduplicación.
         Elimina acentos, prefijos redundantes y signos de puntuación.
         """
-        s = str(name).strip().upper()
-        s = s.replace("Á", "A").replace("É", "E").replace("Í", "I").replace("Ó", "O").replace("Ú", "U").replace("Ü", "U")
-        s = re.sub(r"^(?:SUPER\s*MANZANA|SUPERMANZANA|SM|S\.?M\.?|REGION|REG\.?|R\.?|COLONIA|COL\.?|FRACCIONAMIENTO|FRACC\.?)\s*", "", s)
-        s = re.sub(r"[^A-Z0-9]", "", s)
-        return s
+        from .place_identity import place_name_key
+        return place_name_key(name)
 
     @classmethod
     def unify_supermanzanas(
@@ -495,6 +492,7 @@ class ToponymyHomogenizer:
             return [], []
 
         source_weights = {
+            "YAML_CURATED": 4,
             "OSM_POLYGON": 3,
             "OSM_NODE": 2,
             "INEGI_DENUE": 1
@@ -509,6 +507,8 @@ class ToponymyHomogenizer:
             key = cls.canonical_key(name)
             src = p.get("source", "UNKNOWN")
             weight = source_weights.get(src, 0)
+            if p.get("original_name"):
+                weight = 4  # Preserve an explicit manual rename.
             decorated.append({
                 "index": idx,
                 "place": dict(p),
@@ -549,7 +549,8 @@ class ToponymyHomogenizer:
                 cand = decorated[j]
 
                 dist = haversine_distance_m(curr["lon"], curr["lat"], cand["lon"], cand["lat"])
-                if dist <= distance_threshold_m:
+                from .place_identity import same_territory
+                if dist <= distance_threshold_m and same_territory(curr['place'], cand['place']):
                     is_match = False
                     if curr["key"] and curr["key"] == cand["key"]:
                         is_match = True
@@ -651,6 +652,27 @@ class ToponymyHomogenizer:
         }
 
 
+def place_score_components(place: Dict[str, Any], heuristic: str = "balanced") -> Dict[str, float]:
+    """Reviewable label policy, without interpreting commerce as population."""
+    source = str(place.get("source", "")).upper()
+    origin = 600.0 if "CURATED" in source or place.get("original_name") else (
+        350.0 if "OSM_POLYGON" in source else 200.0 if "OSM_NODE" in source else 50.0 if "DENUE" in source else 0.0)
+    category = place.get("category") or ToponymyAnalyzer.classify_name(str(place.get("name", "")))["category"]
+    taxonomy = {"SUPERMANZANA": 350, "REGION": 350, "COLONIA": 200, "BARRIO_PUEBLO": 180,
+                "FRACCIONAMIENTO": 120, "RESIDENCIAL": 70, "UNIDAD_HABITACIONAL": 90,
+                "BARE_NUMERIC": 220}.get(category, 0)
+    scale = {"city": 500, "large": 500, "town": 400, "borough": 400, "suburb": 200,
+             "medium": 200, "quarter": 100, "neighbourhood": 40, "neighborhood": 40,
+             "village": 40, "small": 40}.get(str(place.get("type", "")).lower(), 0)
+    # Balanced: no trade count or lexical taxonomy bonus. Shortest: name length only.
+    if heuristic == "shortest":
+        return {"length": round(max(0.0, 150.0 - len(str(place.get("name", "")).strip()) * 3), 2)}
+    if heuristic == "balanced":
+        return {"source": origin, "scale": scale, "commerce": 0.0}
+    return {"source": origin, "scale": scale, "taxonomy": taxonomy,
+            "commerce": float(place.get("establishments", 0) or 0) * 2.5}
+
+
 def calculate_place_prestige_score(place: Dict[str, Any], heuristic: str = "density") -> float:
     """
     Calcula una puntuacion heuristica de representatividad toponimica para un asentamiento:
@@ -659,6 +681,8 @@ def calculate_place_prestige_score(place: Dict[str, Any], heuristic: str = "dens
     - Jerarquia toponimica (Supermanzanas / Regiones > Suburb > Quarter > Neighbourhood).
     - En heuristica 'shortest', premia nombres mas cortos y limpios para rotulacion de metro.
     """
+    if heuristic in ("balanced", "shortest"):
+        return round(sum(place_score_components(place, heuristic).values()), 2)
     score = 0.0
     # 1. Establecimientos comerciales DENUE
     establishments = float(place.get("establishments", 0) or 0)
@@ -759,6 +783,9 @@ def cluster_places_by_proximity(
         except (ValueError, TypeError):
             continue
 
+        if not math.isfinite(lon) or not math.isfinite(lat):
+            continue
+
         p_name = str(p.get("name", "")).strip()
         is_micro = bool(
             p.get("is_micro")
@@ -780,6 +807,7 @@ def cluster_places_by_proximity(
             "source": p.get("source", "UNKNOWN"),
             "establishments": int(p.get("establishments", 0) or p.get("denue_count", 0) or 0),
             "score": score,
+            "score_components": place_score_components(p, rank_heuristic),
             "is_micro": is_micro
         })
 
@@ -799,13 +827,23 @@ def cluster_places_by_proximity(
         }
 
     # Ordenar por puntuacion descendente
-    valid_places.sort(key=lambda x: x["score"], reverse=True)
+    from sb_mexico.place_identity import same_territory, place_id
+    valid_places.sort(key=lambda x: (-x["score"], place_id(x["place"])))
+
+    def compatible(a, b):
+        # A town label must not compete with its neighbourhoods. Cross-border
+        # labels also remain separate, even when their points are very close.
+        city_types = {"city", "large", "town", "borough"}
+        return (same_territory(a["place"], b["place"]) and
+                (a["type"] in city_types) == (b["type"] in city_types))
 
     # 2. Greedy Anchor Selection (separados al menos por radius_m)
     anchors: List[Dict[str, Any]] = []
     for cand in valid_places:
         too_close = False
         for a in anchors:
+            if not compatible(cand, a):
+                continue
             d = haversine_distance_m(cand["loc"][0], cand["loc"][1], a["loc"][0], a["loc"][1])
             if d < radius_m:
                 too_close = True
@@ -828,6 +866,8 @@ def cluster_places_by_proximity(
         best_anchor_idx = None
         best_dist = float("inf")
         for a in anchors:
+            if not compatible(cand, a):
+                continue
             d = haversine_distance_m(cand["loc"][0], cand["loc"][1], a["loc"][0], a["loc"][1])
             if d <= radius_m and d < best_dist:
                 best_dist = d
@@ -840,7 +880,7 @@ def cluster_places_by_proximity(
             })
         else:
             # Fallback en caso extremo: asignar al anchor global mas cercano
-            closest_a = min(anchors, key=lambda a: haversine_distance_m(cand["loc"][0], cand["loc"][1], a["loc"][0], a["loc"][1]))
+            closest_a = min((a for a in anchors if compatible(cand, a)), key=lambda a: haversine_distance_m(cand["loc"][0], cand["loc"][1], a["loc"][0], a["loc"][1]))
             d_cl = haversine_distance_m(cand["loc"][0], cand["loc"][1], closest_a["loc"][0], closest_a["loc"][1])
             anchor_dict[closest_a["original_index"]]["competitors"].append({
                 "candidate": cand,
@@ -871,6 +911,7 @@ def cluster_places_by_proximity(
             "source": anchor_cand["source"],
             "establishments": anchor_cand["establishments"],
             "score": anchor_cand["score"],
+            "score_components": anchor_cand["score_components"],
             "is_micro": anchor_cand["is_micro"],
             "distance_m": 0.0,
             "recommended": True
@@ -886,6 +927,7 @@ def cluster_places_by_proximity(
                 "source": c["source"],
                 "establishments": c["establishments"],
                 "score": c["score"],
+                "score_components": c["score_components"],
                 "is_micro": c["is_micro"],
                 "distance_m": comp["distance_to_anchor_m"],
                 "recommended": False
@@ -982,6 +1024,11 @@ def apply_zone_thinning_selection(
                 elif z.get("recommended_index") is not None:
                     kept_indices.add(int(z["recommended_index"]))
 
+    # Unrepresented/invalid points must not disappear merely because the
+    # clustering omitted them. Only reviewed candidates are eligible for pruning.
+    represented = {int(c["original_index"]) for z in zones for c in z.get("candidates", [])
+                   if c.get("original_index") is not None}
+    kept_indices.update(set(range(len(places))) - represented)
     kept_places = [places[i] for i in sorted(kept_indices) if 0 <= i < len(places)]
     return {
         "status": "ok",
@@ -1086,8 +1133,11 @@ def find_exact_and_fuzzy_duplicates(
             is_duplicate = False
             match_type = "EXACT"
 
-            # Coincidencia 1: Mismo nombre exacto en cualquier parte de la metropoli
-            if curr_name == cand_name:
+            from .place_identity import same_territory
+            if not same_territory(curr['place'], cand['place']):
+                continue
+            # Homonyms need spatial agreement, even when spelling is identical.
+            if curr_name == cand_name and dist <= distance_threshold_m:
                 is_duplicate = True
                 match_type = "EXACT"
             # Coincidencia 2: Mismo nucleo toponimico a menos del umbral de distancia
@@ -1188,6 +1238,3 @@ def resolve_duplicate_groups(
         "pruned_indices": sorted(list(indices_to_drop)),
         "places": kept_places
     }
-
-
-

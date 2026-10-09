@@ -45,6 +45,58 @@ TEMPLATE_HTML_PATH = os.path.join(os.path.dirname(__file__), "templates", "wizar
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static", "wizard")
 INSTANCE_STARTED_AT = time.time()
 INSTANCE_ID = uuid.uuid4().hex
+source_download_manager = None
+source_download_manager_lock = threading.Lock()
+candidate_preview_lock = threading.Lock()
+candidate_preview_jobs = {}
+
+
+def candidate_preview_job(resolved, stage, compute, job_id=None):
+    """Keep long candidate calculations outside an idle HTTP connection."""
+    from sb_mexico.build_delivery import config_hash
+    fingerprint = config_hash(resolved)
+    key = (resolved, stage, fingerprint)
+    with candidate_preview_lock:
+        if job_id:
+            job = candidate_preview_jobs.get(job_id)
+            if not job or job['key'] != key:
+                raise ValueError('La configuración cambió; vuelve a evaluar el candidato.')
+        else:
+            # A repeated click joins the same active evaluation.
+            job = next((j for j in candidate_preview_jobs.values()
+                        if j['key'] == key and j['status'] == 'running'), None)
+            if job is None:
+                for old_id, old in list(candidate_preview_jobs.items()):
+                    if old['status'] != 'running' and time.monotonic()-old['finished'] > 1800:
+                        del candidate_preview_jobs[old_id]
+                if sum(j['status']=='running' for j in candidate_preview_jobs.values()) >= 2:
+                    raise ValueError('Hay otras evaluaciones en curso; espera a que terminen.')
+                job = dict(id=uuid.uuid4().hex, key=key, status='running')
+                candidate_preview_jobs[job['id']] = job
+                def worker():
+                    try:
+                        data = compute()
+                        if config_hash(resolved) != fingerprint:
+                            raise ValueError('La configuración cambió; vuelve a evaluar el candidato.')
+                        update = dict(status='complete', data=data)
+                    except Exception as error:
+                        update = dict(status='error', error=str(error))
+                    with candidate_preview_lock:
+                        job.update(update, finished=time.monotonic())
+                threading.Thread(target=worker, daemon=True).start()
+        if job['status'] == 'complete':
+            return dict(job['data'], status='complete', job_id=job['id'])
+        return dict(status=job['status'], job_id=job['id'], stage=stage, error=job.get('error'))
+
+
+def get_source_download_manager():
+    global source_download_manager
+    from sb_mexico.source_downloads import DownloadManager
+    with source_download_manager_lock:
+        if source_download_manager is None:
+            source_download_manager = DownloadManager(ROOT_DIR, DATA_DIR, load_city_data, _resolve_city_path)
+        return source_download_manager
+
 with open(__file__, 'rb') as _wizard_source:
     INSTANCE_CODE_SHA256 = hashlib.sha256(_wizard_source.read()).hexdigest()
 system_health_lock = threading.Lock()
@@ -300,10 +352,65 @@ def _yaml_quote(val: Any) -> str:
     return json.dumps(str(val), ensure_ascii=False)
 
 
+def bind_available_engine_sources(data):
+    """Resolve pending EIC from this project's or national official files only."""
+    from pathlib import Path
+    import pandas as pd
+    from sb_mexico.demand_sources import select_sources
+    from sb_mexico.inegi import _detect_cpv_format
+    from sb_mexico.source_downloads import EIC_INDICATOR_NAME, validate_csv
+    macro = data.get('macroeconomics', {})
+    reference = macro.get('demographic_reference') or {}
+    if data.get('demand', {}).get('engine') != 'v2' or not reference.get('pending_download'):
+        return
+    project = Path(ROOT_DIR) / data.get('data_dir', 'data')
+    try:
+        cpv = data.get('demand', {}).get('sources', {}).get('cpv')
+        if cpv is None:
+            cpv = select_sources(project, DATA_DIR, 'cpv', data.get('data_exclusions', []))
+        states = set()
+        for name in cpv:
+            path = Path(ROOT_DIR) / name
+            encoding, separator = _detect_cpv_format(str(path))
+            frame = pd.read_csv(path, encoding=encoding, sep=separator, dtype=str,
+                                usecols=lambda column: column.strip().upper().lstrip('\ufeff') == 'ENTIDAD')
+            if frame.empty or len(frame.columns) != 1:
+                return
+            states.update(str(value).strip().zfill(2) for value in frame.iloc[:, 0].dropna().unique())
+        if not states or any(not re.fullmatch(r'\d{2}', state) for state in states):
+            return
+        indicators = reference.get('indicators')
+        if not indicators:
+            indicators = next((str(folder / EIC_INDICATOR_NAME) for folder in (project, Path(DATA_DIR))
+                               if (folder / EIC_INDICATOR_NAME).is_file()), None)
+        if not indicators:
+            return
+        persons = list(reference.get('persons', []))
+        present = {re.fullmatch(r'personas(\d{2})\.csv', Path(name).name).group(1)
+                   for name in persons if re.fullmatch(r'personas(\d{2})\.csv', Path(name).name)}
+        for state in sorted(states - present):
+            path = next((folder / f'personas{state}.csv' for folder in (project, Path(DATA_DIR))
+                         if (folder / f'personas{state}.csv').is_file()), None)
+            if path is None:
+                return
+            persons.append(str(path))
+        validate_csv(Path(ROOT_DIR) / indicators, 'eic_indicators')
+        for name in persons:
+            validate_csv(Path(ROOT_DIR) / name, 'eic_persons')
+        def display(name):
+            return os.path.relpath((Path(ROOT_DIR) / name).resolve(), ROOT_DIR).replace('\\', '/')
+        reference.update(indicators=display(indicators), persons=[display(name) for name in persons])
+        reference.pop('pending_download', None)
+    except (ValueError, OSError, KeyError, TypeError):
+        # Keep the pending reference visible; download/build performs full reconciliation.
+        return
+
+
 def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
     """Guarda la configuración completa de la ciudad respetando el esquema oficial."""
     from sb_mexico.config_defaults import apply_demand_defaults
     apply_demand_defaults(data)
+    bind_available_engine_sources(data)
     fpath = _resolve_city_path(rel_or_abs_path)
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
 
@@ -418,10 +525,25 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         f'  furness_tol: {float(macro_cfg.get("furness_tol", 0.02))}',
     ])
 
+    if 'demand' in data:
+        from sb_mexico.demand_v2.request import validate_config
+        validate_config(data)
+        # The candidate contract is preserved in full, including explicit source roles.
+        lines.insert(lines.index('macroeconomics:'), 'demand: ' + json.dumps(data['demand'], ensure_ascii=False))
+
+    if 'routing' in data:
+        if not isinstance(data['routing'], dict):
+            raise ValueError('routing must be a mapping')
+        lines.insert(lines.index('macroeconomics:'), 'routing: ' + json.dumps(data['routing'], ensure_ascii=False, allow_nan=False))
+
     if 'residential_employment' in macro_cfg:
         from sb_mexico.residential_employment import validate_employment_mode
         employment_mode = validate_employment_mode(macro_cfg['residential_employment'])
         lines.append(f'  residential_employment: {_yaml_quote(employment_mode)}')
+    if macro_cfg.get('demographic_reference') is not None:
+        from sb_mexico.demographic_reference import validate_reference
+        validate_reference(macro_cfg, allow_pending=True)
+        lines.append('  demographic_reference: ' + json.dumps(macro_cfg['demographic_reference'], ensure_ascii=False))
     if 'workplace_employment' in macro_cfg:
         from sb_mexico.workplace_employment import validate_workplace_mode
         lines.append(f'  workplace_employment: {_yaml_quote(validate_workplace_mode(macro_cfg["workplace_employment"]))}')
@@ -637,14 +759,18 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
     if places_cfg:
         lines.append("# Toponimia y Colonias Curadas")
         lines.append("places:")
-        for pl in places_cfg:
-            pl_name = pl.get("name", "Colonia")
-            pl_loc = pl.get("loc", [0.0, 0.0])
-            pl_type = pl.get("type", "suburb")
-            lines.append(f'  - name: {_yaml_quote(pl_name)}')
-            lines.append(f'    loc: [{pl_loc[0]:.5f}, {pl_loc[1]:.5f}]')
-            lines.append(f'    type: {_yaml_quote(pl_type)}')
+        from sb_mexico.place_identity import serialize_places
+        for place in serialize_places(places_cfg):
+            lines.extend('  ' + line for line in yaml.safe_dump(
+                [place], allow_unicode=True, sort_keys=False).rstrip().splitlines())
         lines.append("")
+
+    if data.get("toponymy_mode") in ("merge", "replace"):
+        lines.append("toponymy_mode: " + data["toponymy_mode"])
+
+    if data.get("deleted_places"):
+        lines.append(yaml.safe_dump({"deleted_places": data["deleted_places"]},
+                                    allow_unicode=True, sort_keys=False).rstrip())
 
     content = "\n".join(lines).rstrip() + "\n"
     # Publish a complete configuration, including projection year and provenance,
@@ -861,11 +987,13 @@ def set_project_data_dir(city_file: str, new_dir: str) -> Dict[str, Any]:
 
 def inspect_data_files(city_name: str = "", city_code: str = "", city_file: str = "", data_dir_override: str = "") -> Dict[str, Any]:
     """
-    Escanea ÚNICAMENTE la carpeta de datos asignada al proyecto.
-    Cero escaneo en carpetas de otras ciudades o en la raíz para evitar duplicados.
+    Describe the same source candidates selected by compilation and previews.
+    Includes shared national sources, never another city's subdirectory.
+    Presence is not content validation; ZIP archives are not usable sources.
     """
     target_dir = None
     exclusions = set()
+    cdata = {}
 
     if city_file:
         try:
@@ -925,15 +1053,91 @@ def inspect_data_files(city_name: str = "", city_code: str = "", city_file: str 
                         })
         return found
 
-    denue = find_files(["*denue*.csv", "*DENUE*.csv", "*denue*.zip"])
-    cpv = find_files(["*RESAGEBURB*.csv", "*resageburb*.csv", "*censo*.csv", "*cpv*.csv"])
-    ce2024 = find_files(["*SAIC*.csv", "*saic*.csv", "*exporta*.csv", "*tr_ce*.csv", "*ce2024*.csv", "*ce_2024*.csv", "*ce*.csv"])
-    conapo = find_files(["*pobproy*.csv", "*quinq*.csv", "*pob_proy*.csv", "*conapo*.csv", "data-*.csv", "*proyeccion*.csv"])
-    enoe = find_files([
-        "*enoe*.csv", "*ENOE*.csv", "*trim*.csv", "*2024_trim*.csv", "*2025_trim*.csv", "*2026_trim*.csv",
-        "*enoe*.xls", "*ENOE*.xls", "*trim*.xls", "*2024_trim*.xls", "*2025_trim*.xls", "*2026_trim*.xls",
-        "*enoe*.xlsx", "*ENOE*.xlsx", "*trim*.xlsx"
-    ])
+    from pathlib import Path
+    from sb_mexico.demand_sources import select_sources
+
+    def describe(paths, first_only=False):
+        records = []
+        for index, source in enumerate(paths):
+            path = Path(source).resolve()
+            try:
+                display_path = os.path.relpath(path, ROOT_DIR)
+            except ValueError:
+                display_path = str(path)
+            records.append(dict(path=display_path.replace('\\', '/'),
+                                abs_path=str(path), filename=path.name,
+                                size_mb=round(path.stat().st_size / (1024 * 1024), 2),
+                                selected=(index == 0 if first_only else True),
+                                shared=path.parent == Path(DATA_DIR).resolve()))
+        return records
+
+    source_paths = {kind: select_sources(target_dir, DATA_DIR, kind, exclusions)
+                    for kind in ('denue', 'cpv', 'ce', 'conapo', 'enoe')}
+    explicit = cdata.get('demand', {}).get('sources', {}) if cdata.get('demand', {}).get('engine') == 'v2' else {}
+    for kind in ('denue', 'cpv', 'ce'):
+        if kind in explicit:
+            source_paths[kind] = [str(Path(ROOT_DIR) / name) for name in explicit[kind]]
+    sources = {}
+    archive_patterns = {
+        'denue': ['*denue*.zip', '*DENUE*.zip'],
+        'cpv': ['*RESAGEBURB*.zip', '*resageburb*.zip', '*cpv*.zip', '*censo*.zip'],
+        'ce': ['*SAIC*.zip', '*saic*.zip', '*tr_ce*.zip'],
+        'conapo': ['*pobproy*.zip', '*conapo*.zip', '*proyeccion*.zip'],
+        'enoe': ['*enoe*.zip', '*ENOE*.zip', '*trim*.zip'],
+        'marco': ['*marco*.zip', '*Marco*.zip', '*mg*.zip', '*MG*.zip', '[0-9][0-9]_*.zip'],
+    }
+    for kind, paths in source_paths.items():
+        archives = find_files(archive_patterns[kind])
+        missing_paths = [str(path) for path in paths if not Path(path).is_file()]
+        files = describe([path for path in paths if Path(path).is_file()], first_only=kind in ('conapo', 'enoe'))
+        sources['ce2024' if kind == 'ce' else kind] = dict(
+            status='missing' if missing_paths else 'ok' if files else ('archive' if archives else 'missing'),
+            files=files, archives=archives, missing_paths=missing_paths, selection='first' if kind in ('conapo', 'enoe') else 'all')
+
+    macro = cdata.get('macroeconomics', {})
+    reference = macro.get('demographic_reference')
+    eic_active = isinstance(reference, dict) and reference.get('mode') == 'eic2025'
+    eic = dict(status='inactive', files=[], archives=find_files(['*eic2025*.zip']),
+               selection='explicit', required=eic_active, active=eic_active, missing_paths=[])
+    if reference is not None:
+        try:
+            from sb_mexico.demographic_reference import validate_reference
+            from sb_mexico.source_downloads import validate_csv
+            validate_reference(macro)
+            for name, kind in [(reference['indicators'], 'eic_indicators')] + [(p, 'eic_persons') for p in reference['persons']]:
+                path = (Path(ROOT_DIR) / name).resolve()
+                if not path.is_file():
+                    eic['missing_paths'].append(name)
+                    continue
+                files = describe([path])
+                files[0]['shared'] = not path.is_relative_to(Path(target_dir).resolve())
+                eic['files'].extend(files)
+                validate_csv(path, kind)
+            eic['status'] = 'missing' if eic['missing_paths'] else 'ok'
+            eic['validation'] = 'column_structure; municipal reconciliation checked during download/build'
+        except (ValueError, OSError, KeyError, TypeError) as error:
+            pending = isinstance(reference, dict) and reference.get('pending_download')
+            eic.update(status='missing' if pending else 'invalid',
+                       message='EIC pendiente: prepara las descargas y guarda las rutas antes de compilar.' if pending else str(error))
+    sources['eic'] = eic
+    sources['conapo']['active'] = not eic_active
+    if eic_active:
+        for record in sources['conapo']['files']:
+            record['selected'] = False
+
+    placement = cdata.get('city', {}).get('residential_placement', 'official_blocks')
+    if 'marco' in explicit:
+        marco_paths = [str(Path(ROOT_DIR) / name) for name in explicit['marco']]
+    elif placement == 'official_blocks':
+        from sb_mexico.residential import discover_marco_layers
+        marco_paths = discover_marco_layers(target_dir)
+    else:
+        marco_paths = select_sources(target_dir, DATA_DIR, 'marco', exclusions)
+    marco_archives = find_files(archive_patterns['marco'])
+    missing_marco = [str(path) for path in marco_paths if not Path(path).is_file()]
+    sources['marco'] = dict(status='missing' if missing_marco else 'ok' if marco_paths else ('archive' if marco_archives else 'missing'),
+                            files=describe([path for path in marco_paths if Path(path).is_file()]), missing_paths=missing_marco, archives=marco_archives, selection='all',
+                            placement=placement)
 
     # Para OSM: buscar en la carpeta del proyecto, y solo si falta, verificar extracto nacional en data/
     osm = find_files(["*.osm.pbf", "*.osm", "roads.geojson"])
@@ -956,13 +1160,11 @@ def inspect_data_files(city_name: str = "", city_code: str = "", city_file: str 
         "abs_active_dir": os.path.abspath(target_dir),
         "dir_exists": os.path.exists(target_dir),
         "exclusions": list(exclusions),
-        "denue": {"status": "ok" if denue else "missing", "files": denue},
-        "cpv": {"status": "ok" if cpv else "missing", "files": cpv},
-        "ce2024": {"status": "ok" if ce2024 else "missing", "files": ce2024},
-        "conapo": {"status": "ok" if conapo else "missing", "files": conapo},
-        "enoe": {"status": "ok" if enoe else "missing", "files": enoe},
+        **sources,
         "osm": {"status": "ok" if osm else "missing", "files": osm},
-        "all_ready": bool(denue and cpv)
+        "all_ready": bool(sources['denue']['status'] == 'ok' and sources['cpv']['status'] == 'ok' and
+                          (reference is None or eic['status'] == 'ok')),
+        "presence_only": True
     }
 
 
@@ -1021,6 +1223,15 @@ def automatic_workplace_status(city_file):
     from sb_mexico.demand_sources import select_sources
     from sb_mexico.automatic_workplace import resolve_automatic_workplace
     config = load_city_data(city_file)
+    if (config.get('demand', {}).get('engine') == 'v2'
+            and config['macroeconomics']['workplace_employment'] == 'auto'):
+        from sb_mexico.demand_v2.request import prepare_request
+        from sb_mexico.fine_workplace import load_fine_workplaces
+        request = prepare_request(config, ROOT_DIR)
+        bbox = dict(zip(('min_lon', 'min_lat', 'max_lon', 'max_lat'), config['city']['bbox']))
+        _, _, report = load_fine_workplaces(request.sources['denue'], bbox,
+            config['macroeconomics'], request.sources['ce'], ROOT_DIR)
+        return dict(report, requested_mode='auto', engine='v2')
     project = os.path.join(ROOT_DIR, config.get('data_dir') or 'data/' + Path(city_file).stem)
     exclusions = config.get('data_exclusions', [])
     macro, notice = resolve_automatic_workplace(
@@ -1195,24 +1406,10 @@ def detect_macro_parameters(city_file: str) -> Dict[str, Any]:
     enoe_files = []
     cpv_files = []
     if target_dir and os.path.exists(target_dir):
-        enoe_candidates = (
-            glob.glob(os.path.join(target_dir, "*enoe*.csv")) +
-            glob.glob(os.path.join(target_dir, "*ENOE*.csv")) +
-            glob.glob(os.path.join(target_dir, "*trim*.csv")) +
-            glob.glob(os.path.join(target_dir, "*enoe*.xls")) +
-            glob.glob(os.path.join(target_dir, "*ENOE*.xls")) +
-            glob.glob(os.path.join(target_dir, "*trim*.xls")) +
-            glob.glob(os.path.join(target_dir, "*enoe*.xlsx")) +
-            glob.glob(os.path.join(target_dir, "*trim*.xlsx"))
-        )
-        enoe_files = sorted(list(dict.fromkeys(os.path.normpath(f) for f in enoe_candidates if os.path.isfile(f))))
+        from sb_mexico.demand_sources import select_sources
+        enoe_files = select_sources(target_dir, DATA_DIR, 'enoe', cdata.get('data_exclusions', []))
 
-        cpv_candidates = (
-            glob.glob(os.path.join(target_dir, "*RESAGEBURB*.csv")) +
-            glob.glob(os.path.join(target_dir, "*resageburb*.csv")) +
-            glob.glob(os.path.join(target_dir, "*censo*.csv"))
-        )
-        cpv_files = sorted(list(dict.fromkeys(os.path.normpath(f) for f in cpv_candidates if os.path.isfile(f))))
+        cpv_files = select_sources(target_dir, DATA_DIR, 'cpv', cdata.get('data_exclusions', []))
 
     # Identificar claves municipales del proyecto si existen
     target_muns = []
@@ -1766,6 +1963,16 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
             data_dir = query.get("data_dir", [""])[0]
             status = inspect_data_files(city_name=city_name, city_code=city_code, city_file=city_file, data_dir_override=data_dir)
             self.serve_json(status)
+        elif path == "/api/sources/job":
+            try:
+                self.serve_json(get_source_download_manager().status(query.get('id', [''])[0]))
+            except Exception as error:
+                self.serve_error(str(error), 400)
+        elif path == "/api/sources/plan-job":
+            try:
+                self.serve_json(get_source_download_manager().preparation_status(query.get('id', [''])[0]))
+            except Exception as error:
+                self.serve_error(str(error), 400)
         elif path == "/api/conapo/years":
             city_file = query.get('file', [''])[0]
             if not city_file:
@@ -1922,24 +2129,13 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 self.serve_json({"status": "error", "message": str(e)})
         elif path == "/api/settlement_suggestions":
             try:
+                from sb_mexico.toponymy import city_settlement_suggestions
                 city_file = query.get("file", [""])[0]
-                from tools.poi_studio import load_city_data as l_city
-                from sb_mexico.toponymy import extract_settlement_suggestions
-                
-                cdata = l_city(city_file) if city_file else {}
-                bbox = cdata.get("city", {}).get("bbox")
-                st = inspect_data_files(city_file=city_file)
-                denue_files = st.get("denue", {}).get("files", [])
+                resolved = _resolve_city_path(city_file)
+                self.serve_json(city_settlement_suggestions(resolved))
+            except Exception as error:
+                self.serve_json({"suggestions": [], "error": str(error)})
 
-                if denue_files and bbox:
-                    first_f = denue_files[0]
-                    denue_path = first_f.get("abs_path") or os.path.join(ROOT_DIR, first_f["path"])
-                    suggs = extract_settlement_suggestions(denue_path, bbox, min_count=10)
-                else:
-                    suggs = []
-                self.serve_json({"suggestions": suggs})
-            except Exception as e:
-                self.serve_json({"suggestions": [], "error": str(e)})
         elif path == "/api/toponymy/scan":
             try:
                 city_file = query.get("file", [""])[0]
@@ -1959,6 +2155,28 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 self.serve_json({"status": "ok", "places": places_osm, "total": len(places_osm)})
             except Exception as e:
                 self.serve_json({"status": "error", "message": str(e), "places": [], "total": 0})
+        elif path == "/api/demand-v2-preview":
+            try:
+                resolved = _resolve_city_path(query.get('file', [''])[0])
+                from sb_mexico.demand_v2.integration import preview_candidate
+                config = load_city_data(resolved)
+                config.setdefault('demand', {})['engine'] = 'v2'
+                stage = query.get('stage', ['points'])[0]
+                if stage not in ('points', 'allocation'):
+                    raise ValueError('Preview stage must be points or allocation')
+                base = os.path.splitext(os.path.basename(resolved))[0].lower()
+                from sb_mexico.build_delivery import resolve_preview_roads
+                roads_path = resolve_preview_roads(resolved, os.path.join(DIST_DIR, base))
+                if query.get('async', [''])[0] == '1':
+                    root = ROOT_DIR
+                    result = candidate_preview_job(resolved, stage,
+                        lambda: preview_candidate(config, root, roads_path=roads_path, stage=stage),
+                        query.get('job', [None])[0])
+                else:
+                    result = preview_candidate(config, ROOT_DIR, roads_path=roads_path, stage=stage)
+                self.serve_json(result)
+            except Exception as error:
+                self.serve_error(str(error), 400)
         elif path == "/api/demand-preview":
             city_file = query.get("file", [""])[0]
             city_base = os.path.splitext(os.path.basename(city_file))[0].lower() if city_file else ""
@@ -1990,6 +2208,13 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                     points = demand_json.get("points", [])
                     demand_json["distance_distribution"] = calculate_commute_distance_distribution(pops, points)
                     demand_json.setdefault('metadata', {})['package_available'] = package_available
+                    candidate_manifest = os.path.join(os.path.dirname(target_path), 'demand_manifest.json')
+                    if os.path.isfile(candidate_manifest):
+                        with open(candidate_manifest, encoding='utf-8') as stream:
+                            candidate = json.load(stream)
+                        demand_json['metadata']['demand_engine'] = candidate.get('engine')
+                        demand_json['metadata']['candidate_identity'] = candidate.get('identity')
+                        demand_json['metadata']['game_validation'] = candidate.get('game_validation')
                     allocation_path = os.path.join(os.path.dirname(target_path), 'od_allocation_report.json')
                     if os.path.isfile(allocation_path):
                         with open(allocation_path, encoding='utf-8') as stream:
@@ -2049,7 +2274,23 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
         path = parsed.path
         query = parse_qs(parsed.query)
 
-        if path == "/api/city/save":
+        if path in ('/api/sources/plan', '/api/sources/start'):
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                if not 0 < length <= 16384:
+                    raise ValueError('Solicitud de descarga fuera de tamaño permitido')
+                request = json.loads(self.rfile.read(length).decode('utf-8'))
+                manager = get_source_download_manager()
+                if path.endswith('/plan'):
+                    result = manager.prepare_async(request['file'])
+                else:
+                    result = manager.start(request['plan_id'], request['kinds'], request.get('enoe_state'),
+                                           request.get('enoe_year', 2026), request.get('enoe_quarter', 2),
+                                           request.get('refresh') is True)
+                self.serve_json(result)
+            except Exception as error:
+                self.serve_error(str(error), 400)
+        elif path == "/api/city/save":
             try:
                 content_len = int(self.headers.get('Content-Length', 0))
                 post_body = self.rfile.read(content_len)
@@ -2061,7 +2302,8 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                     return
 
                 saved_path = save_full_city_data(city_file, req_data)
-                self.serve_json({"status": "ok", "saved_path": saved_path})
+                self.serve_json({"status": "ok", "saved_path": saved_path,
+                                 "demographic_reference": req_data.get('macroeconomics', {}).get('demographic_reference')})
             except Exception as e:
                 self.serve_error(str(e), 500)
 

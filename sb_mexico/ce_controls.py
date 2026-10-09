@@ -14,11 +14,14 @@ def activity_codes(activity):
     text = normalize(activity)
     if text in ('TOTAL MUNICIPAL', 'TOTAL ESTATAL', 'TOTAL NACIONAL'):
         return '', ()
-    text = re.sub(r'^SECTOR\s+', '', text)
+    label = re.match(r'^(SECTOR|SUBSECTOR|RAMA|SUBRAMA|CLASE)\s+', text)
+    text = re.sub(r'^(?:SECTOR|SUBSECTOR|RAMA|SUBRAMA|CLASE)\s+', '', text)
     match = re.match(r'^(31-33|48-49|\d{2,6})(?:\s|$)', text)
     if not match:
         return None, ()
     code = match[1]
+    if label and label[1] != 'SECTOR' and len(code) != {'SUBSECTOR':3, 'RAMA':4, 'SUBRAMA':5, 'CLASE':6}[label[1]]:
+        return None, ()
     return code, {'31-33': ('31', '32', '33'), '48-49': ('48', '49')}.get(code, (code,))
 
 

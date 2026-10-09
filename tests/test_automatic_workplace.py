@@ -73,5 +73,5 @@ class AutomaticWorkplaceTests(unittest.TestCase):
                 source.write('\n')
             return result
         with patch.object(automatic_workplace, 'read_saic_controls', side_effect=changing):
-            with self.assertRaisesRegex(ValueError, 'sources changed'):
+            with self.assertRaisesRegex(ValueError, '(?i)sources changed'):
                 self.load()

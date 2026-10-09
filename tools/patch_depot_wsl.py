@@ -973,7 +973,7 @@ def patch_polygon_neighborhoods(content: str) -> tuple[str, bool]:
                                 s = shape(geom)
                                 if s.is_empty:
                                     continue
-                                c = s.centroid
+                                c = s.representative_point()
                                 f["geometry"] = {"type": "Point", "coordinates": [round(c.x, 6), round(c.y, 6)]}
                                 poly_feats.append(f)
                             except Exception:
@@ -986,10 +986,10 @@ def patch_polygon_neighborhoods(content: str) -> tuple[str, bool]:
                         p_coords = pf["geometry"]["coordinates"]
                         if name == "cities":
                             # Deduplicacion metropolitana: una ciudad solo puede aparecer 1 vez en todo el mapa
-                            if any(p_name == ef["properties"]["name"].strip().lower() for ef in final_feats):
+                            if any(p_name == ef["properties"]["name"].strip().lower() and _calc_haversine_m(p_coords[0], p_coords[1], ef["geometry"]["coordinates"][0], ef["geometry"]["coordinates"][1]) <= 7500.0 for ef in final_feats):
                                 continue
                         else:
-                            if any(p_name == ef["properties"]["name"].strip().lower() and _calc_haversine_m(p_coords[0], p_coords[1], ef["geometry"]["coordinates"][0], ef["geometry"]["coordinates"][1]) <= 1200.0 for ef in final_feats):
+                            if any(p_name == ef["properties"]["name"].strip().lower() and _calc_haversine_m(p_coords[0], p_coords[1], ef["geometry"]["coordinates"][0], ef["geometry"]["coordinates"][1]) <= 500.0 for ef in final_feats):
                                 continue
                         final_feats.append(pf)
 
@@ -998,7 +998,7 @@ def patch_polygon_neighborhoods(content: str) -> tuple[str, bool]:
                         for poly_f in poly_feats:
                             p_name = poly_f["properties"]["name"].strip().lower()
                             p_coords = poly_f["geometry"]["coordinates"]
-                            if any(p_name == ef["properties"]["name"].strip().lower() and _calc_haversine_m(p_coords[0], p_coords[1], ef["geometry"]["coordinates"][0], ef["geometry"]["coordinates"][1]) <= 2500.0 for ef in final_feats):
+                            if any(p_name == ef["properties"]["name"].strip().lower() and _calc_haversine_m(p_coords[0], p_coords[1], ef["geometry"]["coordinates"][0], ef["geometry"]["coordinates"][1]) <= 500.0 for ef in final_feats):
                                 continue
                             final_feats.append(poly_f)
 
@@ -1013,42 +1013,8 @@ def patch_polygon_neighborhoods(content: str) -> tuple[str, bool]:
                         try:
                             with open(curated_geojson, "r", encoding="utf-8") as cjf:
                                 cdata = json.load(cjf)
-                            c_feats = cdata.get("features", [])
-                            deleted_names = set(cdata.get("deleted_names", []))
-                            for d in list(deleted_names):
-                                deleted_names.add(str(d).strip().lower())
-
-                            layer_type_map = {
-                                "cities": ["city", "town", "borough"],
-                                "suburbs": ["suburb", "quarter", "village", "town", "city"],
-                                "neighborhoods": ["neighbourhood", "neighborhood", "subdivision", "hamlet", "locality", "suburb", "quarter"]
-                            }
-                            allowed_types = layer_type_map.get(name, [])
-
-                            # Modo WYSIWYG Estricto: Si el usuario suministro toponimia curada para esta capa,
-                            # la lista curada es la unica fuente de verdad (cero etiquetas no deseadas de OSM).
-                            curated_for_layer = []
-                            for cf_item in c_feats:
-                                cp = cf_item.get("properties", {})
-                                c_type = str(cp.get("type") or cp.get("place", "suburb")).lower()
-                                c_name = cp.get("name", "").strip()
-                                c_geom = cf_item.get("geometry", {})
-                                if not c_name or not c_geom or c_geom.get("type") != "Point":
-                                    continue
-                                if c_type not in allowed_types:
-                                    continue
-                                if c_name.lower() in deleted_names:
-                                    continue
-                                curated_for_layer.append({
-                                    "type": "Feature",
-                                    "properties": {"name": c_name, "place": c_type, "curated": True},
-                                    "geometry": {"type": "Point", "coordinates": c_geom.get("coordinates")}
-                                })
-
-                            if curated_for_layer:
-                                final_feats = curated_for_layer
-                            elif deleted_names:
-                                final_feats = [ef for ef in final_feats if ef["properties"].get("name", "").strip().lower() not in deleted_names]
+                            from sb_mexico.toponymy_delivery import synchronize_labels
+                            final_feats = synchronize_labels(final_feats, cdata, name)
                         except Exception as ce_cur:
                             if self.verb:
                                 print(f"  [WARN] Error inyectando toponimia curada en '{name}': {ce_cur}")
@@ -1206,4 +1172,3 @@ def patch_combine_labels_dedup(content: str) -> tuple[str, bool]:
 
 if __name__ == "__main__":
     patch_depot_maps()
-

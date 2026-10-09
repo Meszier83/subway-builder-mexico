@@ -199,6 +199,46 @@ class TestPoiStudio(unittest.TestCase):
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
+    def test_census_preview_keeps_diagnostics_without_copying_them_per_point(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        import copy
+        import pandas as pd
+        from tools import poi_studio
+
+        class CensusReport(dict):
+            copies = 0
+
+            def __deepcopy__(self, memo):
+                type(self).copies += 1
+                return copy.deepcopy(dict(self), memo)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            data = root / 'data' / 'fixture'
+            data.mkdir(parents=True)
+            (data / 'censo.csv').write_text('lon,lat,pobtot\n', encoding='utf-8')
+            config = root / 'fixture.yaml'
+            config.write_text(yaml.safe_dump(dict(
+                city=dict(code='TST', name='Test', bbox=[-87, 20, -86, 22], residential_placement='legacy'),
+                data_dir=str(data), macroeconomics=dict(til_1_state=.455,
+                    residential_employment='legacy', workplace_employment='legacy'))), encoding='utf-8')
+            frame = pd.DataFrame([dict(lon=-86.8, lat=21.1, pobtot_adj=i + .5)
+                                  for i in range(40)], index=range(100, 140))
+            report = CensusReport(records=[dict(block=i, population=i + .5) for i in range(40)])
+            frame.attrs['residential_placement'] = report
+            diagnostics = {}
+            with patch.object(poi_studio, 'ROOT_DIR', str(root)), \
+                 patch('sb_mexico.inegi.load_cpv_demography', return_value=frame):
+                points = poi_studio.load_demand_sample(city_file=str(config), diagnostics=diagnostics)
+            self.assertEqual(len(points), 40)
+            self.assertEqual([p['id'] for p in points], [f'ref_residential_{i}' for i in range(40)])
+            self.assertEqual([p['residents'] for p in points], [i + .5 for i in range(40)])
+            self.assertTrue(all(p['location'] == [-86.8, 21.1] and p['jobs'] == 0 for p in points))
+            self.assertTrue(all('employed_residents' not in p for p in points))
+            self.assertEqual(diagnostics['residential_placement'], report)
+            self.assertLess(CensusReport.copies, 5)
+
     def test_load_demand_sample_applies_economic_calibration(self):
         """Use isolated source data: no mutable local city or stale density cache."""
         from pathlib import Path

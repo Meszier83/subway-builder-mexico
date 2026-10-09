@@ -125,15 +125,21 @@ def parse_enoe_indicators(enoe_path: str) -> Dict[str, float]:
     tasa_pea = None
     til_1 = None
 
-    # Caso 1: Archivo Excel .xls o .xlsx
+    # Excel is binary: do not retry it as CSV or silently use reference rates.
     lower_path = enoe_path.lower()
     if lower_path.endswith(('.xls', '.xlsx')):
         try:
-            import xlrd
-            wb = xlrd.open_workbook(enoe_path)
-            sheet = wb.sheet_by_index(0)
-            for r in range(sheet.nrows):
-                row_vals = [sheet.cell_value(r, c) for c in range(sheet.ncols)]
+            if lower_path.endswith('.xlsx'):
+                from openpyxl import load_workbook
+                wb = load_workbook(enoe_path, read_only=True, data_only=True)
+                sheet = wb.worksheets[0]
+                rows = sheet.iter_rows(values_only=True)
+            else:
+                import xlrd
+                wb = xlrd.open_workbook(enoe_path)
+                sheet = wb.sheet_by_index(0)
+                rows = (sheet.row_values(r) for r in range(sheet.nrows))
+            for row_vals in rows:
                 row_str = " ".join(str(v) for v in row_vals).lower()
                 if ("tasa de participaci" in row_str or "participacion" in row_str) and tasa_pea is None:
                     for v in row_vals:
@@ -153,10 +159,15 @@ def parse_enoe_indicators(enoe_path: str) -> Dict[str, float]:
                                 break
                         except (ValueError, TypeError):
                             continue
-        except Exception:
-            pass
+        except Exception as exc:
+            raise ValueError(f'No se pudo leer el tabulado ENOE {os.path.basename(enoe_path)}: {exc}') from exc
+        finally:
+            if lower_path.endswith('.xlsx') and 'wb' in locals():
+                wb.close()
+        if tasa_pea is None or til_1 is None:
+            raise ValueError('El tabulado ENOE debe contener Tasa de participación y TIL1 en la primera hoja.')
 
-    # Caso 2: Archivo CSV (o respaldo si XLS no arrojó ambos valores)
+    # Caso 2: CSV. Preserve the existing reference-rate behavior for legacy CSVs.
     if tasa_pea is None or til_1 is None:
         encodings = ['utf-8-sig', 'utf-8', 'latin1', 'cp1252']
         for enc in encodings:
@@ -396,6 +407,10 @@ def parse_ce2024_municipal(ce_path: str, reference_year: Optional[int] = None) -
 
 def resolve_projection_year(macro):
     """Shared Wizard/build precedence, with the existing 2026 default."""
+    if macro.get('demographic_reference') is not None:
+        from sb_mexico.demographic_reference import validate_reference
+        validate_reference(macro)
+        return 2025
     value = macro.get('projection_year')
     if value is None:
         value = macro.get('target_year', 2026)
@@ -681,7 +696,9 @@ def load_denue(denue_paths: Union[str, List[str]], bbox: Dict[str, float], *, fu
             keep = []
             identity_columns = [c for c in ('clee','id','cve_mun_clean','jobs_formal','is_micro_small',
                                            'lat','lon','cve_loc','ageb','manzana') if c in chunk]
-            for row_index, values in zip(chunk.index, chunk[identity_columns].itertuples(index=False, name=None)):
+            if full_scope:
+                identity_columns.extend(('workplace_band', 'workplace_industry'))
+            for values in chunk[identity_columns].itertuples(index=False, name=None):
                 row = dict(zip(identity_columns, values))
                 aliases = [(name, identities.clean(row.get(name))) for name in ('clee', 'id')
                            if identities.clean(row.get(name))]
@@ -690,7 +707,7 @@ def load_denue(denue_paths: Union[str, List[str]], bbox: Dict[str, float], *, fu
                            geo_code(row.get('cve_loc'), 4), geo_code(row.get('ageb'), 4),
                            geo_code(row.get('manzana'), 3))
                 if full_scope:
-                    payload += (str(chunk.loc[row_index, 'workplace_band']), str(chunk.loc[row_index, 'workplace_industry']))
+                    payload += (str(row['workplace_band']), str(row['workplace_industry']))
                 try:
                     keep.append(identities.keep(aliases, payload))
                 except ValueError:

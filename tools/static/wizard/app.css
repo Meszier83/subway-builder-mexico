@@ -14,12 +14,23 @@
       color: #181615;
     }
 
+    #btnAutoUrbanCore:disabled { opacity: 0.65; cursor: wait; }
+    #autoUrbanCoreStatus[data-state="error"] { color: #BE123C; }
+    #autoUrbanCoreStatus[data-state="success"] { color: #15803D; }
+    #toponymyScanStatus, #scanSourceSummary {
+      max-height: 7.5rem; overflow: auto; flex-shrink: 0; padding: 0.4rem;
+    }
+    #toponymyScanStatus[data-state="error"], #scanSourceSummary[data-state="error"] { color: #BE123C; }
+    #toponymyScanStatus[data-state="warning"], #scanSourceSummary[data-state="warning"] { color: #92400E; }
+    #toponymyScanStatus[data-state="success"], #scanSourceSummary[data-state="success"] { color: #15803D; }
+    #btnScanPlaces:disabled, #btnExecuteScan:disabled { opacity: 0.65; cursor: wait; }
+
     /* Reglas universales para contraste impecable */
     h1, h2, h3, h4, th, td, label:not(.badge-colored) {
       color: #181615;
     }
 
-    .text-white:not(button, button *, .btn-accent, .bg-metro-orange *, .bg-metro-green *, .bg-emerald-600 *, .bg-emerald-700 *, .badge-colored *, .bg-rose-500 *, .bg-rose-600 *, .bg-amber-500 *, .bg-amber-600 *, .bg-blue-600 *, .bg-blue-700 *, .bg-purple-600 *, .bg-stone-800 *, .bg-stone-900 *, [class*="bg-black"] *, [class*="bg-gray-8"] *, [class*="bg-gray-9"] *) {
+    .text-white:not(.wizard-toast, button, button *, .btn-accent, .bg-metro-orange *, .bg-metro-green *, .bg-emerald-600 *, .bg-emerald-700 *, .badge-colored *, .bg-rose-500 *, .bg-rose-600 *, .bg-amber-500 *, .bg-amber-600 *, .bg-blue-600 *, .bg-blue-700 *, .bg-purple-600 *, .bg-stone-800 *, .bg-stone-900 *, [class*="bg-black"] *, [class*="bg-gray-8"] *, [class*="bg-gray-9"] *) {
       color: #181615 !important;
     }
 
@@ -434,3 +445,65 @@
       letter-spacing: 0.02em !important;
       z-index: 300;
     }
+.source-data-card { background: #fff; border: 1px solid #d8d1c5; border-radius: 12px; padding: 14px 16px; color: #181615; font-size: 14px; line-height: 1.5; }
+.source-card-heading, .source-card-title, .source-card-tools, .source-file-row, .source-file-actions { display: flex; align-items: center; gap: 10px; }
+.source-card-heading, .source-card-tools, .source-file-row { justify-content: space-between; }
+.source-card-title { min-width: 0; }
+.source-card-purpose { margin: 4px 0 10px; color: #524b42; }
+.source-state, .source-guide-tag { display: inline-block; padding: 3px 8px; border-radius: 6px; background: #f3efe6; color: #524b42; font-size: 12px; flex-shrink: 0; }
+.source-state-warning { background: #fef3c7; color: #92400e; }
+.source-needs-extraction { border-color: #f59e0b; }
+.source-card-tools button, .source-guide-link { color: #15803d; font-weight: 600; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }
+.source-file-details { margin-top: 12px; border-top: 1px solid #e7e5e4; padding-top: 10px; }
+.source-file-details summary, .source-guide-block summary { cursor: pointer; }
+.source-file-row { padding: 9px 0; border-bottom: 1px solid #f3efe6; }
+.source-file-info { min-width: 0; flex: 1; }
+.source-file-name { display: block; overflow-wrap: anywhere; font-family: monospace; font-size: 12px; }
+.source-file-meta { display: block; color: #524b42; font-size: 12px; }
+.source-file-actions { flex-shrink: 0; }
+.source-file-actions button { padding: 6px; border-radius: 6px; color: #524b42; font-size: 12px; }
+.source-file-actions button:hover { background: #f3efe6; }
+.source-selection-note, .source-preparation-note { font-size: 12px; color: #524b42; margin-top: 10px; overflow-wrap: anywhere; }
+.source-preparation-note { color: #92400e; }
+.source-guide-block { border: 1px solid #d8d1c5; border-radius: 10px; font-size: 14px; line-height: 1.6; color: #181615; }
+.source-guide-block summary { padding: 12px 14px; font-weight: 600; }
+.source-guide-block summary .source-guide-tag { margin-left: 8px; font-weight: 400; }
+.source-guide-body { padding: 0 14px 14px; }
+.source-guide-body p { margin: 8px 0; }
+.source-guide-body ol { list-style: decimal; padding-left: 22px; margin: 10px 0; }
+.source-guide-body li { margin: 7px 0; }
+.source-guide-note { background: #f7f5f0; border-radius: 8px; padding: 10px 12px; color: #524b42; font-size: 13px; line-height: 1.6; }
+@media (max-width: 520px) { .source-card-heading { align-items: flex-start; } .source-card-tools { flex-wrap: wrap; } .source-file-row { align-items: flex-start; } .source-guide-tag { white-space: normal; } }
+/* Toponymy review and small-screen editor controls. */
+.scan-review-filters {display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
+.scan-review-filters input,.scan-review-filters select {min-width:0;width:100%;padding:7px;border:1px solid #d6d3d1;border-radius:6px;font-size:12px;background:white;color:#292524}
+.scan-review-selection {display:flex;gap:12px;margin:6px 0;font-size:12px}
+.scan-review-selection button,.scan-review-more {color:#075985;text-decoration:underline;cursor:pointer;padding:4px}
+.scan-review-row {display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid #e7e5e4}
+.scan-review-row label {display:flex;align-items:flex-start;gap:8px;flex:1;min-width:0}
+.scan-review-row input {margin-top:3px;min-width:14px;min-height:14px}
+.scan-review-row strong,.scan-review-row small {display:block;overflow-wrap:anywhere}
+.scan-review-row small {color:#57534e;font-size:11px;line-height:1.5}
+.scan-review-row button {padding:6px;border:1px solid #d6d3d1;border-radius:5px;color:#075985;background:#fff;cursor:pointer}
+.scan-review-delta {font-size:12px;font-weight:700;color:#0c4a6e}
+.scan-review-warning {background:#fff7ed;color:#9a3412;border:1px solid #fdba74;padding:8px;font-size:12px;border-radius:6px}
+.scan-review-warning[hidden] {display:none}
+.scan-review-empty {padding:14px;text-align:center;color:#57534e}
+#poiTab-places > div:first-child {flex-wrap:wrap;gap:6px}
+#poiTab-places > div:first-child > div:last-child {flex-wrap:wrap;gap:4px}
+.toponymy-delivery-control {display:block;font-size:11px;color:#44403c}
+.toponymy-delivery-control select {display:block;width:100%;margin:4px 0;padding:5px;border:1px solid #d6d3d1;border-radius:5px;background:white}
+.toponymy-delivery-control small {display:block;line-height:1.4;color:#78716c}
+.place-source-badge {font-size:9px;color:#57534e;background:#f5f5f4;padding:3px;border-radius:4px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.demand-engine-switch {position:relative;display:inline-block;width:42px;height:24px;flex-shrink:0}
+.demand-engine-switch input {position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:1}
+.demand-engine-track {display:block;width:100%;height:100%;border-radius:20px;background:#78716c;transition:background .15s}
+.demand-engine-track::after {content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:white;transition:transform .15s}
+.demand-engine-switch input:checked + .demand-engine-track {background:#059669}
+.demand-engine-switch input:checked + .demand-engine-track::after {transform:translateX(18px)}
+.demand-engine-switch input:focus-visible + .demand-engine-track {outline:2px solid #0284c7;outline-offset:3px}
+.demand-engine-switch input:disabled + .demand-engine-track {opacity:.5}
+@media (max-width:600px) {
+  #modalScanToponymy > div {padding:12px}
+  .scan-review-filters {grid-template-columns:1fr}
+}

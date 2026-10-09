@@ -6,7 +6,9 @@ PATTERNS = {
     'denue': ['*denue*.csv', '*DENUE*.csv'],
     'cpv': ['*RESAGEBURB*.csv', '*resageburb*.csv', '*censo*.csv', '*censo*.xlsx', '*cpv*.csv'],
     'ce': ['*SAIC*.csv', '*saic*.csv', '*exporta*.csv', '*cenu24*.csv', '*tr_ce*.csv', '*ce_*.csv', '*ce2024*.csv'],
-    'enoe': ['*2026_trim*.csv', '*2024_trim*.csv', '*2025_trim*.csv', '*trim*.csv', '*enoe*.csv'],
+    # Keep existing CSV precedence; Excel uses the same selection in all callers.
+    'enoe': ['*2026_trim*.csv', '*2024_trim*.csv', '*2025_trim*.csv', '*trim*.csv', '*enoe*.csv', '*ENOE*.csv',
+             '*trim*.xls', '*enoe*.xls', '*ENOE*.xls', '*trim*.xlsx', '*enoe*.xlsx', '*ENOE*.xlsx'],
     'conapo': ['*pobproy*.csv', '*quinq*.csv', '*pob_proy*.csv', '*conapo*.csv', 'data-*.csv', '*proyeccion*.csv'],
     'marco': ['*mza*.shp', '*mza*.geojson', '*mza*.gpkg', '*ageb*.shp', '*ageb*.geojson',
               '*ageb*.gpkg', '*manzana*.shp', '*manzana*.geojson'],

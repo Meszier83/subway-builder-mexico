@@ -121,6 +121,11 @@ def execute_wizard_build(config_path, output_dir, data_dir, skip_map=False):
                 if source.exists():
                     shutil.copy2(source, stage / name)
                     result['reused_cartography'][name] = file_hash(source)
+            if config.get('demand', {}).get('engine') == 'v2':
+                cache = asset_root / '.demand-v2-routes.json'
+                if cache.is_file():
+                    # Each entry is keyed by coordinates, network and geometry mode.
+                    shutil.copy2(cache, stage / cache.name)
             result['cartography_provenance'] = ('previous Wizard build' if asset_root != root
                                                 else 'existing project assets; original vintage unverified')
         snapshot = stage / 'effective-city.yaml'
@@ -159,3 +164,19 @@ def resolve_download(config_path, output_dir):
     if file_hash(package) != result['package_hash']:
         raise ValueError('Package changed since validation; rebuild required')
     return package, result
+
+
+def resolve_preview_roads(config_path, output_dir):
+    """Use the last matching build's roads rather than stale root assets."""
+    root = Path(output_dir)
+    manifest = root / 'wizard-build.json'
+    if manifest.is_file():
+        result = json.loads(manifest.read_text(encoding='utf-8'))
+        if (result.get('status') == 'success'
+                and result.get('config_hash') == config_hash(config_path)
+                and Path(result['config_path']).resolve() == Path(config_path).resolve()):
+            stage = Path(result['output_dir']).resolve()
+            if not stage.is_relative_to(root.resolve() / 'wizard-builds' / result['build_id']):
+                raise ValueError('Invalid preview artifact location')
+            return stage / 'roads.geojson'
+    return root / 'roads.geojson'

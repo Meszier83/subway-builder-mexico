@@ -32,12 +32,12 @@ function harness() {
       diagnostics:{workplace_mode:'auto', employment_mode:'census_employed', residential_employment:{placement:{retained:{
         blocks:2, projected_employed:96, by_source:{published_block:{blocks:1},ageb_residual:{blocks:1}}}}}}})};}};
   for (const name of ['updateBboxLayer','updateBboxDimensionsDisplay','toggleBboxLock',
-    'updateCohortUIFromData','toggleModalExperimentControls','updateModalSimulatorPreview',
+    'updateCohortUIFromData','updateCohortTelemetry','toggleModalExperimentControls','updateModalSimulatorPreview',
     'renderUrbanCorePolygon','updateZoomPreviewLayer','renderGrowthFactorsTable','renderPoiList',
     'renderPoiMarkersOnMap','renderPlacesList','renderPlacesMarkersOnMap','renderIsolatedZones',
     'renderAffluenceZones','renderExclusionZones','updatePoiPreviewFromForm']) context[name]=()=>{};
   vm.createContext(context);
-  vm.runInContext(['updateDemandMethodsSummary','workplaceSourceStatus','updateWorkplaceSourceStatus','refreshWorkplaceSourceStatus','syncStateFromInputs','populateFormFields','triggerAutoSave','loadDemandDensityForPoi'].map(fn).join('\n'),context);
+  vm.runInContext(['selectedDemandEngine','updateDemandEngineControls','syncDemandEngineFields','syncCohortCount','updateDemandMethodsSummary','workplaceSourceStatus','updateWorkplaceSourceStatus','refreshWorkplaceSourceStatus','syncStateFromInputs','populateFormFields','triggerAutoSave','loadDemandDensityForPoi'].map(fn).join('\n'),context);
   return {context, element};
 }
 (async()=>{
@@ -105,6 +105,28 @@ function harness() {
   const {context:c, element:e} = harness();
   c.populateFormFields();
   assert.equal(e('cfg_residential_employment').value,'census_employed');
+  c.cityData={city:{code:'MULTI'},macroeconomics:{projection_year:2026}};
+  c.populateFormFields();
+  e('cfg_demographic_reference').value='eic2025';
+  e('cfg_eic_indicators').value='data/shared/indicators.csv';
+  e('cfg_eic_persons').value='data/state01/personas01.csv\ndata/state02/personas02.csv';
+  c.syncStateFromInputs();
+  assert.equal(c.cityData.macroeconomics.projection_year,2025);
+  assert.equal(c.cityData.macroeconomics.demographic_reference.persons.length,2);
+  const reference=JSON.stringify(c.cityData.macroeconomics.demographic_reference);
+  c.populateFormFields();
+  c.syncStateFromInputs();
+  assert.equal(JSON.stringify(c.cityData.macroeconomics.demographic_reference),reference);
+  const originalFetch=c.fetch;
+  c.saveCurrentCity=async()=>true;
+  c.fetch=async()=>({ok:true,json:async()=>({points:[],diagnostics:{employment_mode:'census_employed'}})});
+  await c.loadDemandDensityForPoi();
+  assert.match(c.error,/referencia EIC 2025/,'A census preview must not be accepted as EIC');
+  e('cfg_demographic_reference').value='projected';
+  c.syncStateFromInputs();
+  assert.equal(c.cityData.macroeconomics.projection_year,2026);
+  assert.equal(c.cityData.macroeconomics.demographic_reference,undefined);
+  c.fetch=originalFetch;
   e('cfg_residential_employment').value='census_employed';
   e('cfg_residential_employment').listeners.get('change')();
   assert.equal(c.cityData.macroeconomics.residential_employment,'census_employed');

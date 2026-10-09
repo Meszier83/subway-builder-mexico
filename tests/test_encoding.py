@@ -17,7 +17,7 @@ MOJIBAKE_SUBSTRINGS = [
 ]
 
 VALID_EXTENSIONS = [".py", ".md", ".yaml", ".yml", ".json", ".html", ".bat", ".txt"]
-EXCLUDED_DIRS = {".git", "__pycache__", "venv", ".pytest_cache", "build", "dist", "data"}
+EXCLUDED_DIRS = {".git", "__pycache__", "venv", ".venv", "node_modules", ".pytest_cache", "build", "dist", "data", "reports", "plans"}
 EXCLUDED_FILES = {"test_encoding.py"}
 
 

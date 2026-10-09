@@ -177,23 +177,23 @@
         <div class="space-y-3 text-xs">
           <div>
             <label class="block text-stone-700 font-semibold mb-1">Nombre Oficial de la Ciudad</label>
-            <input type="text" id="cfg_city_name" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-metro-orange focus:outline-none" placeholder="Cancún y Riviera Norte">
+            <input type="text" id="cfg_city_name" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-metro-orange focus:outline-none" placeholder="Nombre de la ciudad o región">
           </div>
 
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block text-stone-700 font-semibold mb-1">Código ISO / IATA</label>
-              <input type="text" id="cfg_city_code" maxlength="4" class="w-full uppercase font-mono bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-metro-orange focus:outline-none" placeholder="CUN">
+              <input type="text" id="cfg_city_code" maxlength="4" class="w-full uppercase font-mono bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-metro-orange focus:outline-none" placeholder="Código del proyecto">
             </div>
             <div>
               <label class="block text-stone-700 font-semibold mb-1">Creador / Autor</label>
-              <input type="text" id="cfg_city_creator" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-metro-orange focus:outline-none" placeholder="Keppler">
+              <input type="text" id="cfg_city_creator" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-metro-orange focus:outline-none" placeholder="Nombre del autor">
             </div>
           </div>
 
           <div>
             <label class="block text-stone-700 font-semibold mb-1">Descripción</label>
-            <input type="text" id="cfg_city_desc" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-metro-orange focus:outline-none" placeholder="Zona Metropolitana y Corredor Turístico">
+            <input type="text" id="cfg_city_desc" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-metro-orange focus:outline-none" placeholder="Descripción del proyecto">
           </div>
 
           <!-- Coordenadas BBOX -->
@@ -217,6 +217,16 @@
               <p id="employmentCoverage" class="text-xs text-stone-600"></p>
               <p id="workplaceCoverage" class="text-xs text-stone-600"></p>
             </div>
+            <div class="border rounded-lg p-3 space-y-2">
+              <label for="cfg_demand_engine" class="flex items-center justify-between cursor-pointer text-sm font-semibold">
+                <span>Usar nuevo motor de demanda</span>
+                <span class="demand-engine-switch">
+                  <input id="cfg_demand_engine" type="checkbox" role="switch" aria-describedby="demandEngineStatus" onchange="onDemandEngineChange()">
+                  <span class="demand-engine-track" aria-hidden="true"></span>
+                </span>
+              </label>
+              <p id="demandEngineStatus" role="status" class="text-xs text-stone-600">Desactivado: motor legado.</p>
+            </div>
             <details id="demandCompatibility" class="text-xs mt-2">
               <summary>Compatibilidad y métodos manuales anteriores</summary>
               <p>Se conservan para proyectos anteriores y configuraciones manuales. El flujo normal inspecciona las fuentes automáticamente; no requiere seleccionar grupos CE ni ingresar evidencia manual.</p>
@@ -228,12 +238,24 @@
               </select>
             </div>
             <div>
+              <button type="button" onclick="previewDemandV2()" class="text-xs underline">Evaluar candidato sin cambiar el motor</button>
+              <pre id="demandV2Summary" class="text-xs whitespace-pre-wrap"></pre>
               <label for="cfg_residential_employment" class="block text-xs font-semibold">Residentes ocupados</label>
               <select id="cfg_residential_employment" class="w-full border rounded px-2 py-1">
                 <option value="legacy">Compatible (tasa de participación)</option>
                 <option value="census_employed" selected>Censo INEGI: población ocupada (predeterminado)</option>
               </select>
-              <p class="text-xs text-stone-600">Usa ocupados de 12 años y más del Censo 2020 y reconstruye valores reservados cuando hay controles. La proyección supone crecimiento proporcional a la población.</p>
+              <p class="text-xs text-stone-600">Usa ocupados de 12 años y más del Censo 2020 como distribución espacial. La referencia EIC separa población, ocupados y viajeros.</p>
+              <label for="cfg_demographic_reference" class="block text-xs font-semibold mt-2">Referencia demográfica</label>
+              <select id="cfg_demographic_reference" class="w-full border rounded px-2 py-1">
+                <option value="projected">Proyección configurada</option>
+                <option value="eic2025">Encuesta Intercensal 2025</option>
+              </select>
+              <label for="cfg_eic_indicators" class="block text-xs mt-2">CSV oficial de indicadores EIC 2025</label>
+              <input id="cfg_eic_indicators" class="w-full border rounded px-2 py-1" placeholder="Ruta del archivo nacional">
+              <label for="cfg_eic_persons" class="block text-xs mt-2">CSV de personas EIC 2025, una ruta por línea</label>
+              <textarea id="cfg_eic_persons" class="w-full border rounded px-2 py-1" rows="2" placeholder="Incluye todos los estados del mapa"></textarea>
+              <p class="text-xs text-stone-600">EIC fija el año en 2025 y sustituye los factores manuales para estas magnitudes. Conserva manzanas de 2020; no observa empleos por establecimiento. Para descargar automáticamente, activa EIC y usa «Preparar descargas» en Fuentes; las rutas se guardan al terminar.</p>
             </div>
             <div>
               <label for="cfg_workplace_employment" class="block text-xs font-semibold">Empleo en establecimientos</label>
@@ -250,7 +272,7 @@
                 <label for="cfg_ce_reference_year">Año de actividad del censo</label>
                 <input id="cfg_ce_reference_year" type="number" min="1900" max="2100" value="2023" class="w-full border rounded px-2 py-1">
                 <label for="cfg_ce_sources">Archivos CE dentro del proyecto (una ruta por línea)</label>
-                <textarea id="cfg_ce_sources" rows="3" class="w-full border rounded px-2 py-1" placeholder="reports/source-audit/saic-download/quintana_roo_2023_sector_totals.csv&#10;reports/source-audit/saic-download/quintana_roo_2023_sectors_sizes.csv"></textarea>
+                <textarea id="cfg_ce_sources" rows="3" class="w-full border rounded px-2 py-1" placeholder="data/PROYECTO/SAIC_ENTIDAD_2023_totales.csv&#10;data/PROYECTO/SAIC_ENTIDAD_2023_sectores_tamanos.csv"></textarea>
                 <button type="button" onclick="inspectWorkplaceBenchmark()" class="border rounded px-2 py-1">Inspeccionar referencia</button>
                 <p id="historicalBenchmarkStatus" role="status"></p>
                 <pre id="historicalBenchmarkGroups" class="text-xs whitespace-pre-wrap"></pre>
@@ -445,7 +467,7 @@
             <div class="grid grid-cols-2 gap-2">
               <button type="button" onclick="autoDetectUrbanCore()" id="btnAutoUrbanCore" class="bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold py-1.5 px-2 rounded-lg flex items-center justify-center space-x-1 transition shadow-2xs" title="Calcula la envolvente cóncava a partir del Censo INEGI con el alcance seleccionado">
                 <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-600"></i>
-                <span>Auto Censo</span>
+                <span id="btnAutoUrbanCoreText">Auto Censo</span>
               </button>
               <button type="button" onclick="toggleEditUrbanCoreVertices()" id="btnEditUrbanCoreVertices" class="hidden bg-stone-100 hover:bg-stone-200 border border-stone-300 text-stone-800 text-xs font-bold py-1.5 px-2 rounded-lg flex items-center justify-center space-x-1 transition shadow-2xs" title="Editar y mover vértices directamente en el mapa">
                 <i data-lucide="edit-3" class="w-3.5 h-3.5 text-amber-600"></i>
@@ -456,6 +478,7 @@
                 <span>+ Trazar Manualmente</span>
               </button>
             </div>
+            <p id="autoUrbanCoreStatus" role="status" aria-live="polite" hidden class="text-[11px] text-stone-600 leading-snug"></p>
             <button type="button" id="btnClearUrbanCore" onclick="clearUrbanCorePolygon()" class="hidden w-full text-center text-[11px] text-rose-600 font-bold hover:underline py-0.5">
               Eliminar Polígono Núcleo
             </button>
@@ -678,6 +701,26 @@
             </div>
           </div>
 
+          <p class="text-sm text-stone-600 mb-3">Comprueba qué fuentes se encontraron y cuáles requieren preparación. La presencia de archivos no valida su contenido.</p>
+          <div class="mb-4 bg-stone-50 border border-stone-300 p-3 rounded-xl space-y-2">
+            <button id="sourceDownloadPrepare" onclick="prepareSourceDownloads()" class="px-3 py-2 bg-metro-green text-white text-xs font-bold rounded-lg">Preparar descargas automáticas</button>
+            <p class="text-xs text-stone-600">Detecta las entidades y municipios del BBOX. Descarga y extrae fuentes oficiales; conserva las fuentes manuales existentes.</p>
+            <div id="sourceDownloadPlan" class="hidden space-y-2 text-xs">
+              <p id="sourceDownloadGeography"></p>
+              <div id="sourceDownloadChoices" class="space-y-1"></div>
+              <div id="sourceDownloadEnoeOptions">
+              <label>Referencia ENOE <select id="sourceDownloadEnoeState" class="border rounded p-1"></select></label>
+              <label>Año ENOE <input id="sourceDownloadEnoeYear" type="number" min="2005" max="2100" value="2026" class="border rounded p-1 w-20"></label>
+              <label>Trimestre <select id="sourceDownloadEnoeQuarter" class="border rounded p-1"><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option></select></label>
+              <p class="text-stone-600">La referencia ENOE se aplica a todo el mapa en el legado. El periodo inicial es 2026 T2; puedes elegir otro periodo publicado.</p>
+              </div>
+              <p class="text-stone-600">SAIC usa referencia 2023; CPV y Marco usan 2020. El nuevo motor usa EIC 2025 y no requiere ENOE ni CONAPO.</p>
+              <label class="block"><input id="sourceDownloadRefresh" type="checkbox"> Volver a descargar desde el proveedor (sin reutilizar la caché)</label>
+              <p class="text-stone-600">La caché conserva la descarga anterior; no busca automáticamente una edición nueva de DENUE u OSM. La fecha y procedencia quedan registradas con los archivos.</p>
+              <button id="sourceDownloadStart" onclick="startSourceDownloads()" class="px-3 py-2 bg-metro-green text-white font-bold rounded-lg">Descargar fuentes seleccionadas</button>
+            </div>
+            <pre id="sourceDownloadProgress" class="text-xs whitespace-pre-wrap break-all" role="status" aria-live="polite"></pre>
+          </div>
           <div class="space-y-3" id="dataStatusList">
             <!-- Renderizado dinámico -->
           </div>
@@ -722,7 +765,7 @@
             <input type="file" id="manualFileInput" multiple class="hidden" onchange="handleFileSelect(event)">
             <i data-lucide="file-up" class="w-12 h-12 text-metro-pink mb-3"></i>
             <span class="text-sm font-bold text-stone-900 mb-1">Arrastra archivos aquí o haz clic para examinar</span>
-            <span class="text-xs text-stone-500 text-center max-w-sm">Formatos soportados: .csv, .xls, .xlsx, .zip, .osm.pbf, .geojson</span>
+            <span class="text-xs text-stone-500 text-center max-w-sm">Datos extraídos: .csv, .xls, .xlsx, .osm.pbf, .geojson, .gpkg y componentes del shapefile. Los ZIP se guardan sin descomprimir.</span>
           </div>
 
           <!-- Barra de Progreso de Subida -->
@@ -863,7 +906,7 @@
             </div>
 
             <p class="text-[11px] text-stone-600 leading-relaxed">
-              Define cómo se empaquetan los viajeros en agentes discretos para el motor WebGL. Permite alternar entre el tamaño canónico rígido (200 pax, estándar oficial de Colin Miller en Subway Builder) o un rango adaptativo para capturar demanda barrial sin comprometer los 60 FPS.
+              Define el tamaño máximo o rango preferido de las cohortes. El candidato conserva los viajeros, las restricciones territoriales y las cuotas de POIs; puede necesitar restos para mantener el reparto municipal. El rendimiento se comprueba en el juego.
             </p>
 
             <!-- Arquetipos / Presets Rápidos (1-Clic) -->
@@ -916,7 +959,7 @@
                   <input type="range" id="cfg_fixed_pop_range" min="10" max="500" step="5" value="200" oninput="onFixedPopRangeChanged(this.value)" class="w-full accent-blue-600 cursor-pointer">
                   <input type="number" id="cfg_fixed_pop_size" value="200" min="10" max="500" step="5" oninput="onFixedPopInputChanged(this.value)" class="w-20 bg-white border border-stone-300 rounded-lg px-2 py-1 text-stone-900 font-mono text-xs font-bold text-center">
                 </div>
-                <span class="text-[10px] text-stone-500 block mt-1">Todas las cohortes se generarán en múltiplos enteros de este tamaño (estándar Subway Builder: 200).</span>
+                <span class="text-[10px] text-stone-500 block mt-1">Motor candidato: tamaño objetivo por cohorte. Agrupa residentes a un máximo de 500 m de su punto original, dentro del mismo municipio, zona aislada y componente vial. Conserva restos adicionales por proximidad, reparto municipal y cuotas de POIs.</span>
               </div>
 
               <!-- Controles Modo Adaptativo (Rango min/target/max) -->
@@ -940,6 +983,11 @@
             </div>
 
             <!-- Panel de Telemetría Dinámica de Cohortes y Medidor WebGL -->
+            <div class="bg-white p-2.5 rounded-lg border border-stone-200">
+              <label for="cfg_cohort_count" class="block text-stone-700 font-semibold text-[11px] mb-1">Número total de cohortes · motor candidato</label>
+              <input type="number" id="cfg_cohort_count" min="1" step="1" placeholder="Automático según tamaño objetivo" oninput="onCohortParamChanged()" class="w-full bg-white border border-metro-border rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
+              <span class="text-[10px] text-stone-500 block mt-1">Vacío: usa mínimo, objetivo y máximo. Con un número: exige ese total exacto, conserva viajeros y respeta el máximo. El mínimo pasa a ser una preferencia.</span>
+            </div>
             <div id="cohort_telemetry_box" class="bg-stone-50 p-2.5 rounded-lg border border-stone-200 text-xs space-y-1.5">
               <div class="flex justify-between items-center">
                 <span class="font-bold text-stone-800 flex items-center gap-1.5">
@@ -1299,7 +1347,7 @@
               <span id="poiPrefixBadge" class="bg-stone-100 text-stone-700 px-2.5 py-1.5 text-xs font-mono font-bold border-r border-stone-300 select-none flex items-center shrink-0">
                 AIR_
               </span>
-              <input type="text" id="editPoiBaseName" oninput="onPoiBaseNameChanged()" placeholder="Cancún" class="w-full text-xs font-medium px-2.5 py-1.5 text-stone-900 focus:outline-none">
+              <input type="text" id="editPoiBaseName" oninput="onPoiBaseNameChanged()" placeholder="Nombre de la ciudad o terminal" class="w-full text-xs font-medium px-2.5 py-1.5 text-stone-900 focus:outline-none">
             </div>
             <input type="hidden" id="editPoiId">
 
@@ -1307,7 +1355,7 @@
             <div id="poiGameDisplayBanner" class="p-2 bg-stone-100 rounded-lg text-[11px] flex items-center justify-between border border-stone-200">
               <div class="flex items-center space-x-1.5 truncate">
                 <span class="text-stone-500 text-[10px] uppercase font-bold tracking-wider shrink-0">En el juego:</span>
-                <strong id="poiGameDisplayName" class="text-stone-900 truncate font-sans">✈️ Cancún Terminal</strong>
+                <strong id="poiGameDisplayName" class="text-stone-900 truncate font-sans">✈️ Nombre Terminal</strong>
               </div>
               <span id="poiGameBehaviorTag" class="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-white text-stone-700 border border-stone-300 shrink-0">24/7 (dampening 0.5)</span>
             </div>
@@ -1315,7 +1363,7 @@
             <!-- Sugerencia / Tip si escribe redundancias -->
             <p id="poiRedundancyWarning" class="hidden text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 flex items-center space-x-1.5">
               <i data-lucide="info" class="w-3.5 h-3.5 shrink-0 text-amber-600"></i>
-              <span>El motor añade automáticamente "Terminal". Se recomienda escribir solo el nombre de la ciudad o terminal (ej. <em>Cancún</em>).</span>
+              <span>El motor añade automáticamente "Terminal". Se recomienda escribir solo el nombre de la ciudad o terminal (sin añadir la palabra <em>Terminal</em>).</span>
             </p>
 
             <!-- Alerta de ID Duplicado -->
@@ -1341,7 +1389,7 @@
               </div>
               <div class="space-y-1">
                 <label class="text-[9px] font-bold uppercase tracking-wider text-stone-400">Nombre Inglés (English Name)</label>
-                <input type="text" id="editPoiNameEn" oninput="updatePoiPreviewFromForm()" placeholder="Cancun International Airport" class="w-full text-xs bg-white border border-stone-300 rounded-lg px-2 py-1 text-stone-900">
+                <input type="text" id="editPoiNameEn" oninput="updatePoiPreviewFromForm()" placeholder="Nombre en inglés" class="w-full text-xs bg-white border border-stone-300 rounded-lg px-2 py-1 text-stone-900">
               </div>
             </div>
           </details>
@@ -1355,8 +1403,8 @@
               </button>
             </div>
             <div class="grid grid-cols-2 gap-2">
-              <input type="number" step="0.00001" id="editPoiLon" oninput="updatePoiPreviewFromForm()" placeholder="Longitud (-86.87)" class="w-full font-mono text-xs bg-white border border-stone-300 rounded-lg px-2 py-1.5 text-stone-900">
-              <input type="number" step="0.00001" id="editPoiLat" oninput="updatePoiPreviewFromForm()" placeholder="Latitud (21.03)" class="w-full font-mono text-xs bg-white border border-stone-300 rounded-lg px-2 py-1.5 text-stone-900">
+              <input type="number" step="0.00001" id="editPoiLon" oninput="updatePoiPreviewFromForm()" placeholder="Longitud en grados decimales" class="w-full font-mono text-xs bg-white border border-stone-300 rounded-lg px-2 py-1.5 text-stone-900">
+              <input type="number" step="0.00001" id="editPoiLat" oninput="updatePoiPreviewFromForm()" placeholder="Latitud en grados decimales" class="w-full font-mono text-xs bg-white border border-stone-300 rounded-lg px-2 py-1.5 text-stone-900">
             </div>
           </div>
 
@@ -1485,7 +1533,7 @@
 
               <!-- Botón Escaneo Rápido 1-Clic con Menú de Opciones -->
               <div class="inline-flex rounded shadow-xs">
-                <button onclick="quickScanAndPopulateToponymy(this)" id="btnScanPlaces" class="px-2 py-1 bg-sky-700 hover:bg-sky-600 text-white text-[10px] font-bold rounded-l flex items-center space-x-1 transition cursor-pointer" title="Escanear asentamientos desde OSM y DENUE e incorporar en 1 clic">
+                <button onclick="quickScanAndPopulateToponymy(this)" id="btnScanPlaces" class="px-2 py-1 bg-sky-700 hover:bg-sky-600 text-white text-[10px] font-bold rounded-l flex items-center space-x-1 transition cursor-pointer" title="Escanear OSM y DENUE y revisar los nombres antes de incorporar">
                   <i data-lucide="scan" class="w-3 h-3"></i>
                   <span>Escanear</span>
                 </button>
@@ -1530,9 +1578,18 @@
           <!-- Contenedor Colapsable de Controles Secundarios (Banner y Visibilidad en Mapa) -->
           <div id="placesSecondaryControls" class="space-y-1.5 shrink-0 transition-all">
             <!-- Banner de Estado de Modo Cartográfico (OSM Nativo vs Curado) -->
+            <p id="toponymyScanStatus" role="status" aria-live="polite" hidden class="text-[11px] text-stone-600 leading-snug"></p>
             <div id="toponymyModeBanner" class="shrink-0">
               <!-- Renderizado dinámico desde JS -->
             </div>
+            <label class="toponymy-delivery-control">
+              <span>Al compilar las etiquetas</span>
+              <select id="toponymyDeliveryMode" onchange="setToponymyDeliveryMode(this.value)">
+                <option value="replace">Lista por capa (comportamiento histórico)</option>
+                <option value="merge">Complementar OSM (para listas incompletas)</option>
+              </select>
+              <small id="toponymyDeliveryNote"></small>
+            </label>
 
             <!-- Barra de Controles de Visibilidad Cartográfica y Tamaño de Fuente (Sleek Single Line) -->
             <div class="p-1.5 bg-stone-50 border border-stone-200 rounded-lg flex items-center justify-between text-[10px] shrink-0 gap-1 shadow-2xs">
@@ -1568,13 +1625,13 @@
               Todas (<span id="countCat-all">0</span>)
             </button>
             <button type="button" onclick="setPlaceCategoryFilter('city')" id="btnPlaceCat-city" class="py-1 px-1 rounded-md text-center transition text-stone-600 hover:text-stone-900 cursor-pointer">
-              👑 Ciudades (<span id="countCat-city">0</span>)
+              👑 Grandes (<span id="countCat-city">0</span>)
             </button>
             <button type="button" onclick="setPlaceCategoryFilter('suburb')" id="btnPlaceCat-suburb" class="py-1 px-1 rounded-md text-center transition text-stone-600 hover:text-stone-900 cursor-pointer">
-              🏙️ Distritos (<span id="countCat-suburb">0</span>)
+              🏙️ Medianas (<span id="countCat-suburb">0</span>)
             </button>
             <button type="button" onclick="setPlaceCategoryFilter('neighbourhood')" id="btnPlaceCat-neighbourhood" class="py-1 px-1 rounded-md text-center transition text-stone-600 hover:text-stone-900 cursor-pointer">
-              🏘️ Colonias (<span id="countCat-neighbourhood">0</span>)
+              🏘️ Pequeñas (<span id="countCat-neighbourhood">0</span>)
             </button>
           </div>
 
@@ -1593,6 +1650,8 @@
                 <option value="micro">🚪 Cerradas / Privadas</option>
                 <option value="osm">🗺️ Origen OSM</option>
                 <option value="denue">🏪 Origen DENUE</option>
+                <option value="manual">Añadidas manualmente</option>
+                <option value="unknown">Origen no registrado</option>
               </select>
             </div>
 
@@ -2150,11 +2209,11 @@
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
           <div>
             <label class="block text-stone-700 font-semibold mb-1">Nombre de Ciudad</label>
-            <input type="text" id="newProj_name" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium" placeholder="ej. Puebla">
+            <input type="text" id="newProj_name" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium" placeholder="Nombre del proyecto">
           </div>
           <div>
             <label class="block text-stone-700 font-semibold mb-1">Código Clave (3 letras)</label>
-            <input type="text" id="newProj_code" maxlength="4" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-mono font-bold uppercase" placeholder="PUE">
+            <input type="text" id="newProj_code" maxlength="4" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-mono font-bold uppercase" placeholder="Código del proyecto">
           </div>
           <div class="flex items-end">
             <button onclick="submitCreateNewProject()" class="w-full bg-metro-orange hover:bg-orange-600 text-white font-bold text-xs py-2.5 px-4 rounded-lg transition shadow flex items-center justify-center space-x-1.5">
@@ -2189,7 +2248,7 @@
       </p>
       <div>
         <label class="block text-stone-700 font-bold text-xs mb-1.5">Ruta del Directorio de Datos</label>
-        <input type="text" id="inputCustomDataDir" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-mono text-xs" placeholder="ej. D:/Censos_INEGI/Puebla/ o data/puebla">
+        <input type="text" id="inputCustomDataDir" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-mono text-xs" placeholder="Ruta a la carpeta de datos del proyecto">
       </div>
       <div class="flex justify-end space-x-2 pt-2">
         <button onclick="closeChangeDataDirModal()" class="px-4 py-2 bg-stone-100 text-stone-700 text-xs font-bold rounded-lg hover:bg-stone-200 transition">Cancelar</button>
@@ -2198,104 +2257,111 @@
     </div>
   </div>
 
-  <!-- Modal Guía de Fuentes de Datos INEGI / CONAPO -->
+  <!-- Guía de fuentes: instrucciones compatibles con los lectores actuales -->
   <div id="modalDataSources" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-    <div class="bg-white border border-stone-200 rounded-2xl p-6 w-full max-w-2xl shadow-2xl space-y-4 max-h-[85vh] flex flex-col">
+    <div role="dialog" aria-modal="true" aria-labelledby="dataSourceGuideTitle" class="bg-white border border-stone-200 rounded-2xl p-6 w-full max-w-3xl shadow-2xl space-y-4 max-h-[85vh] flex flex-col">
       <div class="flex justify-between items-start border-b border-stone-200 pb-3 shrink-0">
         <div>
-          <h3 class="text-base font-bold text-stone-900 flex items-center space-x-2">
-            <i data-lucide="book-open" class="w-5 h-5 text-metro-orange"></i>
-            <span>Guía de Descargas Oficiales (INEGI / CONAPO)</span>
-          </h3>
-          <p class="text-xs text-stone-500 mt-0.5">Enlaces directos a los portales oficiales de datos abiertos de México.</p>
+          <h3 id="dataSourceGuideTitle" class="text-base font-bold text-stone-900">Guía de fuentes y descargas</h3>
+          <p id="dataSourceGuideContext" class="text-sm text-stone-600 mt-1">Selecciona las entidades y los periodos de tu proyecto.</p>
         </div>
-        <button onclick="closeDataSourcesModal()" class="text-stone-400 hover:text-stone-800 p-1.5 rounded-lg hover:bg-stone-100 transition">
-          <i data-lucide="x" class="w-5 h-5"></i>
-        </button>
+        <button onclick="closeDataSourcesModal()" aria-label="Cerrar guía" class="text-stone-500 hover:text-stone-900 p-2"><i data-lucide="x" class="w-5 h-5"></i></button>
       </div>
-
-      <div class="flex-1 overflow-y-auto space-y-3 text-xs pr-1">
-        <!-- 1. DENUE -->
-        <div class="bg-stone-50 p-3.5 rounded-xl border border-stone-200 space-y-1">
-          <div class="flex justify-between items-center">
-            <span class="font-bold text-metro-orange">1. DENUE (Directorio de Establecimientos Económicos)</span>
-            <a href="https://www.inegi.org.mx/app/descarga/" target="_blank" class="text-[11px] bg-orange-100 text-orange-800 hover:bg-orange-200 px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
-              <span>Abrir INEGI</span> <i data-lucide="external-link" class="w-3 h-3"></i>
-            </a>
+      <div class="flex-1 overflow-y-auto space-y-3 pr-1">
+        <p class="source-guide-note">Descomprime los ZIP antes de usar sus datos. La carga guarda archivos, pero no extrae paquetes. «Encontrado» indica presencia; comprueba el contenido y la cobertura en la vista previa.</p>
+        <p class="source-guide-note">En el paso 2 puedes usar Preparar descargas automáticas: detecta el BBOX y extrae los datos. Para descarga manual, NN indica la clave estatal de dos dígitos; repite los paquetes estatales para todas las entidades del mapa.</p>
+        <details id="guide-denue" class="source-guide-block" open>
+          <summary><span>DENUE · establecimientos económicos</span><span class="source-guide-tag">Necesaria</span></summary>
+          <div class="source-guide-body">
+            <p>Ubica establecimientos y aporta su actividad y estrato de empleo.</p>
+            <a href="https://www.inegi.org.mx/app/descarga/" target="_blank" rel="noopener noreferrer" class="source-guide-link">Abrir INEGI ↗</a>
+            <p>Ruta vigente: <code>https://www.inegi.org.mx/contenidos/masiva/denue/denue_NN_csv.zip</code>. Conserva fecha y edición; no inventes enlaces con fechas.</p>
+            <ol><li>Selecciona DENUE, la entidad federativa del proyecto y la edición que quieres utilizar. Descarga el paquete CSV.</li><li>Descomprime el ZIP y copia conjunto_de_datos/denue_inegi_NN_.csv directamente al proyecto. NN es la clave estatal; no copies el diccionario como datos.</li><li>Pulsa Detectar y comprueba los archivos encontrados. Usa una sola edición por entidad; el nombre no certifica cobertura ni fecha.</li></ol>
+            <p class="source-guide-note">CSV: *denue*.csv. Se leen todos los archivos seleccionados. Un ZIP pendiente de extracción no sirve como entrada.</p>
           </div>
-          <p class="text-stone-700">Descarga masiva por Entidad Federativa en formato CSV o ZIP.</p>
-          <p class="text-stone-500 font-mono text-[11px]">Archivo esperado: <code>denue_inegi_*.csv</code> (ej. <code>09</code> CDMX, <code>15</code> EdoMex, <code>23</code> Q. Roo).</p>
-        </div>
-
-        <!-- 2. CPV 2020 -->
-        <div class="bg-stone-50 p-3.5 rounded-xl border border-stone-200 space-y-1">
-          <div class="flex justify-between items-center">
-            <span class="font-bold text-metro-green">2. Censo de Población y Vivienda 2020 (Microdatos Manzanas)</span>
-            <a href="https://www.inegi.org.mx/programas/ccpv/2020/#microdatos" target="_blank" class="text-[11px] bg-emerald-100 text-emerald-800 hover:bg-emerald-200 px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
-              <span>Abrir INEGI</span> <i data-lucide="external-link" class="w-3 h-3"></i>
-            </a>
+        </details>
+        <details id="guide-cpv" class="source-guide-block" open>
+          <summary><span>CPV 2020 · población por manzana</span><span class="source-guide-tag">Necesaria</span></summary>
+          <div class="source-guide-body">
+            <p>Aporta población, claves territoriales y ocupación censal por manzana urbana.</p>
+            <a href="https://www.inegi.org.mx/programas/ccpv/2020/#Microdatos" target="_blank" rel="noopener noreferrer" class="source-guide-link">Abrir Censo 2020 ↗</a>
+            <p>Ruta: <code>https://www.inegi.org.mx/contenidos/programas/ccpv/2020/datosabiertos/ageb_manzana/ageb_mza_urbana_NN_cpv2020_csv.zip</code>.</p>
+            <ol><li>En Microdatos elige Principales resultados por AGEB y manzana urbana y descarga el CSV de cada entidad del proyecto.</li><li>Descomprime y copia conjunto_de_datos/conjunto_de_datos_ageb_urbana_NN_cpv2020.csv al proyecto. No copies el diccionario ni las tablas de Personas o Viviendas.</li><li>Conserva todas las columnas originales, incluidas las claves ENTIDAD, MUN, LOC, AGEB y MZA y los indicadores POBTOT, P_15YMAS y POCUPADA.</li></ol>
+            <p class="source-guide-note">El nombre oficial contiene cpv2020 y se reconoce sin renombrarlo. También se admiten RESAGEBURB_*.csv y *censo*.xlsx. El CSV contiene estadísticas, no polígonos: añade el Marco Geoestadístico para la geometría oficial.</p>
           </div>
-          <p class="text-stone-700">Ve a <em>Microdatos &rarr; Resultados por AGEB y Manzana Urbana</em> y selecciona la entidad.</p>
-          <p class="text-stone-500 font-mono text-[11px]">Archivo esperado: <code>RESAGEBURB_*.csv</code> (ej. <code>RESAGEBURB_09CSV20.csv</code>).</p>
-        </div>
-
-        <!-- 3. CE 2024 -->
-        <div class="bg-stone-50 p-3.5 rounded-xl border border-stone-200 space-y-1">
-          <div class="flex justify-between items-center">
-            <span class="font-bold text-metro-pink">3. Censos Económicos 2024 (SAIC - Personal Ocupado H001A)</span>
-            <a href="https://www.inegi.org.mx/app/saic/" target="_blank" class="text-[11px] bg-pink-100 text-pink-800 hover:bg-pink-200 px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
-              <span>Abrir SAIC</span> <i data-lucide="external-link" class="w-3 h-3"></i>
-            </a>
+        </details>
+        <details id="guide-eic" class="source-guide-block">
+          <summary><span>Encuesta Intercensal 2025 · referencia demográfica</span><span class="source-guide-tag">Según referencia</span></summary>
+          <div class="source-guide-body">
+            <p>Actualiza población, ocupados residentes y viajeros laborales municipales. CPV y Marco 2020 siguen aportando distribución y geometría.</p>
+            <a href="https://www.inegi.org.mx/programas/eic/2025/" target="_blank" rel="noopener noreferrer" class="source-guide-link">Abrir EIC 2025 ↗</a>
+            <ol><li>En Macroeconomía activa Encuesta Intercensal 2025. En Fuentes prepara las descargas y selecciona EIC; se incluyen todos los estados que intersectan el BBOX.</li><li>La descarga extrae conjunto_datos_eic2025_105.csv y personasNN.csv, valida sus columnas y reproduce los controles municipales ponderando FACTOR. Al terminar guarda las rutas en el proyecto activo.</li><li>Para descarga manual, en Datos abiertos usa conjunto_de_datos_eic2025_105_csv.zip; en Microdatos usa eic2025_micro_NN_csv.zip para cada entidad. Descomprime los CSV y configura sus rutas en Macroeconomía.</li></ol>
+            <p class="source-guide-note">No se sobrescriben archivos manuales. La referencia pendiente de descarga puede guardarse, pero impide compilar hasta vincular fuentes completas. CONAPO queda opcional y sin uso con EIC. Las rutas EIC se cambian en Macroeconomía; las exclusiones por nombre de otras fuentes no modifican esta selección explícita.</p>
           </div>
-          <p class="text-stone-700">Consulta de variable H001A Personal Ocupado Total por municipio.</p>
-          <p class="text-stone-500 font-mono text-[11px]">Archivo esperado: <code>tr_ce_*.csv</code> o <code>SAIC_Exporta_*.csv</code>.</p>
-        </div>
-
-        <!-- 4. CONAPO -->
-        <div class="bg-stone-50 p-3.5 rounded-xl border border-stone-200 space-y-1">
-          <div class="flex justify-between items-center">
-            <span class="font-bold text-blue-600">4. Proyecciones Demográficas CONAPO (2020-2050)</span>
-            <a href="https://datos.gob.mx/busca/dataset/proyecciones-de-la-poblacion-de-mexico-y-de-las-entidades-federativas-2020-2050" target="_blank" class="text-[11px] bg-sky-100 text-sky-800 hover:bg-sky-200 px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
-              <span>Abrir Datos.gob.mx</span> <i data-lucide="external-link" class="w-3 h-3"></i>
-            </a>
+        </details>
+        <details id="guide-marco" class="source-guide-block" >
+          <summary><span>Marco Geoestadístico · manzanas y AGEB</span><span class="source-guide-tag">Geometría oficial</span></summary>
+          <div class="source-guide-body">
+            <p>Aporta los polígonos para colocar la población censal. Los proyectos nuevos usan Manzanas oficiales INEGI.</p>
+            <a href="https://www.inegi.org.mx/app/biblioteca/ficha.html?upc=889463807469" target="_blank" rel="noopener noreferrer" class="source-guide-link">Abrir Marco 2020 ↗</a>
+            <p>En la ficha abre la descarga por entidad y elige el ZIP estatal, conservando los componentes de NNm y NNa juntos.</p>
+            <ol><li>Descarga el Marco Geoestadístico del Censo de Población y Vivienda 2020 de cada entidad, compatible con las claves del CPV 2020.</li><li>Descomprime el paquete completo dentro de la carpeta del proyecto; puedes conservar marco_2020_ENTIDAD/conjunto_de_datos/ y su estructura.</li><li>Conserva juntos .shp, .dbf, .shx, .prj y .cpg cuando exista. En los nombres de las capas, el prefijo numérico identifica la entidad: NNm.shp corresponde a manzanas y NNa.shp a AGEB urbanas; sustituye NN por la clave de dos dígitos de la entidad.</li></ol>
+            <p class="source-guide-note">SHP, GeoJSON o GPKG con claves territoriales y polígonos de manzanas/AGEB. El modo oficial busca capas en subcarpetas. Encontrado no significa cobertura completa: comprueba el reporte de ubicación en la vista previa.</p>
           </div>
-          <p class="text-stone-700">Tabulado municipal para cálculo del factor de crecimiento intercensal.</p>
-          <p class="text-stone-500 font-mono text-[11px]">Archivo esperado: <code>data-*.csv</code> o <code>*conapo*.csv</code>.</p>
-        </div>
-
-        <!-- 5. OpenStreetMap -->
-        <div class="bg-stone-50 p-3.5 rounded-xl border border-stone-200 space-y-1">
-          <div class="flex justify-between items-center">
-            <span class="font-bold text-amber-700">5. Cartografía OpenStreetMap (PBF México)</span>
-            <a href="https://download.geofabrik.de/central-america/mexico.html" target="_blank" class="text-[11px] bg-amber-100 text-amber-900 hover:bg-amber-200 px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
-              <span>Abrir Geofabrik</span> <i data-lucide="external-link" class="w-3 h-3"></i>
-            </a>
+        </details>
+        <details id="guide-ce2024" class="source-guide-block" >
+          <summary><span>Censos Económicos 2024 · SAIC</span><span class="source-guide-tag">Complementaria</span></summary>
+          <div class="source-guide-body">
+            <p><strong>Recomendación: 2 archivos CSV por entidad.</strong> El archivo 1 contiene el detalle que necesita el método automático; el archivo 2 añade totales de referencia. SAIC es complementaria: puedes continuar sin ella con estimaciones DENUE.</p>
+            <a href="https://www.inegi.org.mx/app/saic/" target="_blank" rel="noopener noreferrer" class="source-guide-link">Abrir SAIC ↗</a>
+            <p><strong>Selección común para las dos descargas</strong></p>
+            <ol><li>En Año censal selecciona <strong>2023</strong> (corresponde a los Censos Económicos 2024).</li><li>En Área geográfica selecciona tu entidad y <strong>los municipios del proyecto</strong>. Puedes incluir todos los municipios de una entidad en el mismo CSV. Si el proyecto abarca varias entidades, repite las dos consultas para cada una. Un total estatal solo no sirve como detalle municipal.</li><li>En Actividad económica marca <strong>Todos los sectores</strong> y <strong>Con totales</strong>.</li><li>En Variable censal selecciona juntas <strong>UE · Unidades económicas</strong> y <strong>H001A · Personal ocupado total</strong>. Ambos datos van dentro de cada CSV; no descargues un archivo separado por variable.</li></ol>
+            <p><strong>Archivo 1 · detalle por sector y tamaño</strong></p>
+            <ol><li>En Estrato de personal ocupado selecciona <strong>0 a 10, 11 a 50, 51 a 250 y 251 y más</strong>. Incluye también Agrupados por confidencialidad si aparece; conserva los valores reservados sin convertirlos a cero.</li><li>Pulsa <strong>Consultar</strong>, abre <strong>Exportar</strong> y selecciona <strong>Exportar como: CSV</strong>.</li><li>Renombra la descarga como <strong>SAIC_ENTIDAD_2023_sectores_tamanos.csv</strong>. Debe contener Año censal, Entidad, Municipio, Estrato, Actividad económica, UE y H001A.</li></ol>
+            <p><strong>Archivo 2 · totales por sector (adicional)</strong></p>
+            <ol><li>Conserva las selecciones anteriores de año, geografía, actividades y variables. Cambia Estrato de personal ocupado a <strong>Suma de estratos</strong>.</li><li>Pulsa <strong>Consultar</strong>, abre <strong>Exportar</strong> y selecciona <strong>Exportar como: CSV</strong> para el segundo archivo.</li><li>Renómbralo como <strong>SAIC_ENTIDAD_2023_totales.csv</strong>. Contiene las mismas variables, sin el desglose por tamaño.</li></ol>
+            <p><strong>Después:</strong> coloca ambos CSV en la carpeta de datos que aparece arriba y pulsa Detectar. Sustituye ENTIDAD por el nombre de la entidad, sin espacios, y conserva el prefijo SAIC_ y la extensión .csv. Los nombres originales SAIC_Exporta_*.csv también son compatibles; renombrar solo ayuda a distinguir las descargas.</p>
+            <p class="source-guide-note"><strong>Mínimo para el método automático:</strong> 1 CSV como el archivo 1, con celdas municipales publicadas y utilizables de UE y H001A. El archivo 2 solo no activa ese método. No hay un requisito de 3 archivos: una descarga antigua de totales no añade un requisito. El lector combina los CSV seleccionados; no sumes manualmente totales y desgloses ni mezcles años. Actualmente utiliza los sectores 31-33, 43, 46, 53 y 72.</p>
           </div>
-          <p class="text-stone-700">Extracto OSM para toda la República Mexicana.</p>
-          <p class="text-stone-500 font-mono text-[11px]">Archivo esperado: <code>mexico-latest.osm.pbf</code>.</p>
-        </div>
-
-        <!-- 6. ENOE -->
-        <div class="bg-stone-50 p-3.5 rounded-xl border border-stone-200 space-y-1">
-          <div class="flex justify-between items-center">
-            <span class="font-bold text-metro-orange">6. Indicadores Estratégicos ENOE (INEGI)</span>
-            <a href="https://www.inegi.org.mx/programas/enoe/15ymas/#tabulados" target="_blank" class="text-[11px] bg-orange-100 text-orange-800 hover:bg-orange-200 px-2.5 py-1 rounded font-bold transition flex items-center space-x-1">
-              <span>Abrir ENOE Tabulados</span> <i data-lucide="external-link" class="w-3 h-3"></i>
-            </a>
+        </details>
+        <details id="guide-conapo" class="source-guide-block" >
+          <summary><span>CONAPO · población municipal 1990–2040</span><span class="source-guide-tag">Según proyección</span></summary>
+          <div class="source-guide-body">
+            <p>Aporta población municipal para el año objetivo; no es intercambiable con una serie estatal.</p>
+            <a href="https://www.datos.gob.mx/dataset/proyecciones-de-poblacion/resource/3c3092be-583e-4490-8c23-67ef9a64b198" target="_blank" rel="noopener noreferrer" class="source-guide-link">Abrir CONAPO ↗</a>
+            <p><a href="https://www.datos.gob.mx/dataset/f2b9b220-3ef7-4e3a-bde6-87e1dac78c6a/resource/3c3092be-583e-4490-8c23-67ef9a64b198/download/pobproy_quinq1.csv" target="_blank" rel="noopener noreferrer" class="source-guide-link">Descargar CSV municipal ↗</a></p>
+            <ol><li>Abre la ficha de pobproy_quinq1.csv y pulsa Descargar. El CSV contiene población municipal; no uses únicamente indicadores demográficos o totales estatales.</li><li>Descomprime y coloca el CSV municipal en la carpeta del proyecto. La base quinquenal compatible es pobproy_quinq1.csv; también se reconocen *conapo*.csv y data-*.csv.</li><li>Comprueba que contiene CLAVE municipal, ANO (o equivalente) y población total, por ejemplo POB_TOTAL o POB_MIT_MUN. Selecciona el año objetivo en Macroeconomía; si no hay columna de año, confirma el año de la fuente.</li></ol>
+            <p class="source-guide-note">CSV municipal. Se utiliza el primer archivo seleccionado: revisa cuál aparece marcado y excluye candidatos que no correspondan. No se combinan automáticamente varios CSV de CONAPO.</p>
           </div>
-          <p class="text-stone-700">Tabulados trimestrales de indicadores estratégicos por entidad federativa (Tasa PEA e Informalidad TIL1).</p>
-          <p class="text-stone-500 font-mono text-[11px]">Archivos soportados: <code>*trim*.csv</code>, <code>*enoe*.csv</code> o <code>*trim*.xls</code>.</p>
-        </div>
-
-        <!-- Zonas Metropolitanas Multi-Estado -->
-        <div class="bg-amber-50 border border-amber-300 p-3.5 rounded-xl text-amber-900">
-          <strong class="block text-amber-950 mb-1">🗺️ Zonas Metropolitanas Interestatales / Multi-Estado:</strong>
-          <p>Para zonas conurbadas que cruzan límites estatales (ej. ZMVM, La Laguna, Puebla-Tlaxcala, Puerto Vallarta), puedes colocar los archivos de los estados correspondientes en la carpeta del proyecto. El motor los concatenará automáticamente y los filtrará por el BBOX sin duplicar datos.</p>
+        </details>
+        <details id="guide-enoe" class="source-guide-block" >
+          <summary><span>ENOE · participación e informalidad</span><span class="source-guide-tag">Complementaria</span></summary>
+          <div class="source-guide-body">
+            <p>Aporta tasas de participación laboral y de informalidad laboral 1 (TIL1) para la entidad y el periodo seleccionados.</p>
+            <a href="https://www.inegi.org.mx/programas/enoe/15ymas/#Tabulados" target="_blank" rel="noopener noreferrer" class="source-guide-link">Abrir ENOE ↗</a>
+            <p><a href="https://www.inegi.org.mx/contenidos/programas/enoe/15ymas/tabulados/enoe_indicadores_estrategicos_2026_trim2_xls.zip" target="_blank" rel="noopener noreferrer" class="source-guide-link">Descargar paquete 2026 T2 ↗</a></p>
+            <ol><li>En Tabulados elige Indicadores estratégicos para población de 15 años y más, el trimestre y la entidad que quieres utilizar.</li><li>Descarga el ZIP XLS de Indicadores estratégicos y copia únicamente Entidades/AAAA_trim_T_Entidad_NOMBRE DEL ESTADO.xls. No copies los libros de Ciudades o Agregado_39_ciudades. Un PDF o los microdatos no sustituyen este tabulado.</li><li>Conserva Tasa de participación y Tasa de informalidad laboral 1 (TIL1) en la primera hoja. Usa un solo periodo y Total, ambos sexos; el lector toma el primer valor utilizable de cada indicador.</li></ol>
+            <p class="source-guide-note">CSV, XLS y XLSX: nombres *trim* o *enoe*. Se utiliza el primer archivo seleccionado, no necesariamente el trimestre más reciente. Comprueba las tasas en Macroeconomía y su procedencia antes de guardar.</p>
+          </div>
+        </details>
+        <details id="guide-osm" class="source-guide-block" >
+          <summary><span>OpenStreetMap · cartografía y red vial</span><span class="source-guide-tag">Compilación cartográfica</span></summary>
+          <div class="source-guide-body">
+            <p>Aporta calles y cartografía para compilar el mapa y preparar rutas.</p>
+            <a href="https://download.geofabrik.de/north-america/mexico.html" target="_blank" rel="noopener noreferrer" class="source-guide-link">Abrir Geofabrik ↗</a>
+            <p><a href="https://download.geofabrik.de/north-america/mexico-latest.osm.pbf" target="_blank" rel="noopener noreferrer" class="source-guide-link">Descargar PBF nacional ↗</a></p>
+            <ol><li>En Mexico descarga mexico-latest.osm.pbf. Los paquetes SHP/GPKG de Geofabrik no sustituyen el PBF en la compilación cartográfica.</li><li>Guarda el PBF en la carpeta del proyecto o, para compartir el extracto nacional, directamente en data/. Conserva la fecha o edición descargada.</li><li>Para regenerar solo demanda utiliza cartografía previa compatible en la salida del proyecto. roads.geojson por sí solo no permite generar un mapa nuevo.</li></ol>
+            <p class="source-guide-note">PBF: *.osm.pbf. Los paquetes finales requieren cartografía completa y compatible; encontrar un archivo no certifica la integridad del mapa.</p>
+          </div>
+        </details>
+        <div class="source-guide-note">
+          <strong>Proyectos de varias entidades</strong>
+          <p>Añade los CSV de CPV y DENUE de todas las entidades y sus capas del Marco 2020. Conserva las claves y una edición coherente por fuente. CE admite varios archivos compatibles; CONAPO y ENOE utilizan el primero seleccionado. Para una zona multiestado, ENOE mantiene una tasa de referencia para todo el proyecto: revisa esa elección en Macroeconomía.</p>
         </div>
       </div>
-
-      <div class="flex justify-end pt-3 border-t border-stone-200 shrink-0">
-        <button onclick="closeDataSourcesModal()" class="px-5 py-2 bg-stone-100 text-stone-800 text-xs font-bold rounded-lg hover:bg-stone-200 transition">Cerrar</button>
+      <div class="flex justify-between items-center pt-3 border-t border-stone-200 shrink-0 gap-3">
+        <span class="text-xs text-stone-500">Revisión: 5 de octubre de 2026</span>
+        <button onclick="closeDataSourcesModal()" class="px-5 py-2 bg-stone-100 text-stone-800 text-sm font-bold rounded-lg hover:bg-stone-200">Cerrar</button>
       </div>
     </div>
   </div>
@@ -2321,12 +2387,12 @@
       <div class="space-y-3 text-xs">
         <div>
           <label class="block text-stone-700 font-semibold mb-1">Nombre Descriptivo</label>
-          <input type="text" id="iso_name" oninput="onIsoNameInput()" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-cyan-600 focus:outline-none" placeholder="ej. Isla Mujeres">
+          <input type="text" id="iso_name" oninput="onIsoNameInput()" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-cyan-600 focus:outline-none" placeholder="Nombre de la isla o zona aislada">
         </div>
 
         <div>
           <label class="block text-stone-700 font-semibold mb-1">Identificador ID (minúsculas, sin espacios)</label>
-          <input type="text" id="iso_id" class="w-full bg-stone-50 font-mono border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-bold focus:border-cyan-600 focus:outline-none" placeholder="isla_mujeres">
+          <input type="text" id="iso_id" class="w-full bg-stone-50 font-mono border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-bold focus:border-cyan-600 focus:outline-none" placeholder="identificador_zona">
         </div>
 
         <div class="bg-stone-50 p-3 rounded-lg border border-stone-200 space-y-2">
@@ -2384,11 +2450,11 @@
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-stone-700 font-semibold mb-1">Nombre de la Zona</label>
-            <input type="text" id="az_name" oninput="onAzNameInput()" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-amber-500 focus:outline-none" placeholder="ej. Zona Hotelera">
+            <input type="text" id="az_name" oninput="onAzNameInput()" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-amber-500 focus:outline-none" placeholder="Nombre de la zona">
           </div>
           <div>
             <label class="block text-stone-700 font-semibold mb-1">ID (Identificador)</label>
-            <input type="text" id="az_id" class="w-full bg-stone-50 font-mono border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-bold focus:border-amber-500 focus:outline-none" placeholder="zone_hotelera">
+            <input type="text" id="az_id" class="w-full bg-stone-50 font-mono border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-bold focus:border-amber-500 focus:outline-none" placeholder="identificador_zona">
           </div>
         </div>
 
@@ -2519,7 +2585,7 @@
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-stone-700 font-semibold mb-1">Nombre de la Zona</label>
-            <input type="text" id="ez_name" oninput="onEzNameInput()" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-rose-500 focus:outline-none" placeholder="ej. Laguna Nichupté">
+            <input type="text" id="ez_name" oninput="onEzNameInput()" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-rose-500 focus:outline-none" placeholder="Nombre del área de exclusión">
           </div>
           <div>
             <label class="block text-stone-700 font-semibold mb-1">ID (Identificador)</label>
@@ -2595,7 +2661,7 @@
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-stone-700 font-semibold mb-1">Clave INEGI (cve_mun)</label>
-            <input type="text" id="gf_code" maxlength="5" class="w-full bg-stone-50 font-mono border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-bold focus:border-metro-green focus:outline-none" placeholder="ej. 23005">
+            <input type="text" id="gf_code" maxlength="5" class="w-full bg-stone-50 font-mono border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-bold focus:border-metro-green focus:outline-none" placeholder="Clave INEGI de 5 dígitos">
             <span class="text-[10px] text-stone-500 mt-0.5 block">5 dígitos (Estado + Mun.)</span>
           </div>
           <div>
@@ -2607,7 +2673,7 @@
 
         <div>
           <label class="block text-stone-700 font-semibold mb-1">Nombre del Municipio / Referencia</label>
-          <input type="text" id="gf_name" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-metro-green focus:outline-none" placeholder="ej. Benito Juárez">
+          <input type="text" id="gf_name" class="w-full bg-white border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-medium focus:border-metro-green focus:outline-none" placeholder="Nombre del municipio">
         </div>
 
         <div class="p-3 bg-stone-50 rounded-xl border border-stone-200">
@@ -2635,7 +2701,7 @@
   </div>
 
   <!-- Modal Escaneo de Toponimia Urbana (OSM + DENUE) -->
-  <div id="modalScanToponymy" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+  <div id="modalScanToponymy" role="dialog" aria-modal="true" aria-label="Revisión de nombres detectados" onkeydown="if(event.key === 'Escape') closeScanToponymyDialog()" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
     <div class="bg-white border border-stone-200 rounded-2xl p-6 w-full max-w-2xl shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
       <div class="flex justify-between items-center border-b border-stone-200 pb-3 shrink-0">
         <div>
@@ -2643,7 +2709,7 @@
             <i data-lucide="scan" class="w-5 h-5 text-sky-700"></i>
             <span>Escaneo Integral de Toponimia Urbana</span>
           </h3>
-          <p class="text-xs text-stone-500 mt-0.5">Explora asentamientos densos desde OpenStreetMap y DENUE del INEGI para la ciudad.</p>
+          <p class="text-xs text-stone-500 mt-0.5">Escanea, revisa y selecciona. Los resultados no se incorporan hasta guardar.</p>
         </div>
         <button onclick="closeScanToponymyDialog()" class="text-stone-400 hover:text-stone-800 p-1.5 rounded-lg hover:bg-stone-100 transition">
           <i data-lucide="x" class="w-5 h-5"></i>
@@ -2655,10 +2721,10 @@
         <div class="p-3 bg-sky-50 rounded-xl border border-sky-200 flex justify-between items-center">
           <div>
             <span class="font-bold text-sky-950 block">Umbral de Establecimientos DENUE</span>
-            <span class="text-sky-700 text-[11px]">Mínimo de comercios por asentamiento para calificar como polo denso</span>
+            <span class="text-sky-700 text-[11px]">Filtra direcciones DENUE; no mide población ni certifica colonias. OSM no usa este umbral.</span>
           </div>
           <div class="flex items-center space-x-2">
-            <input type="number" id="scanMinCount" value="8" min="3" max="50" class="w-16 text-center font-bold text-stone-900 bg-white border border-stone-300 rounded px-2 py-1">
+            <input type="number" id="scanMinCount" value="8" min="1" max="1000" aria-label="Mínimo de establecimientos DENUE" class="w-16 text-center font-bold text-stone-900 bg-white border border-stone-300 rounded px-2 py-1">
             <button onclick="executeCityToponymyScan()" id="btnExecuteScan" class="px-3 py-1.5 bg-sky-700 hover:bg-sky-600 text-white font-bold rounded-lg shadow-xs flex items-center space-x-1">
               <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
               <span>Escanear</span>
@@ -2666,6 +2732,7 @@
           </div>
         </div>
 
+        <p id="scanSourceSummary" role="status" aria-live="polite" hidden class="text-[11px] text-stone-600 leading-snug"></p>
         <!-- Indicador de Carga -->
         <div id="scanLoadingIndicator" class="hidden p-8 text-center space-y-2">
           <i data-lucide="loader-2" class="w-8 h-8 text-sky-700 animate-spin mx-auto"></i>
@@ -2700,8 +2767,20 @@
           <!-- Muestra de Resultados con Scroll -->
           <div>
             <div class="flex justify-between items-center mb-1">
-              <span class="font-bold text-stone-700">Muestra de Asentamientos Detectados:</span>
+              <span class="font-bold text-stone-700">Revisar candidatos:</span>
               <span id="scanCandidateCount" class="text-stone-500 font-mono text-[10px]">0 elementos</span>
+            </div>
+            <div class="scan-review-filters">
+              <input id="scanReviewSearch" type="search" placeholder="Nombre, variante o municipio" aria-label="Buscar candidatos" oninput="renderScanReview()">
+              <select id="scanReviewStatus" aria-label="Estado del candidato" onchange="renderScanReview()">
+                <option value="new">Nuevos</option><option value="kept">Existentes</option><option value="discarded">Descartados</option><option value="all">Todos</option>
+              </select>
+              <select id="scanReviewSource" aria-label="Fuente del candidato" onchange="renderScanReview()"><option value="">Todas las fuentes</option></select>
+              <select id="scanReviewMunicipality" aria-label="Municipio del candidato" onchange="renderScanReview()"><option value="">Todos los municipios</option></select>
+            </div>
+            <div class="scan-review-selection">
+              <button type="button" onclick="selectScanReviewFiltered(true)">Seleccionar coincidencias</button>
+              <button type="button" onclick="selectScanReviewFiltered(false)">Quitar coincidencias</button>
             </div>
             <div id="scanCandidatesList" class="max-h-52 overflow-y-auto border border-stone-200 rounded-lg divide-y divide-stone-100 bg-stone-50/50 text-[11px]">
               <!-- Items dinámicos -->
@@ -2714,25 +2793,34 @@
               <span class="font-bold text-stone-700">Modo de Inserción:</span>
               <div class="flex items-center space-x-4">
                 <label class="flex items-center space-x-1.5 cursor-pointer">
-                  <input type="radio" name="scanImportMode" value="merge" checked class="text-sky-700">
+                  <input type="radio" name="scanImportMode" value="merge" checked onchange="renderScanReview()" class="text-sky-700">
                   <span>Fusionar sin duplicar (Recomendado)</span>
                 </label>
                 <label class="flex items-center space-x-1.5 cursor-pointer">
-                  <input type="radio" name="scanImportMode" value="replace" class="text-sky-700">
+                  <input type="radio" name="scanImportMode" value="replace" onchange="renderScanReview()" class="text-sky-700">
                   <span>Reemplazar lista actual</span>
                 </label>
               </div>
             </div>
             <div class="pt-1.5 border-t border-stone-200/80 flex items-center justify-between">
               <label class="flex items-center space-x-2 text-stone-700 font-semibold cursor-pointer">
-                <input type="checkbox" id="scanExcludeMicro" class="rounded border-stone-300 text-sky-700">
-                <span class="text-[11px]">Omitir cerradas, privadas y callejones al importar (recomendado para limpiar mapa)</span>
+                <input type="checkbox" id="scanExcludeMicro" onchange="renderScanReview()" class="rounded border-stone-300 text-sky-700">
+                <span class="text-[11px]">Omitir candidatos de micro-asentamientos. El nombre es una heurística, revisa su ubicación.</span>
               </label>
             </div>
+            <label class="flex items-center space-x-2 text-stone-700 cursor-pointer">
+              <input id="scanInferSmall" type="checkbox" checked onchange="renderScanReview()">
+              <span>Escala pequeña para nuevas localidades DENUE sin jerarquía verificada. Conserva la escala de nombres existentes.</span>
+            </label>
           </div>
         </div>
       </div>
 
+      <p id="scanImportDelta" role="status" aria-live="polite" class="scan-review-delta"></p>
+      <div id="scanReplaceWarning" hidden class="scan-review-warning">
+        <p>Se retirarán estos nombres de la lista actual: <span id="scanReplaceNames"></span></p>
+        <label><input id="scanConfirmReplace" type="checkbox" onchange="renderScanReview()"> Confirmo las eliminaciones indicadas.</label>
+      </div>
       <!-- Footer -->
       <div class="flex justify-end space-x-2 pt-3 border-t border-stone-200 shrink-0">
         <button onclick="closeScanToponymyDialog()" class="px-4 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-semibold rounded-lg transition">
@@ -2941,7 +3029,8 @@
           <div class="flex items-center space-x-2 shrink-0">
             <span class="text-stone-700 font-semibold text-[11px]">Sugerencia:</span>
             <select id="zoneRankHeuristic" onchange="recalculateZoneClusters()" class="bg-white border border-stone-300 rounded px-2 py-1 text-[11px] font-medium text-stone-800 cursor-pointer">
-              <option value="density">Mayor Actividad DENUE / Prestigio (Recomendado)</option>
+              <option value="balanced">Rotulación sin peso comercial (Recomendado)</option>
+              <option value="density">Actividad DENUE / Prestigio (criterio histórico)</option>
               <option value="shortest">Nombre Más Corto y Conciso</option>
             </select>
           </div>

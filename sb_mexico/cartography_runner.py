@@ -219,7 +219,15 @@ def run_cartography(
     os.environ["SB_LOD_PERIPHERAL_LABELS"] = str(lod_peripheral_labels).lower()
     os.environ["SB_LOD_PERIPHERAL_BUILDINGS"] = str(lod_peripheral_buildings).lower()
 
+    curated_override = False
+    curated_mode = "replace"
     if curated_places and os.path.exists(curated_places):
+        with open(curated_places, "r", encoding="utf-8") as stream:
+            curated_data = json.load(stream)
+        curated_override = bool(curated_data.get("features") or curated_data.get("deleted_places") or curated_data.get("deleted_names"))
+        curated_mode = curated_data.get("mode", "replace")
+        if curated_mode not in ("merge", "replace"):
+            raise ValueError("Invalid toponymy mode")
         os.environ["SB_CURATED_PLACES_GEOJSON"] = os.path.abspath(curated_places)
         print(f"-> [Toponimia Curada] Sincronización activa con Wizard: {curated_places}")
     else:
@@ -391,7 +399,7 @@ def run_cartography(
         if candidates:
             denue_csv = candidates[0]
 
-    if denue_csv and os.path.exists(denue_csv) and not curated_places:
+    if denue_csv and os.path.exists(denue_csv) and not curated_override:
         try:
             from sb_mexico.toponymy import generate_denue_neighborhoods_geojson
             denue_out_geojson = os.path.join(native_build_dir, f"{city_code.lower()}_denue_neighborhoods.geojson")
@@ -407,8 +415,8 @@ def run_cartography(
                 print(f"-> [Toponimia DENUE] Inyectando colonias y fraccionamientos adicionales desde {denue_csv}")
         except Exception as te:
             print(f"  [WARN] No se pudo generar toponimia complementaria de DENUE: {te}")
-    elif curated_places:
-        print(f"-> [Toponimia Curada] Utilizando exclusivamente toponimia curada y sincronizada desde el Wizard.")
+    elif curated_override:
+        print(f"-> [Toponimia] Lista del Wizard activa; política de etiquetas: {curated_mode}.")
 
     print(f"-> Inicializando MapGen (Cores: {cores}, RAM asignada: {ram_gb} GB [{ram_mb} MB])...")
 

@@ -121,8 +121,13 @@ def load_city_config(config_path: str) -> Dict[str, Any]:
 
     from sb_mexico.config_defaults import apply_demand_defaults
     apply_demand_defaults(config)
+    from sb_mexico.demand_v2.request import validate_config
+    validate_config(config)
     validate_placement_mode(config['city']['residential_placement'])
     validate_employment_mode(config['macroeconomics'].get('residential_employment', 'legacy'))
+    from sb_mexico.demographic_reference import validate_reference
+    if config.get('demand', {}).get('engine') != 'v2':
+        validate_reference(config['macroeconomics'])
     validate_workplace_mode(config['macroeconomics'].get('workplace_employment', 'legacy'))
     if config['macroeconomics'].get('workplace_employment') == 'historical_transfer':
         from sb_mexico.historical_transfer import validate_transfer_contract
@@ -349,6 +354,8 @@ def execute_pipeline(
             lod_peripheral_labels=city_info.get("lod_peripheral_labels", "none"),
             lod_peripheral_buildings=city_info.get("lod_peripheral_buildings", "none"),
             places=cfg.get("places", []),
+            deleted_places=cfg.get("deleted_places", []),
+            toponymy_mode=cfg.get("toponymy_mode", "replace"),
             output_dir=out_dir
         )
     else:
@@ -357,6 +364,10 @@ def execute_pipeline(
     # =========================================================================
     # 2. INGESTA ESTADÍSTICA DE LA CUATRIFECTA INEGI
     # =========================================================================
+    if cfg.get('demand', {}).get('engine') == 'v2':
+        from sb_mexico.demand_v2.integration import execute_candidate
+        return execute_candidate(cfg, ROOT_DIR, project_dir, out_dir, include_driving_path)
+
     console.print(f"\n[bold yellow]2. Ingesta y Calibración INEGI[/bold yellow]")
 
     # Detección universal automática en todas las ubicaciones candidatas
@@ -487,7 +498,7 @@ def execute_pipeline(
     conapo_projs = None
     projection_year = resolve_projection_year(macro)
     projection_report = dict(requested_year=projection_year, manual_factors=growth_factors)
-    if conapo_files:
+    if conapo_files and macro.get('demographic_reference') is None:
         from sb_mexico.population_projection import resolve_population_factors
         conapo_projs = resolve_population_factors(conapo_files[0], cpv_files, macro, projection_report)
         projection_report['manual_factors'] = growth_factors
@@ -501,14 +512,19 @@ def execute_pipeline(
         df_denue=df_denue,
         bbox=bbox_dict,
         tasa_pea=tasa_pea,
-        growth_factors={**(conapo_projs or {}), **growth_factors},
+        growth_factors={**(conapo_projs or {}), **growth_factors} if macro.get('demographic_reference') is None else {},
         conapo_projections=None,
-        default_growth=macro.get("default_growth_factor", 1.0),
+        default_growth=macro.get("default_growth_factor", 1.0) if macro.get('demographic_reference') is None else 1.0,
         marco_paths=marco_files if marco_files else None,
         placement_mode=placement_mode,
         employment_mode=macro.get('residential_employment', 'legacy'),
         projection_year=projection_year
     )
+    if macro.get('demographic_reference') is not None:
+        from sb_mexico.demographic_reference import apply_reference
+        df_cpv = apply_reference(df_cpv, cpv_files, macro, ROOT_DIR)
+        projection_report.update(effective_year=2025, year_basis='observed_reference',
+            demographic_reference=df_cpv.attrs['residential_employment']['demographic_reference'])
     total_cpv_pop = float(df_cpv['pobtot_adj'].sum()) if len(df_cpv) > 0 else 0.0
     total_cpv_pea = float(df_cpv['pea_real'].sum()) if len(df_cpv) > 0 else 0.0
     if conapo_projs and projection_report.get('year_basis') == 'unverified':
@@ -526,7 +542,8 @@ def execute_pipeline(
         import hashlib
         employment_report['effective_config_sha256'] = hashlib.sha256(
             json.dumps(cfg, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
-        attach_source_context(employment_report, config_path, projection_report, conapo_files[:1])
+        attach_source_context(employment_report, config_path, projection_report,
+                              conapo_files[:1] if macro.get('demographic_reference') is None else [])
         console.print('-> Residential employment: census_employed (projected employed residents)')
     if placement_report is not None:
         console.print("-> Residential placement: official_blocks (active)")
@@ -1043,7 +1060,7 @@ def execute_pipeline(
         dd.generate_config(
             name=city_info["name"],
             code=city_code,
-            description=city_info["description"][:80],
+            description=city_info["description"],
             creator=city_info.get("creator", "Subway Builder México v7.1"),
             version="7.1.0",
             filename=cfg_out_path
@@ -1071,7 +1088,7 @@ def execute_pipeline(
         config_data = {
             "name": city_info["name"],
             "code": city_code,
-            "description": city_info["description"][:80],
+            "description": city_info["description"],
             "population": total_viajeros,
             "initialViewState": {
                 "zoom": city_info.get("initial_zoom", 12.0),
@@ -1111,6 +1128,11 @@ def execute_pipeline(
     # =========================================================================
     # 7. EMPAQUETADO EN ARCHIVO ZIP FINAL
     # =========================================================================
+    return package_demand_outputs(out_dir, city_code, demand_out_path, clean_demand_points, pops, total_viajeros, allocation_report)
+
+
+def package_demand_outputs(out_dir, city_code, demand_out_path, clean_demand_points, pops, total_viajeros, allocation_report=None):
+    """Unchanged package contract, shared by both demand engines."""
     zip_name = f"{city_code}.zip"
     zip_path = os.path.join(out_dir, zip_name)
 

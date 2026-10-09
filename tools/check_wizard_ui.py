@@ -16,6 +16,13 @@ with tempfile.TemporaryDirectory() as temporary:
     subprocess.run(['node', str(ROOT / 'tests/conapo_panel_ui.cjs')], check=True)
     subprocess.run(['node', '--check', str(ROOT / 'tools/static/wizard/bootstrap.js')], check=True)
     subprocess.run(['node', str(ROOT / 'tests/wizard_startup_ui.cjs')], check=True)
+    subprocess.run(['node', str(ROOT / 'tests/auto_urban_core_ui.cjs')], check=True)
+    subprocess.run(['node', str(ROOT / 'tests/toponymy_scan_ui.cjs')], check=True)
+    subprocess.run(['node', str(ROOT / 'tests/source_download_ui.cjs')], check=True)
+    subprocess.run(['node', str(ROOT / 'tests/eic_source_status_ui.cjs')], check=True)
+    subprocess.run(['node', str(ROOT / 'tests/demand_v2_ui.cjs')], check=True)
+    subprocess.run(['node', str(ROOT / 'tests/demand_engine_toggle_ui.cjs')], check=True)
+    subprocess.run(['node', str(ROOT / 'tests/residential_employment_ui.cjs')], check=True)
     # Functions in this file use top-level four-space indentation.
     functions = []
     for name in ('initSSE',):

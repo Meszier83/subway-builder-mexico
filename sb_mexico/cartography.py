@@ -245,7 +245,9 @@ def build_city_map_wsl(
     lod_peripheral_buildings: str = "none",
     denue_csv: Optional[str] = None,
     places: Optional[List[Dict]] = None,
-    curated_places_geojson: Optional[str] = None
+    curated_places_geojson: Optional[str] = None,
+    deleted_places: Optional[List] = None,
+    toponymy_mode: str = "replace"
 ) -> Dict[str, str]:
     """
     Ejecuta la compilación cartográfica dentro de WSL Ubuntu vía subprocess con streaming en vivo.
@@ -278,34 +280,14 @@ def build_city_map_wsl(
 
     # Exportar toponimia curada desde el Wizard a GeoJSON para su inyección en WSL
     curated_path = curated_places_geojson
-    if not curated_path and places:
-        try:
-            os.makedirs(output_dir, exist_ok=True)
-            curated_path = os.path.join(output_dir, "curated_places.geojson")
-            c_features = []
-            for p in places:
-                p_name = str(p.get("name", "")).strip()
-                p_loc = p.get("loc", [0.0, 0.0])
-                if not p_name or len(p_loc) != 2:
-                    continue
-                c_features.append({
-                    "type": "Feature",
-                    "properties": {
-                        "name": p_name,
-                        "place": str(p.get("type", "suburb")).lower(),
-                        "curated": True
-                    },
-                    "geometry": {
-                        "type": "Point",
-                        "coordinates": [float(p_loc[0]), float(p_loc[1])]
-                    }
-                })
-            with open(curated_path, "w", encoding="utf-8") as cf:
-                json.dump({"type": "FeatureCollection", "features": c_features}, cf, ensure_ascii=False, indent=2)
-            print(f"-> [Toponimia Curada] Exportadas {len(c_features)} etiquetas curadas para el compilador.")
-        except Exception as ce:
-            print(f"  [WARN] No se pudo exportar curated_places.geojson: {ce}")
-            curated_path = None
+    if not curated_path and (places is not None or deleted_places):
+        from sb_mexico.toponymy_delivery import curated_collection
+        collection = curated_collection(places, deleted_places, toponymy_mode)
+        os.makedirs(output_dir, exist_ok=True)
+        curated_path = os.path.join(output_dir, "curated_places.geojson")
+        with open(curated_path, "w", encoding="utf-8") as cf:
+            json.dump(collection, cf, ensure_ascii=False, indent=2)
+        print(f"-> [Toponimia] {len(collection['features'])} etiquetas; modo {toponymy_mode}.")
 
     if curated_path and os.path.exists(curated_path):
         wsl_cmd.extend(["--curated-places", to_wsl_path(curated_path)])
@@ -423,7 +405,9 @@ def build_city_map(
     lod_peripheral_labels: str = "none",
     lod_peripheral_buildings: str = "none",
     places: Optional[List[Dict]] = None,
-    denue_csv: Optional[str] = None
+    denue_csv: Optional[str] = None,
+    deleted_places: Optional[List] = None,
+    toponymy_mode: str = "replace"
 ) -> Dict[str, str]:
     """
     Ejecuta el pipeline cartográfico completo de depot.maps.MapGen.
@@ -461,7 +445,9 @@ def build_city_map(
                 lod_peripheral_labels=lod_peripheral_labels,
                 lod_peripheral_buildings=lod_peripheral_buildings,
                 places=places,
-                denue_csv=denue_csv
+                denue_csv=denue_csv,
+                deleted_places=deleted_places,
+                toponymy_mode=toponymy_mode
             )
 
         else:
@@ -608,6 +594,14 @@ def build_city_map(
     print(f"-> Inicializando MapGen para {city_code} (Cores: {cores}, RAM: {ram_mb} MB)...")
 
     prev_cwd = os.getcwd()
+    previous_curated = os.environ.get("SB_CURATED_PLACES_GEOJSON")
+    if places is not None or deleted_places:
+        from sb_mexico.toponymy_delivery import curated_collection
+        collection = curated_collection(places, deleted_places, toponymy_mode)
+        curated_path = os.path.join(work_dir, "curated_places.geojson")
+        with open(curated_path, "w", encoding="utf-8") as cf:
+            json.dump(collection, cf, ensure_ascii=False, indent=2)
+        os.environ["SB_CURATED_PLACES_GEOJSON"] = curated_path
     try:
         os.chdir(native_build_dir)
         m = MapGen(
@@ -637,6 +631,10 @@ def build_city_map(
         except Exception:
             pass
     finally:
+        if previous_curated is None:
+            os.environ.pop("SB_CURATED_PLACES_GEOJSON", None)
+        else:
+            os.environ["SB_CURATED_PLACES_GEOJSON"] = previous_curated
         os.chdir(prev_cwd)
     generated_files = {}
 
