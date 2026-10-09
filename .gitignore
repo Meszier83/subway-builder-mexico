@@ -2,6 +2,8 @@
 # ==================================
 *.csv
 *.xlsx
+*.xls
+*.pbf
 *.osm.pbf
 *.pmtiles
 *.geojson
@@ -14,15 +16,26 @@ config.json
 # Python
 __pycache__/
 *.pyc
+*.pyo
 .pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 venv/
+.venv/
 .env/
+.env
+.env.*
+!.env.example
 node_modules/
 
 # Build temporales y datos locales
 build/
 dist/
 data/
+*.log
+*.part
+*.crdownload
 *.html
 !tools/templates/*.html
 
