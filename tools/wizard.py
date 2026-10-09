@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Subway Builder México v7.1 - Wizard Server
+Subway Builder México v7.2 - Wizard Server
 ============================================
 Servidor local interactivo con API REST, soporte para carga manual de datos,
 streaming en vivo de compilación (SSE) y calibración geoespacial integral.
@@ -442,7 +442,7 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
 
     lines = [
         "# ==============================================================================",
-        f"# CONFIGURACIÓN: {city_cfg.get('name', 'CIUDAD')} ({city_cfg.get('code', 'XXX')}) - SUBWAY BUILDER MÉXICO v7.1",
+        f"# CONFIGURACIÓN: {city_cfg.get('name', 'CIUDAD')} ({city_cfg.get('code', 'XXX')}) - SUBWAY BUILDER MÉXICO v7.2",
         "# ==============================================================================",
         "",
         "city:",
@@ -2895,7 +2895,7 @@ def run_server(port: int = 8080, initial_city: str = None, open_browser: bool = 
         url += f"?city={initial_city}"
 
     print("=" * 65)
-    print(" 🚇 SUBWAY BUILDER MÉXICO v7.1 - WIZARD STUDIO")
+    print(" 🚇 SUBWAY BUILDER MÉXICO v7.2 - WIZARD STUDIO")
     print(" 🎨 Identidad Gráfica: Metro CDMX / Lance Wyman Standard")
     print("=" * 65)
     print(f" Servidor iniciado en: {url}")
@@ -2919,7 +2919,7 @@ def run_server(port: int = 8080, initial_city: str = None, open_browser: bool = 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Subway Builder México Wizard v7.1 - Suite Integral de Modelación"
+        description="Subway Builder México Wizard v7.2 - Suite Integral de Modelación"
     )
     parser.add_argument(
         "--city",

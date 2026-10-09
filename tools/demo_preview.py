@@ -68,7 +68,7 @@ config_data = {
         "bearing": 0
     },
     "creator": "Keppler",
-    "version": "7.1.0"
+    "version": "7.2.0"
 }
 
 with open(config_path, "w", encoding="utf-8") as f:

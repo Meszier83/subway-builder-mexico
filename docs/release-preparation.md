@@ -1,8 +1,8 @@
-# Next release preparation
+# Release v7.2.0
 
-Prepared on 2026-10-08. Version, tag and publication date are not assigned.
+Prepared on 2026-10-08. Engine version: 7.2.0. Git tag: v7.2.0.
 
-## Proposed release notes
+## Release notes
 
 - Add an opt-in Demand V2 engine shared by compilation, Wizard previews and POI
   Studio. Its controls cover EIC 2025, official residential placement, automatic

@@ -1,19 +1,19 @@
 <div align="center">
 
-# Subway Builder Mexico (v7.1)
+# Subway Builder Mexico (v7.2)
 ### Motor de Generacion de Demanda, Ruteo Vial y Cartografia 3D para Mexico
 
-[![Release](https://img.shields.io/badge/Release-v7.1.0-blue.svg?style=flat-square)](https://github.com/Meszier83/subway-builder-mexico)
+[![Release](https://img.shields.io/badge/Release-v7.2.0-blue.svg?style=flat-square)](https://github.com/Meszier83/subway-builder-mexico)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Engine](https://img.shields.io/badge/Engine-Furness%20IPFP%20%7C%20OSRM-purple.svg?style=flat-square)](METHODOLOGY.md)
 [![UI Theme](https://img.shields.io/badge/UI-Metro%20CDMX%20%2F%20Lance%20Wyman-E53935.svg?style=flat-square)](tools/wizard.py)
 [![Standards](https://img.shields.io/badge/Standards-S--Tier%20Strict-059669.svg?style=flat-square)](.agents/rules/subway_builder_standards.md)
-[![Tests](https://img.shields.io/badge/Tests-367%20Passed-10B981.svg?style=flat-square)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-538%20Passed%20%7C%201%20Skipped-10B981.svg?style=flat-square)](tests/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
 
 **Pipeline integral, declarativo y matematicamente riguroso para transformar microdatos abiertos del INEGI (CPV 2020, DENUE, CE 2024, ENOE) y CONAPO en mapas metropolitanos de alta fidelidad, perfectamente compatibles con Subway Builder y Subway Builder Modded.**
 
-[Inicio Rapido](#inicio-rapido-quickstart) | [Innovaciones v7.1](#innovaciones-arquitectonicas-v71) | [Wizard Studio](#asistente-visual-integral-wizard-studio) | [Documentacion](#documentacion-oficial-y-fundamentos)
+[Notas v7.2.0](docs/release-preparation.md) | [Inicio Rapido](#inicio-rapido-quickstart) | [Innovaciones v7.1](#innovaciones-arquitectonicas-v71) | [Wizard Studio](#asistente-visual-integral-wizard-studio) | [Documentacion](#documentacion-oficial-y-fundamentos)
 
 </div>
 
