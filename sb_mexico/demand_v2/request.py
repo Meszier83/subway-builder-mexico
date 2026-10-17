@@ -5,7 +5,7 @@ import copy
 import hashlib
 import json
 
-STAGES = ('sources', 'population', 'points', 'allocation', 'export')
+STAGES = ('sources', 'population', 'points', 'sensitivity', 'allocation', 'export')
 
 
 @dataclass
@@ -17,7 +17,10 @@ class DemandRequest:
     route_provider: object = None
     route_identity: str = 'canonical:car:v1'
     route_cache: Path = None
+    beta_cache: Path = None
+    progress: object = None
     source_metadata: dict = field(default_factory=dict)
+    sensitivity_cache: Path = None
 
 
 def validate_config(config):
@@ -26,6 +29,8 @@ def validate_config(config):
         raise ValueError('demand must be a mapping')
     if demand.get('engine', 'legacy') not in ('legacy', 'v2'):
         raise ValueError('demand.engine must be legacy or v2')
+    if demand.get('beta_selection', 'reference') not in ('reference', 'automatic'):
+        raise ValueError('demand.beta_selection must be reference or automatic')
     if type(demand.get('target_year', 2025)) is not int or demand.get('target_year', 2025) not in (2020, 2025):
         raise ValueError('Candidate supports observed references 2020 and 2025 only')
     if demand.get('boundary_policy', 'closed') != 'closed':
@@ -74,8 +79,36 @@ def prepare_request(config, root, project_dir=None, roads=None, **kwargs):
     for role in ('eic_indicators', 'eic_persons'):
         if role in explicit and not isinstance(explicit[role], list):
             raise ValueError('demand.sources.'+role+' must be a list')
+    kwargs.setdefault('beta_cache', project / '.demand-v2-beta-cache.json')
+    kwargs.setdefault('sensitivity_cache', project / '.demand-v2-sensitivity-cache.json')
     return DemandRequest(cfg, sources, root, roads=roads,
                          source_metadata=demand.get('source_metadata', {}), **kwargs)
+
+
+def _code_stamp():
+    from sb_mexico.residential_employment import file_sha256
+    code = [(p.name, file_sha256(p)) for p in sorted(Path(__file__).parent.glob('*.py'))]
+    for name in ('gravity.py', 'residential.py', 'residential_employment.py', 'workplace_employment.py',
+                 'historical_transfer.py', 'automatic_workplace.py', 'fine_workplace.py', 'ce_controls.py', 'demographic_reference.py', 'osrm.py'):
+        p = Path(__file__).parents[1]/name
+        code.append((name, file_sha256(p)))
+    return code
+
+
+def _roads_stamp(request):
+    if request.roads is not None:
+        return hashlib.sha256(b''.join(bytes(g.wkb) for g in request.roads.geometry
+                                      if g is not None)).hexdigest()
+    return None
+
+
+def beta_identity(request, files):
+    # The selector separately hashes all actual points, evidence and allocation
+    # parameters. Routing URL/path flags do not change pre-routing allocation;
+    # newly rejected OD pairs do, and are part of that selector key.
+    raw=json.dumps(dict(sources=files,code=_code_stamp(),roads=_roads_stamp(request),
+                        metadata=request.source_metadata),sort_keys=True,default=str).encode()
+    return hashlib.sha256(raw).hexdigest()
 
 
 def identity(request):
@@ -92,16 +125,8 @@ def identity(request):
                     companion = p.with_suffix(suffix)
                     if companion.exists():
                         files.append((role, str(companion), file_sha256(companion)))
-    code = [(p.name, file_sha256(p)) for p in sorted(Path(__file__).parent.glob('*.py'))]
-    # Shared adapters are part of the candidate's identity too.
-    for name in ('gravity.py', 'residential.py', 'residential_employment.py', 'workplace_employment.py',
-                 'historical_transfer.py', 'automatic_workplace.py', 'fine_workplace.py', 'ce_controls.py', 'demographic_reference.py', 'osrm.py'):
-        p = Path(__file__).parents[1]/name
-        code.append((name, file_sha256(p)))
-    roads = None
-    if request.roads is not None:
-        roads = hashlib.sha256(b''.join(bytes(g.wkb) for g in request.roads.geometry
-                                         if g is not None)).hexdigest()
+    code = _code_stamp()
+    roads = _roads_stamp(request)
     raw = json.dumps(dict(config=request.config, sources=files, code=code, roads=roads,
                          metadata=request.source_metadata, routing=request.route_identity),
                      sort_keys=True, ensure_ascii=False, default=str).encode()

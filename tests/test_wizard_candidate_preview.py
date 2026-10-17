@@ -28,7 +28,7 @@ class CandidatePreviewJobsTests(unittest.TestCase):
             server=wizard.WizardHTTPServer(('127.0.0.1',0),wizard.WizardRequestHandler)
             thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
             client=http.client.HTTPConnection('127.0.0.1',server.server_port,timeout=10)
-            url='/api/demand-v2-preview?'+urlencode(dict(file=str(self.config),stage='allocation',async_='1')).replace('async_=','async=')
+            url='/api/demand-v2-preview?'+urlencode(dict(file=str(self.config),stage='sensitivity',async_='1')).replace('async_=','async=')
             def get(path):
                 client.request('GET',path);r=client.getresponse();return r.status,json.loads(r.read())
             try:
@@ -56,6 +56,24 @@ class CandidatePreviewJobsTests(unittest.TestCase):
             if data['status']!='running':break
             time.sleep(.01)
         self.assertEqual(data['status'],'error');self.assertIn('Incompatible',data['error'])
+
+    def test_running_worker_exposes_progress_without_waiting_for_completion(self):
+        def calculate(progress):
+            progress('Fricción automática: opción 2 de hasta 5')
+            self.entered.set();self.release.wait(10)
+            return {'identity':'progress-fixture'}
+        job=wizard.candidate_preview_job(str(self.config),'allocation',calculate,with_progress=True)
+        self.assertTrue(self.entered.wait(2))
+        pending=wizard.candidate_preview_job(str(self.config),'allocation',calculate,job['job_id'],with_progress=True)
+        self.assertEqual(pending['status'],'running')
+        self.assertIn('opción 2',pending['message'])
+        self.release.set()
+        for _ in range(100):
+            done=wizard.candidate_preview_job(str(self.config),'allocation',calculate,job['job_id'],with_progress=True)
+            if done['status']!='running':break
+            time.sleep(.01)
+        self.assertEqual(done['status'],'complete')
+        self.assertEqual(done['identity'],'progress-fixture')
 
     def test_change_during_calculation_cannot_be_published(self):
         def calculate():

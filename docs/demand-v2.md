@@ -11,7 +11,8 @@ demand:
   target_year: 2025
   boundary_policy: closed
   cohort_count: null  # automático por tamaños del Wizard; un entero exige ese total exacto
-  beta: null  # ajustar con flujos municipales EIC; respaldo declarado 0.12/km
+  beta_selection: reference  # automatic activa calibración completa EIC
+  beta: null  # un valor positivo tiene prioridad; referencia declarada 0.12/km
   max_distance_km: null  # sin prohibición por distancia
   sources:
     cpv: [data/PROYECTO/cpv.csv]
@@ -33,9 +34,10 @@ escenario 2020 puede usar CPV, declarando que toma ocupados como viajeros por fa
 de movilidad equivalente. Otros años se rechazan en esta versión.
 
 `build_demand(request, stage)` comparte las etapas `sources`, `population`,
-`points`, `allocation`, `export`. Los resultados conservan evidencia, estimaciones
+`points`, `sensitivity`, `allocation`, `export`. Los resultados conservan evidencia, estimaciones
 y demanda del juego separados. La vista previa `points` no ejecuta asignación ni
-ruteo. La vista `allocation` incluye evaluación de movilidad.
+ruteo. La vista `sensitivity` compara preferencias aproximadas con tiempo limitado,
+sin cohortes finales ni ruteo; no cambia beta. La vista `allocation` incluye evaluación de movilidad.
 
 La conciliación usa municipios completos y una categoría residual no espacial.
 Los ocupados se ajustan dentro de la población por unidad. El recorte no absorbe
@@ -123,7 +125,10 @@ ordinarios exportados que comparten exactamente coordenadas y territorio se
 unifican. `demand_model.json.export_point_mapping` permite reconstruir los
 presupuestos y celdas originales; los IDs especiales se conservan separados.
 
-`demand.beta` ausente o `null` solicita calibración, sin heredar la beta histórica.
+`demand.beta` ausente o `null` usa 0,120 por defecto, sin heredar la beta histórica.
+Solo `demand.beta_selection: automatic` solicita la calibración completa; `reference`
+es el valor predeterminado incluso para proyectos existentes. Un beta positivo
+explícito tiene prioridad sobre esa selección.
 `max_distance_km` y `max_pop_size` prevalecen sobre sus equivalentes macro. `null` en distancia
 elimina el límite. Tasa PEA, TIL1, crecimiento, Furness y consolidación posterior
 no gobiernan el candidato y se listan como no aplicables. Los POIs conservan todos

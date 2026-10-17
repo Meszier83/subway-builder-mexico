@@ -133,6 +133,23 @@ class WizardDeliveryTests(unittest.TestCase):
         with patch('sb_mexico.pipeline.execute_pipeline', side_effect=run):
             execute_wizard_build(self.config, self.out, self.data, skip_map=True)
 
+    def test_changed_label_policy_discards_reused_cartography(self):
+        def pipeline(config_path, output_dir, **kwargs):
+            if not kwargs['skip_map']:
+                target = Path(output_dir)
+                (target/'TST.pmtiles').write_bytes(b'fixture map')
+                (target/'roads.geojson').write_text('{"type":"FeatureCollection","features":[]}')
+            return self.fake_pipeline(config_path, output_dir, **kwargs)
+        for key,value in (('toponymy_mode','merge'),('deleted_places',[dict(name='Old',loc=[-86.8,21.1])]),
+                          ('toponymy',dict(engine='official_v1'))):
+            with self.subTest(key=key),patch('sb_mexico.pipeline.execute_pipeline',side_effect=pipeline):
+                self.save()
+                self.assertEqual(execute_wizard_build(self.config,self.out,self.data)['status'],'success')
+                self.cfg[key]=value;self.save()
+                changed=execute_wizard_build(self.config,self.out,self.data,skip_map=True)
+                self.assertEqual(changed['status'],'demand_only')
+                self.assertEqual(changed['reused_cartography'],{})
+
     def test_http_status_download_and_demand_only(self):
         server = ThreadingHTTPServer(('127.0.0.1', 0), wizard.WizardRequestHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)

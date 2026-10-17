@@ -3,28 +3,36 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(require('node:path').join(__dirname,'../tools/static/wizard/app.js'),'utf8');
 const fn = source.match(/    async function previewDemandV2\(.*?\n    }/s)[0];
+const format = source.match(/    function formatDemandSensitivity\(.*?\n    }/s)[0];
+const diagnostic = status => ({status,source_preparation_seconds:2,comparison_seconds:.03,
+  sample_size:512,coverage:{sampled_origins:2,origin_count:10,residential_mass_share:.4,omitted_municipalities:[]},
+  summaries:[{beta:.12,median_km:5,p90_km:15,over_20_km_share:.1}],comparisons:[]});
 function harness() {
   const label = {textContent:''};
   const context = {currentCityFile:'a.yaml',cityData:{city:{},macroeconomics:{},pois:[{id:'UNI_keep',jobs:12}]},
     document:{getElementById(){return label;}},syncStateFromInputs(){},
-    saveCurrentCity:async()=>true,window:{},updateCohortTelemetry(){},
-    fetch:async(url)=>({ok:true,json:async()=>({points:[{}],report:{target_year:2020,territory:{integer_commuters:21},
-      workplaces:{coverage:{bbox:{attraction_share:.3478}}},
-      allocation:{beta:.12,beta_basis:'fallback',poi_quotas:[{shortfall:2}],validation:{conditional_kl:.1},validation_integer:{conditional_kl:1.2}}}})})};
-  vm.createContext(context); vm.runInContext(fn,context);
+    saveCurrentCity:async()=>true,window:{},updateCohortTelemetry(){},updateDemandEngineControls(){},
+    fetch:async(url)=>({ok:true,json:async()=>({points:[],report:{sensitivity:diagnostic('low_variation')}})})};
+  vm.createContext(context); vm.runInContext(format+'\n'+fn,context);
   return {context,label};
 }
 (async()=>{
   let {context,label}=harness();
   const original=JSON.stringify(context.cityData);
   await context.previewDemandV2();
-  assert.match(label.textContent,/21 viajeros/);
-  assert.match(label.textContent,/Candidato 2020/);
-  assert.match(label.textContent,/faltan 2 viajeros/);
-  assert.match(label.textContent,/34.78% del peso/);
-  assert.match(label.textContent,/resto conserva estimaciones DENUE/);
-  assert.match(label.textContent,/continuo 0\.1000 · enteros 1\.2000/);
+  assert.match(label.textContent,/Poca variación estimada/);
+  assert.match(label.textContent,/mediana 5\.00 km · P90 15\.00 km/);
+  assert.match(label.textContent,/fuentes y puntos: 2\.00 s · comparación: 0\.03 s/);
+  assert.equal(context.window.demandV2CohortMetadata,undefined,'screen must not publish final cohorts');
+  assert.equal(context.window.demandV2SensitivityMetadata.file,'a.yaml');
   assert.equal(JSON.stringify(context.cityData),original,'evaluation must not activate candidate or mutate POIs');
+  for (const [status,labelText] of [['sensitive',/Variación importante/],['inconclusive',/Comprobación inconclusa/]]) {
+    const result=diagnostic(status);
+    if (status==='inconclusive') {result.reason='timeout';delete result.summaries;}
+    context.fetch=async()=>({ok:true,json:async()=>({report:{sensitivity:result}})});
+    await context.previewDemandV2();assert.match(label.textContent,labelText);
+    if (status==='inconclusive') assert.match(label.textContent,/descartaron comparaciones parciales/);
+  }
   ({context,label}=harness());
   context.saveCurrentCity=async()=>false;
   context.fetch=async()=>assert.fail('must not query unsaved configuration');
@@ -33,7 +41,11 @@ function harness() {
   ({context,label}=harness());
   context.fetch=async()=>{context.currentCityFile='b.yaml';return {ok:true,json:async()=>({})};};
   await context.previewDemandV2();
-  assert.equal(label.textContent,'Evaluando candidato…','stale response must not render');
+  assert.equal(label.textContent,'Preparando fuentes y puntos para comprobar sensibilidad…','stale response must not render');
+  assert.equal(context.window.demandV2SensitivityMetadata,null);
+  ({context,label}=harness());
+  context.fetch=async()=>{context.cityData.city.bbox=[0,0,1,1];return {ok:true,json:async()=>({})};};
+  await context.previewDemandV2();assert.equal(context.window.demandV2SensitivityMetadata,null,'changed configuration must not publish');
   ({context,label}=harness());
   const completedFetch=context.fetch;const requests=[];
   context.setTimeout=resolve=>resolve();
@@ -41,7 +53,8 @@ function harness() {
     {ok:true,json:async()=>({status:'running',job_id:'job-1'})}:completedFetch(url);};
   await context.previewDemandV2();
   assert.match(requests[0],/async=1/);assert.match(requests[1],/job=job-1/);
-  assert.match(label.textContent,/21 viajeros/);
+  assert.match(requests[0],/stage=sensitivity/);
+  assert.match(label.textContent,/Poca variación estimada/);
   ({context,label}=harness());
   context.setTimeout=resolve=>{context.currentCityFile='b.yaml';resolve();};
   let polls=0;
@@ -50,7 +63,7 @@ function harness() {
   ({context,label}=harness());
   context.fetch=async()=>({ok:true,json:async()=>({status:'error',error:'No feasible support'})});
   await context.previewDemandV2();assert.match(label.textContent,/No feasible support/);
-  console.log('Demand v2 UI: save barrier, passive evaluation, POI preservation, stale response: PASS');
+  console.log('Demand v2 sensitivity UI: all outcomes, timings, no final cohorts, save barrier, stale configuration/project and polling: PASS');
 })().catch(error=>{console.error(error);process.exitCode=1;});
 
 const controls = new Map();

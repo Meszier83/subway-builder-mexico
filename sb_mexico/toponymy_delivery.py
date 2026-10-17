@@ -10,7 +10,7 @@ LAYER_TYPES = {
 }
 
 
-def curated_collection(places, deleted=(), mode='replace'):
+def curated_collection(places, deleted=(), mode='replace', pipeline=None, bbox=None, core=None):
     if mode not in ('merge', 'replace'):
         raise ValueError('toponymy_mode must be merge or replace')
     features = []
@@ -20,9 +20,40 @@ def curated_collection(places, deleted=(), mode='replace'):
             continue
         if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in loc):
             continue
-        features.append(dict(type='Feature', properties=dict(place, place=place.get('type', 'suburb'), curated=True),
+        # Retain boundaries in the review catalog/YAML, not in point-tile properties.
+        props = {k: v for k, v in place.items() if k != 'boundary'}
+        scale = (place.get('label_overrides') or {}).get('scale')
+        if scale:
+            props['territorial_type'] = props.get('type')
+            props['type'] = {'large': 'city', 'medium': 'suburb', 'small': 'neighbourhood'}[scale]
+        features.append(dict(type='Feature', properties=dict(props, place=place.get('type', 'suburb'), curated=True),
                              geometry=dict(type='Point', coordinates=list(loc))))
-    return dict(type='FeatureCollection', features=features, mode=mode, deleted_places=list(deleted or []))
+    result = dict(type='FeatureCollection', features=features, mode=mode, deleted_places=list(deleted or []))
+    if pipeline:
+        from .toponymy_official import options
+        options({'toponymy': pipeline})
+        result.update(pipeline=pipeline.get('engine', 'official_v1'), authoritative=True)
+    from .toponymy_layout import enabled, plan_labels
+    if enabled(pipeline):
+        # Automatic presentation always materializes the complete saved catalog.
+        # Complementing native labels would bypass identity and density decisions.
+        if mode != 'replace':
+            raise ValueError('label_v1 requiere usar la lista guardada (replace).')
+        filtered = [p for p in serialize_places(places or []) if not any(
+            str(p.get('name', '')).strip().casefold() == d.strip().casefold() if isinstance(d, str)
+            else same_place(p, d) for d in deleted)]
+        plan = plan_labels(filtered, bbox, core, pipeline)
+        result.update(layout=plan, mode='replace')
+        result['features'] = []
+        for place in filtered:
+            decision = plan['decisions'][place['id']]
+            if not decision['visible']:
+                continue
+            result['features'].append(dict(type='Feature',
+                tippecanoe=dict(minzoom=decision['min_zoom'], maxzoom=plan['maxzoom'], layer=decision['layer']),
+                properties=dict(name=place['name'], id=place['id'], priority=decision['priority']),
+                geometry=dict(type='Point', coordinates=list(place['loc']))))
+    return result
 
 
 def _place(feature):
@@ -61,7 +92,7 @@ def synchronize_labels(native, collection, layer):
                if (f.get('geometry') or {}).get('type') == 'Point'
                and _place(f).get('name') and _place(f)['type'] in allowed and not discarded(_place(f))]
     retained = [f for f in native if not discarded(_place(f))]
-    if mode == 'replace' and curated:
+    if mode == 'replace' and (curated or collection.get('authoritative')):
         return curated
     # Curated IDs/names/coordinates win locally, without suppressing distant homonyms.
     return curated + [f for f in retained if not any(_matches(_place(f), _place(c)) for c in curated)]

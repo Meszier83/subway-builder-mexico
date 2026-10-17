@@ -17,10 +17,29 @@ Desde etapa 4 reserva su cuota configurada después de captura DENUE y declara
 insuficiencias; véase [contrato OD y POIs](demand-od-rounding.md).
 El motor actual continúa siendo el predeterminado.
 
+En v2 la compilación usa la referencia 0,120 por defecto, también en proyectos
+existentes sin beta manual ni selección explícita. `demand.beta` positivo tiene
+prioridad. `demand.beta_selection: automatic` activa la calibración completa EIC
+en opciones avanzadas; `reference` es el valor predeterminado y ejecuta una sola
+asignación. El legado no cambia.
+
+«Comprobar sensibilidad» usa `stage=sensitivity`: prepara las fuentes y puntos,
+pero no ejecuta asignación final, cohortes, ruteo ni empaquetado. Compara 0,060;
+0,120 y 0,240 con 512 sorteos deterministas de origen ponderados por viajeros y
+todos los destinos permitidos. Muestra distancias geométricas aproximadas,
+viajes de más de 20 km, variación de destinos, cobertura y tiempos separados de
+preparación/comparación. El presupuesto comparativo es 15 s comprobado entre
+orígenes; la preparación no tiene ese límite. Sin cobertura de todos los municipios,
+sin soporte o con tiempo agotado, declara inconcluso y descarta resultados parciales.
+La caché del proyecto verifica fuentes/código/configuración/puntos y checksum.
+No balancea los totales laborales ni aplica reservas finales de POIs; no cambia
+beta y no certifica exactitud ni jugabilidad. Véase [política de fricción](demand-beta-policy.md).
+
 En v2, el modo de tamaño fijo conserva restos locales cuando no puede completar
 el tamaño dentro de 500 m, municipio, zona aislada y componente vial. También
 conserva restos para relaciones municipales pequeñas y cuotas de POIs. La interfaz
-muestra el conteo final después de evaluar; antes muestra un mínimo. Véase
+muestra el conteo final después de asignar o compilar; la sensibilidad no calcula
+cohortes finales y antes se muestra un mínimo. Véase
 [contrato de agrupamiento](demand-fixed-groups.md). El adaptativo no agrega este
 desplazamiento residencial adicional.
 
@@ -240,3 +259,17 @@ guardados; **Comparar OSM** permite inspeccionar también la cobertura nativa.
 La cartografía exporta IDs, procedencia, identidades territoriales y descartes.
 Verificar las capas compiladas y la carga en el juego sigue siendo necesario
 antes de afirmar cobertura exhaustiva o jugabilidad.
+
+
+### Zonas aisladas por polígono
+
+En el mapa del proyecto, «Trazar Polígono» añade un vértice por clic. Enter o
+un doble clic cierran el contorno; Retroceso elimina el último vértice y Escape
+cancela. Después de guardar el nombre, selecciona la zona para arrastrar sus
+vértices. Se rechazan contornos cruzados o sin área. «Manual» conserva la entrada
+por caja para zonas rectangulares y los proyectos existentes siguen siendo válidos.
+
+El Wizard conserva `isolated_zones[].polygon` como pares `[lon, lat]`, lo muestra
+en ambos mapas y lo guarda sin sustituirlo por su caja envolvente. El motor usa
+el contorno real, incluyendo su frontera; `polygon` prevalece si también hay `bbox`.
+La auditoría previa a compilar verifica la geometría.

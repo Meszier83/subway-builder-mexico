@@ -194,9 +194,10 @@ declara la suposición de ocupados como commuters. No usa TIL1 para expandir
 empleo, ni tasa PEA estatal para reemplazar POCUPADA. El legado CUR usa también
 empleo automático con transferencia histórica; no hay expansión TIL1 activa.
 
-V2 toma beta de `demand.beta`; si falta intenta elegirla con la muestra de
-entrenamiento y usa respaldo si no hay evidencia suficiente. En esta referencia
-la beta efectiva es 0,12. `macroeconomics.gravity_beta`, ajustes Furness y
+V2 toma beta de `demand.beta`; si falta usa 0,12 salvo selección explícita
+`demand.beta_selection: automatic`. Esa opción compara asignaciones finales con
+registros de selección y comprobación separados; los de entrenamiento entran
+en el solver. La sensibilidad rápida no selecciona beta. `macroeconomics.gravity_beta`, ajustes Furness y
 experimento modal del legado no se trasladan al solver candidato. Su informe
 lista esos parámetros ignorados. Los tamaños vienen de `demand` con respaldo
 en macro; `fixed_cohort_size` prevalece y no se combina con `cohort_count`.

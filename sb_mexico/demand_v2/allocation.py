@@ -4,6 +4,24 @@ import numpy as np
 from scipy.optimize import minimize
 
 
+def permitted_destinations(origin, config, coordinates, zones, components, indices,
+                           blocked, special, scale):
+    """Shared geographic support for assignment and the preference diagnostic."""
+    distance = np.linalg.norm((coordinates-origin['location'])*scale, axis=1)
+    permitted = (zones == origin['zone']) & np.any(coordinates != origin['location'], axis=1)
+    if origin.get('road_component') is not None:
+        permitted &= components == origin['road_component']
+    if config.get('max_distance_km') is not None:
+        permitted &= distance <= config['max_distance_km']
+    if origin['id'] in indices:
+        permitted[indices[origin['id']]] = False
+    permitted[blocked.get(origin['id'], [])] = False
+    if config.get('_reservation_only'):
+        permitted &= special
+    selected = np.flatnonzero(permitted)
+    return selected, distance[selected]
+
+
 def support(points, config):
     """Complete permitted support; proximity is a cost, never an access cutoff."""
     origins = [p for p in points if p['commuters'] > 0]
@@ -12,6 +30,13 @@ def support(points, config):
         return origins, destinations, np.array([], int), np.array([], int), np.array([], float)
     if not destinations:
         raise ValueError('No permitted destinations for retained commuters')
+    cache = config.get('_support_cache')
+    cache_key = (bool(config.get('_reservation_only')), tuple(p['id'] for p in origins),
+                 tuple(p['id'] for p in destinations))
+    if cache is not None and cache_key in cache:
+        # Cache is scoped to one selector call: fixed coordinates/restrictions.
+        _, _, rows, cols, distances = cache[cache_key]
+        return origins, destinations, rows, cols, distances
     lat = np.mean([p['location'][1] for p in points])
     scale = np.array([111.32*math.cos(math.radians(lat)), 110.574])
     coordinates = np.asarray([p['location'] for p in destinations])
@@ -24,22 +49,17 @@ def support(points, config):
     special = np.asarray([bool(p.get('is_special')) for p in destinations])
     rows, cols, distances = [], [], []
     for i,origin in enumerate(origins):
-        distance = np.linalg.norm((coordinates-origin['location'])*scale, axis=1)
-        permitted = (zones == origin['zone']) & np.any(coordinates != origin['location'], axis=1)
-        if origin.get('road_component') is not None:
-            permitted &= components == origin['road_component']
-        if config.get('max_distance_km') is not None:
-            permitted &= distance <= config['max_distance_km']
-        if origin['id'] in indices: permitted[indices[origin['id']]] = False
-        permitted[blocked.get(origin['id'], [])] = False
-        if config.get('_reservation_only'): permitted &= special
-        selected = np.flatnonzero(permitted)
+        selected, distance = permitted_destinations(origin, config, coordinates, zones,
+            components, indices, blocked, special, scale)
         if not len(selected) and not config.get('_reservation_only'):
             raise ValueError(f"Origin without support: {origin['id']}; commuters={origin['commuters']}; zone={origin['zone']}; max_distance={config.get('max_distance_km')}")
         rows.append(np.full(len(selected),i,dtype=np.int32))
         cols.append(selected.astype(np.int32))
-        distances.append(distance[selected])
-    return origins,destinations,np.concatenate(rows),np.concatenate(cols),np.concatenate(distances)
+        distances.append(distance)
+    result = origins,destinations,np.concatenate(rows),np.concatenate(cols),np.concatenate(distances)
+    if cache is not None:
+        cache[cache_key] = result
+    return result
 
 
 def row_normalize(log_weights, rows, budgets):
@@ -139,17 +159,7 @@ def _allocate_regular(points, config, mobility):
             cohorts=dict(options=cohort_options,requested_count=None,actual_count=0,minimum_feasible=0,maximum_feasible=0))
     attraction = np.asarray([p['attraction'] for p in destinations], float)
     beta = config.get('beta') or .12
-    calibrated = False
-    if config.get('beta') is None and sum(r.get('training_records', r.get('records', 0)) for r in mobility.get('flows', [])) >= 30:
-        candidates = []
-        for value in (.03, .06, .09, .12, .18, .24, .36):
-            proposal, _ = row_normalize(np.log(attraction[cols])-value*distance, rows, budgets)
-            score = municipal_score(proposal, rows, cols, origins, destinations, mobility, 'training_weight')
-            if score['conditional_kl'] is not None:
-                candidates.append((score['conditional_kl'], abs(value-.12), value))
-        if candidates:
-            beta = min(candidates)[2]
-            calibrated = True
+    calibrated = False  # Selection belongs to the complete, rounded allocation wrapper.
     log_prior = np.log(attraction[cols])-beta*distance
     from .workplace_profile import targets_for_support, check_feasibility, project_margins
     targets, profile = targets_for_support(origins,destinations,rows,cols)
@@ -270,8 +280,13 @@ def _allocate_regular(points, config, mobility):
     return cells, report
 
 
-def allocate(points, config, mobility):
+def _allocate_at_beta(points, config, mobility):
     if not any(p.get('is_special') and p['attraction']>0 for p in points):
         return _allocate_regular(points,config,mobility)
     from .poi_assignment import allocate_with_pois
     return allocate_with_pois(points,config,mobility,_allocate_regular)
+
+
+def allocate(points, config, mobility):
+    from .beta_policy import select_beta
+    return select_beta(points, config, mobility, _allocate_at_beta)

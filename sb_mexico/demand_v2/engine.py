@@ -22,12 +22,16 @@ def build_demand(request, stage='export'):
     if stage not in STAGES:
         raise ValueError('Unknown demand stage: '+str(stage))
     started = time.perf_counter()
+    if request.progress:
+        request.progress('Validando fuentes de demanda')
     fingerprint, files = identity(request)
     evidence = ingest(request, files)
     result = dict(stage=stage, identity=fingerprint, report=evidence['report'])
     if stage == 'sources':
         result['evidence'] = evidence
         return result
+    if request.progress:
+        request.progress('Preparando población y puntos de demanda')
     population, controls = allocate_population(evidence['census'], evidence['bases'], evidence['controls'], evidence['people'])
     result['report']['population_controls'] = controls
     result['population'] = population
@@ -38,7 +42,7 @@ def build_demand(request, stage='export'):
     from .cohorts import settings
     cohort_options = settings(request.config)
     result['statistical_points'] = copy.deepcopy(points)
-    if cohort_options['fixed_size']:
+    if cohort_options['fixed_size'] and stage != 'sensitivity':
         from .fixed_groups import resolve
         points,point_report['fixed_cohort_resolution'] = resolve(points,cohort_options['fixed_size'])
     point_report['final_consolidation'] = consolidation
@@ -55,11 +59,33 @@ def build_demand(request, stage='export'):
     if 'max_distance_km' not in parameters and macro.get('max_distance_km') is not None:
         parameters['max_distance_km'] = macro['max_distance_km']
     validate_config({'demand':parameters})
+    if stage == 'sensitivity':
+        from .sensitivity import cached_screen
+        preparation_seconds = time.perf_counter()-started
+        if request.progress:
+            request.progress('Fuentes y puntos preparados; comenzando comparación limitada a 15 s')
+        diagnostic = cached_screen(points,parameters,fingerprint,request.sensitivity_cache,request.progress)
+        diagnostic['source_preparation_seconds'] = preparation_seconds
+        diagnostic['demand_point_count'] = len(points)
+        if request.progress:
+            request.progress('Verificando que las fuentes no cambiaron durante la comprobación')
+        verification_started = time.perf_counter()
+        if identity(request)[0] != fingerprint:
+            raise ValueError('Demand inputs changed during sensitivity check')
+        diagnostic['source_verification_seconds'] = time.perf_counter()-verification_started
+        result['report']['sensitivity'] = diagnostic
+        return result
     if cohort_options['fixed_size']:
         # Pooling cannot hide an unsupported original residence.
         from .allocation import support
         support(result['statistical_points'],parameters)
     parameters['cohort_settings'] = cohort_options
+    if request.progress:
+        parameters['_beta_progress'] = request.progress
+    if request.beta_cache:
+        from .request import beta_identity
+        parameters['_beta_cache_path'] = str(request.beta_cache)
+        parameters['_beta_cache_identity'] = beta_identity(request, files)
     cells, allocation = allocate(points, parameters, evidence['mobility'])
     result['cells'] = cells
     result['report']['allocation'] = allocation

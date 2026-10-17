@@ -238,7 +238,7 @@
               </select>
             </div>
             <div>
-              <button type="button" onclick="previewDemandV2()" class="text-xs underline">Evaluar candidato sin cambiar el motor</button>
+              <button type="button" onclick="previewDemandV2()" class="text-xs underline">Comprobar sensibilidad sin cambiar el motor</button>
               <pre id="demandV2Summary" class="text-xs whitespace-pre-wrap"></pre>
               <label for="cfg_residential_employment" class="block text-xs font-semibold">Residentes ocupados</label>
               <select id="cfg_residential_employment" class="w-full border rounded px-2 py-1">
@@ -562,7 +562,7 @@
             <div class="grid grid-cols-2 gap-1.5">
               <button type="button" onclick="startDrawingIsolatedZone()" id="btnDrawIsolatedZone" class="bg-cyan-50 hover:bg-cyan-100 border border-cyan-300 text-cyan-800 text-xs font-bold py-1.5 px-2 rounded-lg flex items-center justify-center space-x-1 transition shadow-2xs">
                 <i data-lucide="box-select" class="w-3.5 h-3.5"></i>
-                <span>+ Trazar Caja</span>
+                <span>+ Trazar Polígono</span>
               </button>
               <button type="button" onclick="openIsolatedZoneModal(-1)" id="btnAddIsolatedManual" class="bg-cyan-50 hover:bg-cyan-100 border border-cyan-300 text-cyan-800 text-xs font-bold py-1.5 px-2 rounded-lg flex items-center justify-center space-x-1 transition shadow-2xs">
                 <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
@@ -631,7 +631,7 @@
         <!-- Banner Flotante de Modo Trazado de Zona Aislada -->
         <div id="drawingIsolatedBanner" class="hidden absolute top-4 left-1/2 -translate-x-1/2 bg-cyan-950/95 text-cyan-200 border border-cyan-500/60 backdrop-blur-md px-4 py-2 rounded-xl text-xs font-semibold shadow-2xl flex items-center space-x-3 z-[1000]">
           <i data-lucide="box-select" class="w-4 h-4 text-cyan-400 animate-pulse"></i>
-          <span id="drawingIsolatedBannerText">Arrastra un cuadro o haz 2 clics para encuadrar la isla</span>
+          <span id="drawingIsolatedBannerText">Marca vértices; Enter o doble clic cierra. Retroceso deshace; Esc cancela.</span>
           <button type="button" onclick="cancelDrawingIsolatedZone()" class="bg-cyan-800/80 hover:bg-cyan-700 text-white text-[11px] font-bold px-2 py-0.5 rounded border border-cyan-400/40 transition">Cancelar (Esc)</button>
         </div>
 
@@ -795,7 +795,7 @@
     <!-- --------------------------------------------------------------------- -->
     <section id="stepView-3" class="step-view hidden absolute inset-0 p-6 flex flex-col md:flex-row gap-6 overflow-y-auto w-full h-full">
       <div class="w-full md:w-1/2 bg-metro-card border border-metro-border rounded-xl p-5 shadow-xl flex flex-col space-y-4">
-        <div class="border-b border-metro-border pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div id="legacyMacroHeader" class="border-b border-metro-border pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
             <h2 class="text-base font-bold text-stone-900 flex items-center space-x-2">
               <i data-lucide="sliders" class="w-5 h-5 text-metro-orange"></i>
@@ -822,6 +822,7 @@
         </div>
 
         <div class="space-y-4 text-xs">
+          <div id="legacyMacroRates" class="space-y-4">
           <!-- Tasa PEA -->
           <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border">
             <div class="flex justify-between items-center mb-1">
@@ -883,6 +884,8 @@
               <span id="beta_expected_median" class="font-bold text-stone-800">Mediana esperada: ~10 – 15 km.</span>
               <span id="beta_rationale_text" class="block text-[10px] text-stone-500 mt-0.5">Calibrado para coincidir con la distribución real de distancias de viaje (Trip Length Distribution) de Subway Builder.</span>
             </div>
+          </div>
+
           </div>
 
           <!-- Distancia Máx. de Viaje -->
@@ -1089,7 +1092,7 @@
           </div>
 
           <!-- LABORATORIO EXPERIMENTAL: COMPETITIVIDAD MODAL (AUTO VS. METRO) -->
-          <div class="bg-gradient-to-br from-purple-50/80 to-stone-50 p-4 rounded-xl border border-purple-200 shadow-xs space-y-3">
+          <div id="legacyModalPanel" class="bg-gradient-to-br from-purple-50/80 to-stone-50 p-4 rounded-xl border border-purple-200 shadow-xs space-y-3">
             <div class="flex justify-between items-center">
               <div class="flex items-center space-x-2">
                 <i data-lucide="flask-conical" class="w-4 h-4 text-purple-700"></i>
@@ -1185,7 +1188,7 @@
       </div>
 
       <!-- Proyecciones Demográficas CONAPO -->
-      <div class="w-full md:w-1/2 bg-metro-card border border-metro-border rounded-xl p-5 shadow-xl flex flex-col space-y-4">
+      <div id="legacyConapoPanel" class="w-full md:w-1/2 bg-metro-card border border-metro-border rounded-xl p-5 shadow-xl flex flex-col space-y-4">
         <div class="border-b border-metro-border pb-3 flex flex-wrap gap-3 justify-between items-start">
           <div>
             <h3 class="text-base font-bold text-white flex items-center space-x-2">
@@ -1241,6 +1244,26 @@
             </tbody>
           </table>
         </div>
+      </div>
+      <div id="v2DemandPanel" class="hidden w-full md:w-1/2 bg-metro-card border border-metro-border rounded-xl p-5 shadow-xl space-y-4">
+        <h3 class="text-base font-bold text-stone-900">Distribución automática de viajes · v2</h3>
+        <p class="text-xs text-stone-600">La referencia EIC determina los viajeros. DENUE y SAIC aportan la atracción laboral estimada. No se aplican tasas ENOE ni proyecciones CONAPO.</p>
+        <p class="text-xs text-stone-600">La compilación utiliza la referencia 0,120 salvo un valor manual o calibración automática avanzada. Los proyectos existentes sin ajuste explícito también usan esta referencia.</p>
+        <p class="text-xs text-stone-600">Comprueba preferencias aproximadas con 0,060; 0,120 y 0,240 sin compilar ni crear viajes finales. El cálculo comparativo tiene un límite de 15 s; preparar las fuentes puede tardar más. Esta comprobación nunca cambia la fricción.</p>
+        <button type="button" onclick="previewDemandV2()" class="px-3 py-2 bg-metro-green text-white rounded-lg text-xs font-bold">Comprobar sensibilidad</button>
+        <p id="v2BetaSummary" role="status" aria-live="polite" class="text-xs text-stone-800 whitespace-pre-line">Pendiente de evaluación.</p>
+        <details class="text-xs text-stone-600">
+          <summary>Ajuste avanzado de fricción</summary>
+          <label class="block mt-2" for="cfg_demand_beta_selection">Fricción al compilar</label>
+          <select id="cfg_demand_beta_selection" onchange="onDemandBetaSelectionChanged(this)" class="mt-1 border border-stone-300 rounded px-2 py-1 text-stone-900">
+            <option value="reference">Referencia 0,120 (una asignación)</option>
+            <option value="automatic">Calibración automática EIC (hasta cinco asignaciones)</option>
+          </select>
+          <p class="mt-1">La calibración completa comprueba proporciones municipales y puede tardar mucho. Se ejecuta al compilar si la seleccionas.</p>
+          <label class="block mt-2" for="cfg_demand_beta">β manual (tiene prioridad; vacío = opción anterior)</label>
+          <input id="cfg_demand_beta" type="number" min="0.001" step="any" placeholder="Automático" onchange="onDemandBetaChanged(this)" class="mt-1 border border-stone-300 rounded px-2 py-1 text-stone-900">
+        </details>
+        <p class="text-[11px] text-stone-500">La sensibilidad estima preferencias sin balancear totales de empleo ni reservar cuotas finales de POIs. Las distancias son geométricas, no viales ni tiempos observados. No certifica demanda final ni jugabilidad; el ajuste municipal no observa viajes entre colonias.</p>
       </div>
     </section>
 
@@ -1533,11 +1556,11 @@
 
               <!-- Botón Escaneo Rápido 1-Clic con Menú de Opciones -->
               <div class="inline-flex rounded shadow-xs">
-                <button onclick="quickScanAndPopulateToponymy(this)" id="btnScanPlaces" class="px-2 py-1 bg-sky-700 hover:bg-sky-600 text-white text-[10px] font-bold rounded-l flex items-center space-x-1 transition cursor-pointer" title="Escanear OSM y DENUE y revisar los nombres antes de incorporar">
+                <button onclick="prepareAutomaticToponymy()" id="btnPrepareLabels" class="px-2 py-1 bg-sky-700 hover:bg-sky-600 text-white text-[10px] font-bold rounded-l flex items-center space-x-1 transition cursor-pointer" title="Obtener nombres oficiales y calcular tamaños y visibilidad automáticamente">
                   <i data-lucide="scan" class="w-3 h-3"></i>
-                  <span>Escanear</span>
+                  <span>Preparar etiquetas</span>
                 </button>
-                <button onclick="openScanToponymyDialog()" class="px-1.5 py-1 bg-sky-800 hover:bg-sky-900 text-sky-200 text-[10px] font-bold rounded-r border-l border-sky-900/40 transition cursor-pointer" title="Opciones avanzadas de escaneo (umbral DENUE, modo reemplazo)">
+                <button onclick="openScanToponymyDialog()" class="px-1.5 py-1 bg-sky-800 hover:bg-sky-900 text-sky-200 text-[10px] font-bold rounded-r border-l border-sky-900/40 transition cursor-pointer" title="Fuentes, revisión e importación de nombres">
                   <i data-lucide="chevron-down" class="w-2.5 h-2.5"></i>
                 </button>
               </div>
@@ -1548,7 +1571,7 @@
               </button>
 
               <!-- Zonificador Espacial y Poda por Radio -->
-              <button onclick="openZoneThinningModal()" id="btnZoneThinningPlaces" class="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded shadow-xs transition cursor-pointer" title="Poda espacial y zonificación por radio (mantener 1 colonia por cada X metros)">
+              <button onclick="openScanToponymyDialog()" id="btnZoneThinningPlaces" class="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded shadow-xs transition cursor-pointer" title="Fuentes y revisión avanzada; la preparación automática evita la poda destructiva">
                 <i data-lucide="target" class="w-3.5 h-3.5"></i>
               </button>
 
@@ -1577,6 +1600,14 @@
 
           <!-- Contenedor Colapsable de Controles Secundarios (Banner y Visibilidad en Mapa) -->
           <div id="placesSecondaryControls" class="space-y-1.5 shrink-0 transition-all">
+            <button type="button" onclick="cancelAutomaticToponymy();setToponymyScanStatus('Preparación cancelada; no se aplicarán sus resultados.','warning')" id="btnCancelPrepareLabels" hidden class="text-[11px] text-rose-700">Cancelar preparación</button>
+            <div id="automaticLabelSummary" hidden class="p-2 bg-sky-50 border border-sky-200 rounded-lg text-[11px] space-y-1">
+              <strong>Vista de etiquetas</strong> · <span id="automaticLabelCounts"></span>
+              <label class="block"><input type="checkbox" id="toponymyCatalogView" onchange="setToponymyCatalogView(this.checked)"> Catálogo completo (puntos para editar)</label>
+              <p>Vista aproximada del juego. Fuera del núcleo los nombres se conservan en el catálogo.</p>
+              <details><summary class="cursor-pointer">Excepciones y diagnóstico de fuentes</summary><div id="automaticLabelExceptions"></div></details>
+              <button type="button" onclick="restoreToponymyBackup()" class="text-sky-800 underline">Restaurar respaldo anterior</button>
+            </div>
             <!-- Banner de Estado de Modo Cartográfico (OSM Nativo vs Curado) -->
             <p id="toponymyScanStatus" role="status" aria-live="polite" hidden class="text-[11px] text-stone-600 leading-snug"></p>
             <div id="toponymyModeBanner" class="shrink-0">
@@ -1585,7 +1616,7 @@
             <label class="toponymy-delivery-control">
               <span>Al compilar las etiquetas</span>
               <select id="toponymyDeliveryMode" onchange="setToponymyDeliveryMode(this.value)">
-                <option value="replace">Lista por capa (comportamiento histórico)</option>
+                <option value="replace">Usar lista guardada</option>
                 <option value="merge">Complementar OSM (para listas incompletas)</option>
               </select>
               <small id="toponymyDeliveryNote"></small>
@@ -1597,7 +1628,7 @@
                 <span class="text-[9px] font-bold text-stone-500 uppercase tracking-wider">Vista:</span>
                 <div class="flex bg-stone-200/80 p-0.5 rounded text-[9px] font-bold">
                   <button type="button" onclick="setPlaceDisplayMode('pill')" id="btnDisplayMode-pill" class="place-mode-chip px-1.5 py-0.5 rounded transition bg-sky-800 text-white shadow-2xs cursor-pointer" title="Píldoras con fondo oscuro">🏷️ Píldoras</button>
-                  <button type="button" onclick="setPlaceDisplayMode('ingame')" id="btnDisplayMode-ingame" class="place-mode-chip px-1.5 py-0.5 rounded transition text-stone-600 hover:text-stone-900 cursor-pointer" title="Estilo In-Game condensado">🎮 In-Game</button>
+                  <button type="button" onclick="setPlaceDisplayMode('ingame')" id="btnDisplayMode-ingame" class="place-mode-chip px-1.5 py-0.5 rounded transition text-stone-600 hover:text-stone-900 cursor-pointer" title="Previsualización aproximada de las etiquetas">🎮 Etiquetas</button>
                   <button type="button" onclick="setPlaceDisplayMode('halo')" id="btnDisplayMode-halo" class="place-mode-chip px-1.5 py-0.5 rounded transition text-stone-600 hover:text-stone-900 cursor-pointer" title="Halo cartográfico minimalista">🎯 Halo</button>
                   <button type="button" onclick="setPlaceDisplayMode('dots')" id="btnDisplayMode-dots" class="place-mode-chip px-1.5 py-0.5 rounded transition text-stone-600 hover:text-stone-900 cursor-pointer" title="Puntos compactos">🔘 Puntos</button>
                 </div>
@@ -1605,9 +1636,9 @@
 
               <div class="flex items-center space-x-1">
                 <div class="flex items-center bg-white border border-stone-200 rounded px-1 py-0.5 text-[9px] font-mono shadow-2xs">
-                  <button type="button" onclick="changePlaceFontScale(-0.15)" class="px-0.5 font-bold text-stone-500 hover:text-stone-900 cursor-pointer" title="Reducir letra en mapa">A-</button>
+                  <button type="button" onclick="changePlaceFontScale(-0.15)" class="px-0.5 font-bold text-stone-500 hover:text-stone-900 cursor-pointer" title="Reducir la vista; no cambia la exportación">A-</button>
                   <span id="placeFontScaleBadge" class="px-1 font-bold text-stone-700">100%</span>
-                  <button type="button" onclick="changePlaceFontScale(0.15)" class="px-0.5 font-bold text-stone-500 hover:text-stone-900 cursor-pointer" title="Aumentar letra en mapa">A+</button>
+                  <button type="button" onclick="changePlaceFontScale(0.15)" class="px-0.5 font-bold text-stone-500 hover:text-stone-900 cursor-pointer" title="Aumentar la vista; no cambia la exportación">A+</button>
                 </div>
                 <button type="button" onclick="fitMapToPlaces()" class="p-1 bg-white hover:bg-stone-100 text-stone-600 border border-stone-200 rounded shadow-2xs transition cursor-pointer" title="Encuadrar la cámara a todas las colonias">
                   <i data-lucide="maximize" class="w-3 h-3"></i>
@@ -1644,12 +1675,13 @@
               </div>
               <select id="placesTypeFilter" onchange="filterPlacesByType(this.value)" class="text-[11px] bg-white border border-metro-border rounded-lg px-2 py-1 text-stone-700 cursor-pointer">
                 <option value="all">Todas las escalas</option>
-                <option value="large">👑 Grande (18px)</option>
-                <option value="medium">🏙️ Mediano (13px)</option>
-                <option value="small">🏘️ Chico (10px)</option>
+                <option value="large">👑 Grande</option>
+                <option value="medium">🏙️ Mediano</option>
+                <option value="small">🏘️ Pequeño</option>
                 <option value="micro">🚪 Cerradas / Privadas</option>
                 <option value="osm">🗺️ Origen OSM</option>
-                <option value="denue">🏪 Origen DENUE</option>
+                <option value="official">INEGI · nombres oficiales</option>
+                <option value="denue">DENUE · nombres anteriores</option>
                 <option value="manual">Añadidas manualmente</option>
                 <option value="unknown">Origen no registrado</option>
               </select>
@@ -1671,9 +1703,9 @@
                 <!-- Controles de Escala en Lote -->
                 <div id="batchScaleControls" class="hidden items-center space-x-1 border-r border-stone-200 pr-2">
                   <span class="text-[10px] text-stone-500 font-semibold">Escala:</span>
-                  <button type="button" onclick="batchSetPlaceScale('large')" class="px-1.5 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded text-[10px] font-bold transition cursor-pointer" title="Cambiar seleccionados a Grande (18px)">👑 Grande</button>
-                  <button type="button" onclick="batchSetPlaceScale('medium')" class="px-1.5 py-0.5 bg-sky-50 hover:bg-sky-100 text-sky-900 border border-sky-300 rounded text-[10px] font-bold transition cursor-pointer" title="Cambiar seleccionados a Mediano (13px)">🏙️ Mediano</button>
-                  <button type="button" onclick="batchSetPlaceScale('small')" class="px-1.5 py-0.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded text-[10px] font-bold transition cursor-pointer" title="Cambiar seleccionados a Chico (10px)">🏘️ Chico</button>
+                  <button type="button" onclick="batchSetPlaceScale('large')" class="px-1.5 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded text-[10px] font-bold transition cursor-pointer" title="Cambiar seleccionados a Grande">👑 Grande</button>
+                  <button type="button" onclick="batchSetPlaceScale('medium')" class="px-1.5 py-0.5 bg-sky-50 hover:bg-sky-100 text-sky-900 border border-sky-300 rounded text-[10px] font-bold transition cursor-pointer" title="Cambiar seleccionados a Mediano">🏙️ Mediano</button>
+                  <button type="button" onclick="batchSetPlaceScale('small')" class="px-1.5 py-0.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded text-[10px] font-bold transition cursor-pointer" title="Cambiar seleccionados a Pequeño">🏘️ Chico</button>
                 </div>
                 <button type="button" id="btnDeleteSelectedPlaces" onclick="deleteSelectedPlaces()" class="hidden text-rose-600 hover:text-rose-800 font-bold flex items-center space-x-1 cursor-pointer">
                   <i data-lucide="trash-2" class="w-3 h-3"></i>
@@ -2382,6 +2414,11 @@
         </button>
       </div>
 
+      <div id="isoPolygonFields" class="hidden space-y-2">
+        <label for="iso_polygon">Vértices del polígono [lon, lat]</label>
+        <textarea id="iso_polygon" rows="4" class="w-full border border-stone-300 rounded-lg p-2 font-mono text-xs"></textarea>
+        <p class="text-xs text-stone-500">Puedes ajustar los vértices arrastrándolos en el mapa después de guardar.</p>
+      </div>
       <input type="hidden" id="iso_edit_index" value="-1">
 
       <div class="space-y-3 text-xs">
@@ -2395,7 +2432,7 @@
           <input type="text" id="iso_id" class="w-full bg-stone-50 font-mono border border-stone-300 rounded-lg px-3 py-2 text-stone-900 font-bold focus:border-cyan-600 focus:outline-none" placeholder="identificador_zona">
         </div>
 
-        <div class="bg-stone-50 p-3 rounded-lg border border-stone-200 space-y-2">
+        <div id="isoBboxFields" class="bg-stone-50 p-3 rounded-lg border border-stone-200 space-y-2">
           <span class="font-bold text-stone-800 block text-[11px]">Coordenadas BBOX [W, S, E, N]</span>
           <div class="grid grid-cols-2 gap-2 font-mono text-[11px]">
             <div>
@@ -2700,14 +2737,14 @@
     </div>
   </div>
 
-  <!-- Modal Escaneo de Toponimia Urbana (OSM + DENUE) -->
+  <!-- Pipeline oficial de nombres territoriales -->
   <div id="modalScanToponymy" role="dialog" aria-modal="true" aria-label="Revisión de nombres detectados" onkeydown="if(event.key === 'Escape') closeScanToponymyDialog()" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
     <div class="bg-white border border-stone-200 rounded-2xl p-6 w-full max-w-2xl shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
       <div class="flex justify-between items-center border-b border-stone-200 pb-3 shrink-0">
         <div>
           <h3 class="text-base font-bold text-stone-900 flex items-center space-x-2">
             <i data-lucide="scan" class="w-5 h-5 text-sky-700"></i>
-            <span>Escaneo Integral de Toponimia Urbana</span>
+            <span>Nombres de localidades y asentamientos</span>
           </h3>
           <p class="text-xs text-stone-500 mt-0.5">Escanea, revisa y selecciona. Los resultados no se incorporan hasta guardar.</p>
         </div>
@@ -2718,13 +2755,22 @@
 
       <!-- Contenido del Escaneo -->
       <div class="space-y-3.5 text-xs flex-1 overflow-y-auto pr-1">
-        <div class="p-3 bg-sky-50 rounded-xl border border-sky-200 flex justify-between items-center">
-          <div>
-            <span class="font-bold text-sky-950 block">Umbral de Establecimientos DENUE</span>
-            <span class="text-sky-700 text-[11px]">Filtra direcciones DENUE; no mide población ni certifica colonias. OSM no usa este umbral.</span>
+        <div class="p-3 bg-sky-50 rounded-xl border border-sky-200 space-y-3">
+          <p class="text-sky-950">Localidades: nombres y coordenadas oficiales INEGI. Colonias y barrios: polígonos DCAH. La cobertura de colonias puede ser parcial; los nombres sin geometría se reportan y no se ubican por estimación.</p>
+          <div class="flex flex-wrap items-center gap-2">
+            <button type="button" onclick="downloadOfficialToponymy()" class="px-3 py-1.5 bg-white border border-sky-300 rounded-lg">Descargar catálogos INEGI</button>
+            <button type="button" onclick="downloadOfficialToponymy(true)" class="px-3 py-1.5 bg-white border border-sky-300 rounded-lg">Descargar polígonos DCAH</button>
+            <label class="px-3 py-1.5 bg-white border border-sky-300 rounded-lg cursor-pointer">Importar DCAH
+              <input type="file" accept=".zip,.geojson,.json" data-kind="dcah" onchange="importOfficialToponymy(this)" class="hidden">
+            </label>
+            <label class="px-3 py-1.5 bg-white border border-sky-300 rounded-lg cursor-pointer">Importar localidades
+              <input type="file" accept=".csv,.json,.geojson,.zip" data-kind="localities" onchange="importOfficialToponymy(this)" class="hidden">
+            </label>
+            <a href="https://www.inegi.org.mx/programas/dcah/" target="_blank" rel="noopener noreferrer" class="underline text-sky-800">Fuente DCAH</a>
           </div>
-          <div class="flex items-center space-x-2">
-            <input type="number" id="scanMinCount" value="8" min="1" max="1000" aria-label="Mínimo de establecimientos DENUE" class="w-16 text-center font-bold text-stone-900 bg-white border border-stone-300 rounded px-2 py-1">
+          <p class="text-sky-700 text-[11px]">La descarga DCAH usa un paquete nacional de varios cientos de MB y conserva una capa para el área del proyecto. También puedes importar el ZIP original con SHP, DBF, SHX y PRJ, o GeoJSON con NOM_ASEN, TIPO y claves territoriales. Usa una edición por territorio. Archivos: toponymy/sources del proyecto.</p>
+          <div class="flex justify-between items-center gap-2">
+            <label><input id="scanOsmFallback" type="checkbox" onchange="setToponymyOsmFallback(this.checked)"> Complementar candidatos con OSM</label>
             <button onclick="executeCityToponymyScan()" id="btnExecuteScan" class="px-3 py-1.5 bg-sky-700 hover:bg-sky-600 text-white font-bold rounded-lg shadow-xs flex items-center space-x-1">
               <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
               <span>Escanear</span>
@@ -2736,11 +2782,15 @@
         <!-- Indicador de Carga -->
         <div id="scanLoadingIndicator" class="hidden p-8 text-center space-y-2">
           <i data-lucide="loader-2" class="w-8 h-8 text-sky-700 animate-spin mx-auto"></i>
-          <p class="text-stone-600 font-bold">Escaneando OpenStreetMap y microdatos DENUE...</p>
+          <p class="text-stone-600 font-bold">Procesando fuentes de nombres territoriales...</p>
         </div>
 
         <!-- Resultados del Diagnóstico -->
         <div id="scanResultsSection" class="hidden space-y-3">
+          <details class="text-xs border border-stone-200 rounded-lg p-2">
+            <summary class="cursor-pointer font-bold">Diagnóstico de fuentes</summary>
+            <div id="scanSourceDiagnostics" class="mt-2 max-h-48 overflow-y-auto"></div>
+          </details>
           <div class="grid grid-cols-5 gap-1.5 text-center">
             <div class="p-2 bg-stone-50 border border-stone-200 rounded-lg">
               <span class="text-[10px] text-stone-500 font-bold block">TOTAL</span>
@@ -3301,12 +3351,13 @@
           </div>
           <select id="tsScaleFilter" onchange="filterToponymyStudioByScale(this.value)" class="text-xs bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-700 cursor-pointer">
             <option value="all">Todas las escalas</option>
-            <option value="large">👑 Grande (18px)</option>
-            <option value="medium">🏙️ Mediano (13px)</option>
-            <option value="small">🏘️ Chico (10px)</option>
+            <option value="large">👑 Grande</option>
+            <option value="medium">🏙️ Mediano</option>
+            <option value="small">🏘️ Pequeño</option>
             <option value="micro">🚪 Cerradas / Privadas</option>
             <option value="osm">🗺️ Origen OSM</option>
-            <option value="denue">🏪 Origen DENUE</option>
+            <option value="official">INEGI · nombres oficiales</option>
+            <option value="denue">DENUE · nombres anteriores</option>
           </select>
         </div>
 

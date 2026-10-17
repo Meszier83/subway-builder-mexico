@@ -47,3 +47,4 @@ cities/*.yaml
 /reports/
 /plans/
 /test_labels.py
+/.cache/

@@ -224,7 +224,7 @@ def run_cartography(
     if curated_places and os.path.exists(curated_places):
         with open(curated_places, "r", encoding="utf-8") as stream:
             curated_data = json.load(stream)
-        curated_override = bool(curated_data.get("features") or curated_data.get("deleted_places") or curated_data.get("deleted_names"))
+        curated_override = bool(curated_data.get("authoritative") or curated_data.get("features") or curated_data.get("deleted_places") or curated_data.get("deleted_names"))
         curated_mode = curated_data.get("mode", "replace")
         if curated_mode not in ("merge", "replace"):
             raise ValueError("Invalid toponymy mode")
@@ -421,6 +421,8 @@ def run_cartography(
     print(f"-> Inicializando MapGen (Cores: {cores}, RAM asignada: {ram_gb} GB [{ram_mb} MB])...")
 
     prev_cwd = os.getcwd()
+    from .toponymy_tiles import planned_mapgen
+    MapGen = planned_mapgen(MapGen, curated_data if curated_override else None)
     try:
         os.chdir(native_build_dir)
         m = MapGen(
@@ -458,6 +460,7 @@ def run_cartography(
 
     print("-> Compilación completada en ext4. Transfiriendo archivos a destino...")
     expected_files = [
+        'toponymy-layout.json',
         f"{city_code}.pmtiles",
         "buildings_index.bin.gz",
         "roads.geojson",

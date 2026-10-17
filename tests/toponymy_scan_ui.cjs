@@ -5,6 +5,7 @@ const names = ['setToponymyScanStatus','cancelToponymyScan','toponymyNameKey','s
   'runToponymyScan','quickScanAndPopulateToponymy','openScanToponymyDialog','executeCityToponymyScan',
   'placeSourceLabel','prepareScanReview','scanReviewFiltered','scanImportPreview','toggleScanReviewCandidate',
   'selectScanReviewFiltered','loadMoreScanReview','renderScanReview','renderScanResultsUI',
+  'downloadOfficialToponymy','setToponymyOsmFallback','importOfficialToponymy',
   'importScannedPlaces','undoPlacesLastAction','applyZoneThinningSelections','recalculateZoneClusters'];
 const functions = names.map(name=>{
   const match=source.match(new RegExp('    (?:async )?function '+name+'\\(.*?\\n    }','s'));
@@ -27,7 +28,7 @@ function harness(){
   const c={console,AbortController,crypto:require('node:crypto'),currentCityFile:'monterrey.yaml',cityLoadVersion:1,
     cityData:{places:[],deleted_places:[]},document:{getElementById:element,querySelector:()=>({value:mode})},
     Date:{now:()=>now},lucide:{createIcons(){}},setInterval(fn){timers.set(1,fn);return 1;},
-    clearInterval(id){timers.delete(id);},saveCurrentCity:async()=>{saves++;return true;},
+    clearInterval(id){timers.delete(id);},setTimeout:fn=>setImmediate(fn),saveCurrentCity:async()=>{saves++;return true;},
     fetchStartupJson:async()=>{requests++;return {catalog};},showToast(message,type){toasts.push({message,type});},
     updateUndoButtonUI(){},renderPlacesList(){},renderPlacesMarkersOnMap(){},closeScanToponymyDialog(){},
     isMicroPlace:p=>p.is_micro,selectedPlaceIndices:new Set(),triggerAutoSave(){},renderToponymyStudioTable(){},
@@ -35,7 +36,7 @@ function harness(){
     renderZoneClustersUI(){},renderZoneClustersOnMap(){},currentDeckIndex:0,
     escapeHtml:s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;')};
   vm.createContext(c);vm.runInContext(
-    'let toponymyScanController=null, scannedPlacesContext=null, scannedPlacesCatalog=null;'+
+    'let toponymyHistoryState=null;let toponymyScanController=null, scannedPlacesContext=null, scannedPlacesCatalog=null;'+
     'let scanReviewRows=[], scanReviewSelected=new Set(), scanReviewLimit=60, scanImportSaving=false;'+
     'let activeZoneClustersData=null,activeZoneClustersContext=null,zoneCalculationVersion=0;\n'+functions,c);
   return {c,element,toasts,timers,get saves(){return saves;},get requests(){return requests;},setMode(v){mode=v;},
@@ -44,6 +45,31 @@ function harness(){
       'version:cityLoadVersion,snapshot:JSON.stringify(cityData.places)}',c);}};
 }
 (async()=>{
+  {
+    const h=harness();let requests=[];
+    h.c.fetchStartupJson=async url=>{requests.push(url);return requests.length===1 ?
+      {status:'running',job_id:'job',message:'Leyendo DCAH · source.zip'} : {status:'complete',catalog};};
+    await h.c.executeCityToponymyScan();
+    assert.equal(h.c.cityData.toponymy.engine,'official_v1');
+    assert.equal(h.c.cityData.toponymy.osm_fallback,false);
+    assert.match(requests[1],/job=job/);
+    assert.equal(h.c.cityData.places.length,0);
+    await h.c.importScannedPlaces();assert.equal(h.c.cityData.places.length,1);
+    const a={...place,official_code:'1903900010001',feature_kind:'settlement'};
+    assert.equal(h.c.sameToponymyPlace(a,{...a,id:'other',official_code:'1903900010002'}),false);
+    assert.equal(h.c.sameToponymyPlace(a,{...a,id:'city',feature_kind:'locality'}),false);
+  }
+  {
+    const h=harness();let url;
+    h.c.fetchStartupJson=async u=>{url=u;return {status:'complete',files:['dcah'],partial:false};};
+    await h.c.downloadOfficialToponymy(true);assert.match(url,/source=dcah/);
+    assert.equal(h.c.cityData.places.length,0);assert.match(h.element('toponymyScanStatus').textContent,/descargados/);
+  }
+  {
+    const h=harness();await h.c.executeCityToponymyScan();
+    h.c.setToponymyOsmFallback(true);await h.c.importScannedPlaces();
+    assert.equal(h.c.cityData.places.length,0,'policy changes invalidate the review');
+  }
   {
     const h=harness();assert.notEqual(h.c.toponymyNameKey('Peña'),h.c.toponymyNameKey('Pea'));
     assert.equal(h.c.toponymyNameKey('SM 9A'),h.c.toponymyNameKey('Supermanzana 9A'));
@@ -140,6 +166,15 @@ function harness(){
     const saved={...inferred,name:'Escala elegida manualmente'};
     h.c.cityData.places=[saved];await h.c.executeCityToponymyScan();await h.c.importScannedPlaces();
     assert.equal(h.c.cityData.places[0].type,'city','existing manual scale must remain');
+  }
+  {
+    const h=harness(), legacy={...place,id:'legacy',source:'UNKNOWN'};
+    const official=[{...place,id:'one',official_code:'one'},{...place,id:'two',official_code:'two'}];
+    const a=h.c.mergeScannedToponymy([legacy],official), b=h.c.mergeScannedToponymy([legacy],[...official].reverse());
+    assert.equal(a.length,3,'ambiguous official matches cannot enrich one legacy marker');
+    assert.equal(a.find(p=>p.id==='legacy').official_code,undefined);
+    assert.deepEqual(JSON.parse(JSON.stringify(a)).sort((x,y)=>x.id.localeCompare(y.id)),
+      JSON.parse(JSON.stringify(b)).sort((x,y)=>x.id.localeCompare(y.id)));
   }
   {
     const h=harness();h.c.cityData.places=[place,{...place,id:'other'}];h.setZones();

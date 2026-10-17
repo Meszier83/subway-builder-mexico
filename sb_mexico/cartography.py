@@ -247,7 +247,8 @@ def build_city_map_wsl(
     places: Optional[List[Dict]] = None,
     curated_places_geojson: Optional[str] = None,
     deleted_places: Optional[List] = None,
-    toponymy_mode: str = "replace"
+    toponymy_mode: str = "replace",
+    toponymy_pipeline: Optional[Dict] = None
 ) -> Dict[str, str]:
     """
     Ejecuta la compilación cartográfica dentro de WSL Ubuntu vía subprocess con streaming en vivo.
@@ -280,9 +281,10 @@ def build_city_map_wsl(
 
     # Exportar toponimia curada desde el Wizard a GeoJSON para su inyección en WSL
     curated_path = curated_places_geojson
-    if not curated_path and (places is not None or deleted_places):
+    if not curated_path and (places is not None or deleted_places or toponymy_pipeline):
         from sb_mexico.toponymy_delivery import curated_collection
-        collection = curated_collection(places, deleted_places, toponymy_mode)
+        collection = curated_collection(places, deleted_places, toponymy_mode, toponymy_pipeline,
+                                        bbox, urban_core_polygon)
         os.makedirs(output_dir, exist_ok=True)
         curated_path = os.path.join(output_dir, "curated_places.geojson")
         with open(curated_path, "w", encoding="utf-8") as cf:
@@ -302,7 +304,7 @@ def build_city_map_wsl(
         if candidates:
             denue_csv = candidates[0]
 
-    if denue_csv and os.path.exists(denue_csv) and not places:
+    if denue_csv and os.path.exists(denue_csv) and not places and not toponymy_pipeline:
         wsl_cmd.extend(["--denue-csv", to_wsl_path(denue_csv)])
 
     # Exportar urban_core_polygon como GeoJSON para el runner de WSL si está definido
@@ -407,7 +409,8 @@ def build_city_map(
     places: Optional[List[Dict]] = None,
     denue_csv: Optional[str] = None,
     deleted_places: Optional[List] = None,
-    toponymy_mode: str = "replace"
+    toponymy_mode: str = "replace",
+    toponymy_pipeline: Optional[Dict] = None
 ) -> Dict[str, str]:
     """
     Ejecuta el pipeline cartográfico completo de depot.maps.MapGen.
@@ -447,7 +450,8 @@ def build_city_map(
                 places=places,
                 denue_csv=denue_csv,
                 deleted_places=deleted_places,
-                toponymy_mode=toponymy_mode
+                toponymy_mode=toponymy_mode,
+                toponymy_pipeline=toponymy_pipeline
             )
 
         else:
@@ -595,14 +599,18 @@ def build_city_map(
 
     prev_cwd = os.getcwd()
     previous_curated = os.environ.get("SB_CURATED_PLACES_GEOJSON")
-    if places is not None or deleted_places:
+    collection = None
+    if places is not None or deleted_places or toponymy_pipeline:
         from sb_mexico.toponymy_delivery import curated_collection
-        collection = curated_collection(places, deleted_places, toponymy_mode)
+        collection = curated_collection(places, deleted_places, toponymy_mode, toponymy_pipeline,
+                                        bbox, urban_core_polygon)
         curated_path = os.path.join(work_dir, "curated_places.geojson")
         with open(curated_path, "w", encoding="utf-8") as cf:
             json.dump(collection, cf, ensure_ascii=False, indent=2)
         os.environ["SB_CURATED_PLACES_GEOJSON"] = curated_path
+    from .toponymy_tiles import planned_mapgen
     try:
+        MapGen = planned_mapgen(MapGen, collection)
         os.chdir(native_build_dir)
         m = MapGen(
             city=city_code,
@@ -639,6 +647,7 @@ def build_city_map(
     generated_files = {}
 
     expected_files = [
+        'toponymy-layout.json',
         f"{city_code}.pmtiles",
         "buildings_index.bin.gz",
         "roads.geojson",

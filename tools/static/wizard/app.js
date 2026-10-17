@@ -16,6 +16,7 @@
     let poiMarkersGroup = null;
     let placesMarkersGroup = null;
     let nativeOsmMarkersGroup = null;
+    let scanCandidateBoundary = null;
     let isNativeOsmPreviewOn = false;
     let selectedPlaceIndices = new Set();
     let placeFilterText = "";
@@ -36,9 +37,9 @@
     let isolatedZonesDemandGroup = null;
     let selectedIsolatedZoneIndex = -1;
     let isDrawingIsolated = false;
-    let drawStartLatLng = null;
-    let isolatedDrawPhase = 0; // 0: inactivo, 1: esquina 1 fijada esperando esquina 2
-    let isolatedIsDragging = false;
+    let drawTempRect = null;
+    let isolatedPolygonPoints = [];
+    let isolatedPolygonDraft = null;
     let isolatedCornerMarkers = { NW: null, NE: null, SE: null, SW: null };
 
     // Núcleo Urbano (Urban Core AOI LOD)
@@ -1348,7 +1349,7 @@
       let b1 = parseFloat(document.getElementById('cfg_bbox_1').value);
       let b2 = parseFloat(document.getElementById('cfg_bbox_2').value);
       let b3 = parseFloat(document.getElementById('cfg_bbox_3').value);
-      if (isNaN(b0) || isNaN(b1) || isNaN(b2) || isNaN(b3)) return;
+      if (!polygon && (isNaN(b0) || isNaN(b1) || isNaN(b2) || isNaN(b3))) return;
 
       const MIN_SPAN = 0.01;
       let minLon = Math.min(b0, b2);
@@ -1541,164 +1542,102 @@
 
     function setupIsolatedDrawingEvents() {
       if (!mapBbox) return;
-
-      mapBbox.on('mousedown', (e) => {
+      mapBbox.on('click', e => {
         if (!isDrawingIsolated) return;
-        isolatedIsDragging = false;
-        drawStartLatLng = e.latlng;
-
-        if (drawTempRect) mapBbox.removeLayer(drawTempRect);
-        drawTempRect = L.rectangle([drawStartLatLng, drawStartLatLng], {
-          color: '#06B6D4',
-          weight: 2,
-          dashArray: '5, 5',
-          fillColor: '#06B6D4',
-          fillOpacity: 0.25,
-          interactive: false,
-          className: 'drawing-temp-shape'
+        const p = [e.latlng.lng, e.latlng.lat];
+        const last = isolatedPolygonPoints[isolatedPolygonPoints.length - 1];
+        if (last && last[0] === p[0] && last[1] === p[1]) return;
+        isolatedPolygonPoints.push(p);
+        const latlngs = isolatedPolygonPoints.map(p => [p[1], p[0]]);
+        if (!drawTempRect) drawTempRect = L.polygon(latlngs, {
+          color: '#06B6D4', fillOpacity: 0.25, dashArray: '5, 5', interactive: false
         }).addTo(mapBbox);
-
-        window.addEventListener('mousemove', onIsolatedWindowMouseMove);
-        window.addEventListener('mouseup', onIsolatedWindowMouseUp);
+        else drawTempRect.setLatLngs(latlngs);
       });
-
-      function onIsolatedWindowMouseMove(e) {
-        if (!isDrawingIsolated || !drawStartLatLng || !drawTempRect) return;
-        const pt = mapBbox.mouseEventToLatLng(e);
-        if (!pt) return;
-        const distPx = mapBbox.latLngToLayerPoint(drawStartLatLng).distanceTo(mapBbox.latLngToLayerPoint(pt));
-        if (distPx > 8) {
-          isolatedIsDragging = true;
-        }
-        drawTempRect.setBounds([drawStartLatLng, pt]);
-      }
-
-      function onIsolatedWindowMouseUp(e) {
-        window.removeEventListener('mousemove', onIsolatedWindowMouseMove);
-        window.removeEventListener('mouseup', onIsolatedWindowMouseUp);
-
-        if (!isDrawingIsolated || !drawStartLatLng) return;
-        const endLatLng = mapBbox.mouseEventToLatLng(e);
-        if (!endLatLng) return;
-
-        const distPx = mapBbox.latLngToLayerPoint(drawStartLatLng).distanceTo(mapBbox.latLngToLayerPoint(endLatLng));
-
-        if (isolatedIsDragging && distPx > 12) {
-          // Completar trazado por arrastre continuo
-          finishIsolatedZoneDrawing(drawStartLatLng, endLatLng);
-        } else {
-          // Trazado de 2 clics: si no teníamos esquina 1, fijarla; si ya estaba, completar
-          if (isolatedDrawPhase === 0) {
-            isolatedDrawPhase = 1;
-            const bannerText = document.getElementById('drawingIsolatedBannerText');
-            if (bannerText) bannerText.innerText = "📍 Esquina 1 fijada. Haz clic en la esquina opuesta para completar.";
-            showToast("Esquina 1 fijada. Mueve el cursor y haz clic para la esquina opuesta.", "info");
-          } else {
-            finishIsolatedZoneDrawing(drawStartLatLng, endLatLng);
-          }
-        }
-      }
-
-      mapBbox.on('mousemove', (e) => {
+      mapBbox.on('dblclick', e => {
         if (!isDrawingIsolated) return;
-        if (isolatedDrawPhase === 1 && drawStartLatLng && drawTempRect && !isolatedIsDragging) {
-          drawTempRect.setBounds([drawStartLatLng, e.latlng]);
-        }
+        L.DomEvent.stop(e); finishIsolatedPolygonDrawing();
       });
-
-      mapBbox.on('click', (e) => {
+      window.addEventListener('keydown', e => {
         if (!isDrawingIsolated) return;
-        if (isolatedDrawPhase === 1 && drawStartLatLng) {
-          const distPx = mapBbox.latLngToLayerPoint(drawStartLatLng).distanceTo(mapBbox.latLngToLayerPoint(e.latlng));
-          if (distPx > 8) {
-            finishIsolatedZoneDrawing(drawStartLatLng, e.latlng);
-          }
-        }
-      });
-
-      window.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && isDrawingIsolated) {
-          cancelDrawingIsolatedZone();
+        if (e.key === 'Escape') cancelDrawingIsolatedZone();
+        if (e.key === 'Enter') finishIsolatedPolygonDrawing();
+        if (e.key === 'Backspace') {
+          e.preventDefault(); isolatedPolygonPoints.pop();
+          if (drawTempRect) drawTempRect.setLatLngs(isolatedPolygonPoints.map(p => [p[1], p[0]]));
         }
       });
     }
 
-    function finishIsolatedZoneDrawing(startLatLng, endLatLng) {
-      const minLon = Math.min(startLatLng.lng, endLatLng.lng);
-      const minLat = Math.min(startLatLng.lat, endLatLng.lat);
-      const maxLon = Math.max(startLatLng.lng, endLatLng.lng);
-      const maxLat = Math.max(startLatLng.lat, endLatLng.lat);
-
-      if (drawTempRect && mapBbox) {
-        mapBbox.removeLayer(drawTempRect);
-        drawTempRect = null;
+    function validIsolatedPolygon(points) {
+      const ring = points.slice();
+      if (ring.length > 1 && ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1]) ring.pop();
+      if (ring.length < 3 || ring.some(p => !Array.isArray(p) || p.length !== 2 || !p.every(Number.isFinite) || Math.abs(p[0]) > 180 || Math.abs(p[1]) > 90)) return false;
+      const cross = (a, b, c) => (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
+      const on = (a,b,c) => Math.abs(cross(a,b,c)) < 1e-12 && c[0] >= Math.min(a[0],b[0]) && c[0] <= Math.max(a[0],b[0]) && c[1] >= Math.min(a[1],b[1]) && c[1] <= Math.max(a[1],b[1]);
+      let area = 0;
+      for (let i = 0; i < ring.length; i++) {
+        const a=ring[i], b=ring[(i+1)%ring.length];
+        if (a[0] === b[0] && a[1] === b[1]) return false;
+        area += a[0]*b[1]-b[0]*a[1];
+        for (let j=i+1;j<ring.length;j++) {
+          if (j === i+1 || (i === 0 && j === ring.length-1)) continue;
+          const c=ring[j], d=ring[(j+1)%ring.length];
+          if (on(a,b,c) || on(a,b,d) || on(c,d,a) || on(c,d,b) ||
+            (cross(a,b,c)*cross(a,b,d)<0 && cross(c,d,a)*cross(c,d,b)<0)) return false;
+        }
       }
-      cancelDrawingIsolatedZone();
+      return Math.abs(area) > 1e-12;
+    }
 
-      // Evitar áreas microscópicas accidentales
-      if (maxLon - minLon < 0.001 || maxLat - minLat < 0.001) {
-        showToast("Área trazada muy pequeña o inválida", "warning");
-        return;
+    function finishIsolatedPolygonDrawing() {
+      if (!validIsolatedPolygon(isolatedPolygonPoints)) {
+        showToast('Se requieren al menos 3 vértices y un contorno sin cruces.', 'warning'); return;
       }
-
-      openIsolatedZoneModal(-1, [
-        parseFloat(minLon.toFixed(4)),
-        parseFloat(minLat.toFixed(4)),
-        parseFloat(maxLon.toFixed(4)),
-        parseFloat(maxLat.toFixed(4))
-      ]);
+      const polygon = isolatedPolygonPoints.map(p => [...p]);
+      polygon.push([...polygon[0]]);
+      cancelDrawingIsolatedZone(); openIsolatedZoneModal(-1, null, polygon);
     }
 
     function startDrawingIsolatedZone() {
-      if (!currentCityFile) {
-        showToast("Selecciona o crea un proyecto primero", "warning");
-        return;
+      if (!currentCityFile || !mapBbox) {
+        showToast('Selecciona un proyecto con mapa primero', 'warning'); return;
       }
+      cancelDrawingIsolatedZone();
+      if (isDrawingUrbanCore) cancelDrawingUrbanCore();
+      if (isDrawingExclusion) cancelDrawingExclusionZone();
       isDrawingIsolated = true;
-      isolatedDrawPhase = 0;
-      isolatedIsDragging = false;
-      drawStartLatLng = null;
-
-      if (drawTempRect && mapBbox) {
-        mapBbox.removeLayer(drawTempRect);
-        drawTempRect = null;
-      }
-
-      if (mapBbox) {
-        mapBbox.dragging.disable();
-        mapBbox.getContainer().style.cursor = 'crosshair';
-        setMapBboxDrawingInteractivity(true);
-      }
-      const banner = document.getElementById('drawingIsolatedBanner');
-      if (banner) {
-        const bannerText = document.getElementById('drawingIsolatedBannerText');
-        if (bannerText) bannerText.innerText = "Arrastra un cuadro o haz 2 clics para encuadrar la isla";
-        banner.classList.remove('hidden');
-      }
-      lucide.createIcons();
-      showToast("Modo trazado activo: Arrastra un cuadro o haz 2 clics para definir las esquinas", "info");
+      mapBbox.doubleClickZoom.disable();
+      mapBbox.getContainer().style.cursor = 'crosshair';
+      setMapBboxDrawingInteractivity(true);
+      document.getElementById('drawingIsolatedBanner').classList.remove('hidden');
+      showToast('Marca vértices. Enter o doble clic cierra; Retroceso deshace; Esc cancela.', 'info');
     }
 
     function cancelDrawingIsolatedZone() {
-      isDrawingIsolated = false;
-      isolatedDrawPhase = 0;
-      isolatedIsDragging = false;
-      drawStartLatLng = null;
-      if (drawTempRect && mapBbox) {
-        mapBbox.removeLayer(drawTempRect);
-        drawTempRect = null;
-      }
+      isDrawingIsolated = false; isolatedPolygonPoints = [];
+      if (drawTempRect && mapBbox) mapBbox.removeLayer(drawTempRect);
+      drawTempRect = null;
       if (mapBbox) {
-        mapBbox.dragging.enable();
-        mapBbox.getContainer().style.cursor = '';
-        setMapBboxDrawingInteractivity(false);
+        mapBbox.doubleClickZoom.enable(); mapBbox.dragging.enable();
+        mapBbox.getContainer().style.cursor = ''; setMapBboxDrawingInteractivity(false);
       }
       const banner = document.getElementById('drawingIsolatedBanner');
       if (banner) banner.classList.add('hidden');
     }
 
-    function openIsolatedZoneModal(index = -1, bboxCoords = null) {
+    function isolatedZoneBounds(z) {
+      if (!z.polygon) return z.bbox;
+      return [Math.min(...z.polygon.map(p => p[0])), Math.min(...z.polygon.map(p => p[1])),
+        Math.max(...z.polygon.map(p => p[0])), Math.max(...z.polygon.map(p => p[1]))];
+    }
+
+    function openIsolatedZoneModal(index = -1, bboxCoords = null, polygon = null) {
       document.getElementById('iso_edit_index').value = index;
+      isolatedPolygonDraft = polygon || (index >= 0 ? cityData.isolated_zones[index]?.polygon : null);
+      document.getElementById('iso_polygon').value = isolatedPolygonDraft ? JSON.stringify(isolatedPolygonDraft) : '';
+      document.getElementById('isoPolygonFields').classList.toggle('hidden', !isolatedPolygonDraft);
+      document.getElementById('isoBboxFields').classList.toggle('hidden', !!isolatedPolygonDraft);
       const titleEl = document.getElementById('modalIsolatedTitle');
 
       if (!cityData.isolated_zones) cityData.isolated_zones = [];
@@ -1708,7 +1647,7 @@
         if (titleEl) titleEl.innerHTML = `<i data-lucide="shield-alert" class="w-5 h-5 text-cyan-600"></i><span>Editar Zona Aislada</span>`;
         document.getElementById('iso_name').value = z.name || "";
         document.getElementById('iso_id').value = z.id || "";
-        const b = z.bbox || [-86.76, 21.20, -86.68, 21.28];
+        const b = isolatedZoneBounds(z) || [-86.76, 21.20, -86.68, 21.28];
         document.getElementById('iso_bbox_0').value = b[0];
         document.getElementById('iso_bbox_1').value = b[1];
         document.getElementById('iso_bbox_2').value = b[2];
@@ -1777,6 +1716,17 @@
       }
       if (!id) id = "zona_" + Date.now();
 
+      let polygon = null;
+      if (isolatedPolygonDraft) {
+        try {
+          polygon = JSON.parse(document.getElementById('iso_polygon').value);
+          if (!Array.isArray(polygon) || polygon.length < 3 || polygon.some(p =>
+            !Array.isArray(p) || p.length !== 2 || !p.every(Number.isFinite) || Math.abs(p[0]) > 180 || Math.abs(p[1]) > 90)) throw Error();
+          if (!validIsolatedPolygon(polygon)) throw Error();
+          const first = polygon[0], last = polygon[polygon.length - 1];
+          if (first[0] !== last[0] || first[1] !== last[1]) polygon.push([...first]);
+        } catch (_) { showToast('Polígono inválido: usa al menos 3 pares [lon, lat].', 'error'); return; }
+      }
       const b0 = parseFloat(document.getElementById('iso_bbox_0').value);
       const b1 = parseFloat(document.getElementById('iso_bbox_1').value);
       const b2 = parseFloat(document.getElementById('iso_bbox_2').value);
@@ -1786,7 +1736,7 @@
         showToast("Las 4 coordenadas BBOX deben ser numéricas", "error");
         return;
       }
-      if (b0 >= b2 || b1 >= b3) {
+      if (!polygon && (b0 >= b2 || b1 >= b3)) {
         showToast("Coordenadas BBOX inválidas: Min Lon/Lat debe ser menor a Max Lon/Lat", "error");
         return;
       }
@@ -1799,12 +1749,15 @@
       ];
 
       if (!cityData.isolated_zones) cityData.isolated_zones = [];
+      const geometry = polygon ? { polygon } : { bbox: normalizedBbox };
+      const enabled = editIdx >= 0 && cityData.isolated_zones[editIdx]?.enabled !== undefined
+        ? { enabled: cityData.isolated_zones[editIdx].enabled } : {};
 
       if (editIdx >= 0 && editIdx < cityData.isolated_zones.length) {
-        cityData.isolated_zones[editIdx] = { id, name, bbox: normalizedBbox };
+        cityData.isolated_zones[editIdx] = { id, name, ...geometry, ...enabled };
         selectedIsolatedZoneIndex = editIdx;
       } else {
-        cityData.isolated_zones.push({ id, name, bbox: normalizedBbox });
+        cityData.isolated_zones.push({ id, name, ...geometry, ...enabled });
         selectedIsolatedZoneIndex = cityData.isolated_zones.length - 1;
       }
 
@@ -1833,7 +1786,7 @@
     function fitMapToIsolatedZone(index) {
       if (!cityData.isolated_zones || index < 0 || index >= cityData.isolated_zones.length) return;
       const z = cityData.isolated_zones[index];
-      const b = z.bbox;
+      const b = isolatedZoneBounds(z);
       if (mapBbox && b && b.length === 4) {
         mapBbox.fitBounds([[b[1], b[0]], [b[3], b[2]]], { padding: [50, 50] });
       }
@@ -1876,7 +1829,7 @@
             : 'bg-metro-panel border-metro-border hover:border-cyan-500/40'
         }`;
 
-        const b = z.bbox || [0, 0, 0, 0];
+        const b = isolatedZoneBounds(z) || [0, 0, 0, 0];
         const bboxFmt = `[${b[0].toFixed(2)}, ${b[1].toFixed(2)}, ${b[2].toFixed(2)}, ${b[3].toFixed(2)}]`;
 
         card.innerHTML = `
@@ -1919,7 +1872,32 @@
       const zones = cityData.isolated_zones || [];
 
       zones.forEach((z, idx) => {
-        const b = z.bbox;
+        if (z.polygon) {
+          const shape = L.polygon(z.polygon.map(p => [p[1], p[0]]), {
+            color: '#06B6D4', weight: idx === selectedIsolatedZoneIndex ? 3 : 2, fillOpacity: 0.2
+          }).addTo(isolatedZonesGroup);
+          shape.bindTooltip(escapeHtml(z.name || z.id));
+          shape.on('click', e => {
+            if (isDrawingIsolated || isDrawingUrbanCore || isDrawingExclusion) return;
+            L.DomEvent.stopPropagation(e); selectIsolatedZone(idx);
+          });
+          const closed = z.polygon[0][0] === z.polygon[z.polygon.length-1][0] && z.polygon[0][1] === z.polygon[z.polygon.length-1][1];
+          if (idx === selectedIsolatedZoneIndex) (closed ? z.polygon.slice(0, -1) : z.polygon).forEach((p, vertex) => {
+            const before = z.polygon.map(p => [...p]);
+            const marker = L.marker([p[1], p[0]], { draggable: true, icon: createIsolatedCornerIcon(String(vertex + 1)) }).addTo(isolatedHandlesGroup);
+            marker.on('drag', () => {
+              const pos = marker.getLatLng(); z.polygon[vertex] = [pos.lng, pos.lat];
+              if (closed) z.polygon[z.polygon.length - 1] = [...z.polygon[0]];
+              shape.setLatLngs(z.polygon.map(p => [p[1], p[0]]));
+            });
+            marker.on('dragend', () => {
+              if (!validIsolatedPolygon(z.polygon)) { z.polygon = before; showToast('El movimiento cruza el contorno; se conserva el polígono anterior.', 'warning'); }
+              renderIsolatedZones(); triggerAutoSave();
+            });
+          });
+          return;
+        }
+        const b = isolatedZoneBounds(z);
         if (!b || b.length !== 4) return;
         const bounds = [[b[1], b[0]], [b[3], b[2]]];
         const isSelected = (idx === selectedIsolatedZoneIndex);
@@ -2094,16 +2072,18 @@
 
       const zones = cityData.isolated_zones || [];
       zones.forEach(z => {
-        const b = z.bbox;
+        const b = isolatedZoneBounds(z);
         if (!b || b.length !== 4) return;
         const bounds = [[b[1], b[0]], [b[3], b[2]]];
-        L.rectangle(bounds, {
+        (z.polygon ? L.polygon(z.polygon.map(p => [p[1], p[0]]), {
+          color: '#06B6D4', weight: 2, fillOpacity: 0.15
+        }) : L.rectangle(bounds, {
           color: '#06B6D4',
           weight: 2,
           fillColor: '#06B6D4',
           fillOpacity: 0.15,
           dashArray: '6, 4'
-        }).bindTooltip(`<strong>🏝️ ${escapeHtml(z.name || z.id)}</strong><br><span class="text-[10px] text-stone-500">Zona Aislada</span>`, { sticky: true }).addTo(isolatedZonesDemandGroup);
+        })).bindTooltip(`<strong>🏝️ ${escapeHtml(z.name || z.id)}</strong><br><span class="text-[10px] text-stone-500">Zona Aislada</span>`, { sticky: true }).addTo(isolatedZonesDemandGroup);
       });
     }
 
@@ -3988,6 +3968,9 @@
     }
 
     function resetProjectSession() {
+      window.demandV2SensitivityMetadata = null;
+      if (scanCandidateBoundary && mapPoi) mapPoi.removeLayer(scanCandidateBoundary);
+      scanCandidateBoundary = null;
       activeZoneClustersData = null;
       activeZoneClustersContext = null;
       zoneCalculationVersion++;
@@ -4082,7 +4065,9 @@
       if (showPreviewChk) showPreviewChk.checked = true;
       selectedIsolatedZoneIndex = -1;
       selectedExclusionIndex = -1;
-      isDrawingIsolated = false;
+      cancelDrawingIsolatedZone();
+      isolatedPolygonDraft = null;
+      closeIsolatedZoneModal();
       isDrawingExclusion = false;
       cancelDrawingExclusionZone();
       hideDraftBanner();
@@ -4435,16 +4420,21 @@
       const label = document.getElementById('demandV2Summary');
       syncStateFromInputs();
       const state = JSON.stringify(cityData);
-      label.textContent = 'Evaluando candidato…';
+      window.demandV2SensitivityMetadata = null;
+      label.textContent = 'Preparando fuentes y puntos para comprobar sensibilidad…';
+      const previewStartedAt = Date.now();
       try {
         if (!await saveCurrentCity(true)) throw new Error('No se pudo guardar la configuración para comparar.');
         if (file !== currentCityFile || state !== JSON.stringify(cityData)) return;
-        const previewUrl = `/api/demand-v2-preview?file=${encodeURIComponent(file)}&stage=allocation&async=1`;
+        const previewUrl = `/api/demand-v2-preview?file=${encodeURIComponent(file)}&stage=sensitivity&async=1`;
         let response = await fetch(previewUrl);
         let result = await response.json();
         while (response.ok && result.status === 'running') {
           if (file !== currentCityFile || state !== JSON.stringify(cityData)) return;
-          label.textContent = 'Evaluando fuentes y demanda del candidato…';
+          const elapsed = Math.floor((Date.now() - previewStartedAt) / 1000);
+          label.textContent = `${result.message || 'Evaluando fuentes y demanda del candidato…'} · ${Math.floor(elapsed / 60)} min ${elapsed % 60} s`;
+          const progressSummary = document.getElementById('v2BetaSummary');
+          if (progressSummary) progressSummary.textContent = label.textContent;
           await new Promise(resolve => setTimeout(resolve, 2000));
           if (file !== currentCityFile || state !== JSON.stringify(cityData)) return;
           response = await fetch(`${previewUrl}&job=${encodeURIComponent(result.job_id)}`);
@@ -4453,19 +4443,43 @@
         if (file !== currentCityFile || state !== JSON.stringify(cityData)) return;
         if (!response.ok) throw new Error(result.error || result.message || 'No se pudo evaluar el candidato.');
         if (result.status === 'error') throw new Error(result.error || 'No se pudo evaluar el candidato.');
-        const territory = result.report.territory;
-        const allocation = result.report.allocation;
-        window.demandV2CohortMetadata = {file,state,commuters:territory.integer_commuters,report:allocation.cohorts};
-        updateCohortTelemetry();
-        const score = value => Number.isFinite(value?.conditional_kl) ? value.conditional_kl.toFixed(4) : 'sin observaciones comparables';
-        const quotas = allocation.poi_quotas || [];
-        const shortfall = quotas.reduce((sum, quota) => sum + (quota.shortfall || 0), 0);
-        const coverage = result.report.workplaces?.coverage?.bbox;
-        const employment = coverage ? `\nEmpleo dentro de la caja, antes de recortes y POIs: ${(100 * coverage.attraction_share).toFixed(2)}% del peso con transferencia histórica CE; el resto conserva estimaciones DENUE.` : '';
-        label.textContent = `Candidato ${result.report.target_year ?? cityData.demand?.target_year ?? 2025} · ${result.points.length} puntos · ${territory.integer_commuters.toLocaleString()} viajeros · ${allocation.cohorts?.actual_count ?? 0} cohortes\nBeta: ${allocation.beta} (${allocation.beta_basis})\nError de proporciones municipales (menor es mejor): continuo ${score(allocation.validation)} · enteros ${score(allocation.validation_integer)}\nPOIs: ${quotas.length} cuotas después de captura DENUE; faltan ${shortfall.toLocaleString()} viajeros.${employment}\nMotor activo: ${cityData.demand?.engine || 'actual'}.`;
+        const sensitivity = result.report.sensitivity;
+        window.demandV2SensitivityMetadata = {file,state,report:sensitivity};
+        updateDemandEngineControls();
+        label.textContent = formatDemandSensitivity(sensitivity);
       } catch (error) {
-        if (file === currentCityFile) label.textContent = `Candidato pendiente: ${error.message}`;
+        if (file === currentCityFile && state === JSON.stringify(cityData)) {
+          label.textContent = `Comprobación inconclusa: ${error.message}`;
+          const summary = document.getElementById('v2BetaSummary');
+          if (summary) summary.textContent = label.textContent;
+        }
       }
+    }
+
+    function formatDemandSensitivity(report) {
+      const labels = {low_variation:'Poca variación estimada', sensitive:'Variación importante', inconclusive:'Comprobación inconclusa'};
+      const reasons = {timeout:'Se alcanzó el límite de cálculo; se descartaron comparaciones parciales.',
+        incomplete_coverage:'La muestra no representa todos los municipios residenciales.',
+        invalid_support:'Un origen no tiene destinos permitidos.', no_origins:'No hay viajeros retenidos.'};
+      const seconds = value => Number.isFinite(value) ? `${value.toFixed(2)} s` : '—';
+      const lines = [labels[report.status] || labels.inconclusive];
+      if (Number.isFinite(report.commuters)) lines.push(`${report.commuters.toLocaleString()} viajeros retenidos · ${report.demand_point_count ?? '—'} puntos preparados`);
+      if (report.reason) lines.push(reasons[report.reason] || report.reason);
+      for (const row of report.summaries || []) {
+        lines.push(`β ${row.beta.toFixed(3)}: mediana ${row.median_km.toFixed(2)} km · P90 ${row.p90_km.toFixed(2)} km · viajes >20 km ${(100*row.over_20_km_share).toFixed(1)}%`);
+      }
+      for (const row of report.comparisons || []) {
+        lines.push(`Cambio frente a 0,120 (β ${row.beta.toFixed(3)}): mediana ${(100*row.relative_distance_changes.median_km).toFixed(1)}% · P90 ${(100*row.relative_distance_changes.p90_km).toFixed(1)}% · >20 km ${(100*row.over_20_km_share_change).toFixed(1)} puntos porcentuales · destinos ${(100*row.destination_total_variation).toFixed(1)}% de variación total`);
+      }
+      if (report.coverage) {
+        lines.push(`Muestra: ${report.sample_size} sorteos · ${report.coverage.sampled_origins}/${report.coverage.origin_count} orígenes distintos (${(100*report.coverage.residential_mass_share).toFixed(1)}% del peso residencial) · municipios omitidos: ${report.coverage.omitted_municipalities.join(', ') || 'ninguno'}`);
+      }
+      lines.push(`Preparación de fuentes y puntos: ${seconds(report.source_preparation_seconds)} · ${report.cache_hit ? 'recuperación de caché' : 'comparación'}: ${seconds(report.comparison_seconds)}`);
+      if (Number.isFinite(report.source_verification_seconds)) lines.push(`Verificación final de fuentes: ${seconds(report.source_verification_seconds)}`);
+      if (report.cache_hit) lines.push(`Comparación original: ${seconds(report.original_comparison_seconds)}`);
+      lines.push('Preferencias aproximadas; sin balance final de empleo ni reservas finales de POIs. No certifica demanda ni jugabilidad y no cambia β.');
+      lines.push('Poca variación en esta aproximación no garantiza viajes finales idénticos.');
+      return lines.join('\n');
     }
 
     function selectedDemandEngine() {
@@ -4475,7 +4489,38 @@
 
     function updateDemandEngineControls(sources) {
       const active = selectedDemandEngine() === 'v2';
-      for (const id of ['cfg_residential_placement', 'cfg_residential_employment', 'cfg_workplace_employment', 'cfg_demographic_reference', 'conapoYearSelect', 'btnAutoConapo', 'btnConapoYears', 'btnReplaceConapo']) {
+      for (const id of ['legacyMacroHeader', 'legacyMacroRates', 'legacyConapoPanel', 'legacyModalPanel']) {
+        const panel = document.getElementById(id);
+        if (panel) panel.classList[active ? 'add' : 'remove']('hidden');
+      }
+      const panel = document.getElementById('v2DemandPanel');
+      if (panel) panel.classList[active ? 'remove' : 'add']('hidden');
+      const betaInput = document.getElementById('cfg_demand_beta');
+      if (betaInput) betaInput.value = cityData.demand?.beta ?? '';
+      const betaSelection = document.getElementById('cfg_demand_beta_selection');
+      if (betaSelection) betaSelection.value = cityData.demand?.beta_selection || 'reference';
+      const summary = document.getElementById('v2BetaSummary');
+      if (summary) {
+        const metadata = window.demandV2CohortMetadata;
+        const allocation = metadata?.file === currentCityFile && metadata.state === JSON.stringify(cityData) ? metadata.allocation : null;
+        const policy = allocation?.beta_policy;
+        const reasons = {stable_guard_improvement:'Mejora confirmada con registros separados',
+          insufficient_evidence:'Evidencia insuficiente; se conserva la referencia',
+          municipal_flows_uninformative:'Los flujos municipales no permiten distinguir la fricción',
+          no_stable_improvement:'Sin mejora estable frente a la referencia',
+          candidate_solver_failures:'Alternativas sin solución; se conserva la referencia',
+          explicit_parameter:'Ajuste manual avanzado', reference_requested:'Referencia seleccionada; sin calibración automática'};
+        const distances = allocation?.distance_summary;
+        summary.textContent = policy
+          ? `Fricción utilizada: ${Number(allocation.beta).toFixed(3)} · ${policy.mode === 'manual' ? 'Manual' : policy.mode === 'reference' ? 'Referencia' : allocation.beta_calibrated ? 'Ajustada con EIC' : 'Respaldo estándar'}\n${reasons[policy.reason] || policy.reason}\nDistancia geométrica: mediana ${Number.isFinite(distances?.median_km) ? distances.median_km.toFixed(2) : '—'} km · percentil 90 ${Number.isFinite(distances?.p90_km) ? distances.p90_km.toFixed(2) : '—'} km`
+          : cityData.demand?.beta != null ? `Manual: ${Number(cityData.demand.beta).toFixed(3)}. Pendiente de comprobación.` : cityData.demand?.beta_selection === 'automatic' ? 'Calibración automática al compilar. Pendiente de comprobación; referencia 0,120.' : 'Referencia 0,120 al compilar. Pendiente de comprobación.';
+        const diagnostic = window.demandV2SensitivityMetadata;
+        const valid = diagnostic?.file === currentCityFile && diagnostic.state === JSON.stringify(cityData);
+        if (valid) summary.textContent = formatDemandSensitivity(diagnostic.report);
+        const detail = document.getElementById('demandV2Summary');
+        if (detail && !valid) detail.textContent = 'Pendiente de comprobación de sensibilidad.';
+      }
+      for (const id of ['cfg_residential_placement', 'cfg_residential_employment', 'cfg_workplace_employment', 'cfg_demographic_reference', 'conapoYearSelect', 'btnAutoConapo', 'btnConapoYears', 'btnReplaceConapo', 'cfg_tasa_pea', 'cfg_til_1', 'cfg_gravity_beta', 'btnResetMacro']) {
         const control = document.getElementById(id);
         if (control) control.disabled = active;
       }
@@ -4490,6 +4535,22 @@
           ? ` Faltan fuentes utilizables: ${missing.map(key => labels[key]).join(', ')}. Ve a Fuentes y usa Preparar descargas.`
           : ' Fuentes necesarias vinculadas; los datos se validarán al compilar.';
       }
+    }
+
+    function onDemandBetaChanged(input) {
+      if (!input.checkValidity()) { input.reportValidity(); return; }
+      cityData.demand ||= {};
+      if (input.value.trim() === '') delete cityData.demand.beta;
+      else cityData.demand.beta = Number(input.value);
+      updateDemandEngineControls();
+      triggerAutoSave();
+    }
+
+    function onDemandBetaSelectionChanged(input) {
+      cityData.demand ||= {};
+      cityData.demand.beta_selection = input.value;
+      updateDemandEngineControls();
+      triggerAutoSave();
     }
 
     function syncDemandEngineFields() {
@@ -4768,6 +4829,7 @@
       if (isEditorTabOpen && activeEditingPoiIndex >= 0) {
         syncActivePoiFromEditor(false);
       }
+      if (typeof window !== 'undefined' && (window.demandV2CohortMetadata || window.demandV2SensitivityMetadata)) updateDemandEngineControls();
     }
 
     function triggerAutoSave() {
@@ -5064,8 +5126,20 @@
       try {
         syncStateFromInputs();
         const file = currentCityFile;
-        const body = JSON.stringify({ file, ...cityData });
+        const dataReference = cityData;
+        const snapshot = JSON.parse(JSON.stringify(cityData));
+        const labelEpoch = typeof toponymyCommitEpoch === 'undefined' ? 0 : toponymyCommitEpoch;
+        let body;
         const pending = citySaveChain.then(async () => {
+          // Preserve the save's original configuration snapshot. Only refresh
+          // fields published by a preceding automatic-label transaction.
+          if (typeof toponymyCommitEpoch !== 'undefined' && labelEpoch!==toponymyCommitEpoch) {
+            for (const key of ['places','deleted_places','toponymy','toponymy_mode']) {
+              if (dataReference[key]===undefined) delete snapshot[key];
+              else snapshot[key]=JSON.parse(JSON.stringify(dataReference[key]));
+            }
+          }
+          body = JSON.stringify({file, ...snapshot});
           const res = await fetch('/api/city/save', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
             signal: AbortSignal.timeout(30000)
@@ -7467,6 +7541,264 @@
     let tsScaleFilterVal = 'all';
     let placesRenderLimit = 80;
     const PLACES_CHUNK_SIZE = 60;
+    let automaticLabelPlan = null, automaticLabelSignature = '', automaticLabelRequest = 0;
+    let automaticLabelTimer = null, automaticLabelAttempt = '', toponymyCatalogView = false;
+    let topPreparationController = null, toponymyHistoryState = null;
+    let toponymyCommitEpoch = 0;
+    let automaticExceptionLimit = 60;
+    let duplicateReviewContext = null, duplicateScanVersion = 0, homogenizeContext = null, homogenizeVersion = 0;
+
+    function automaticLabelsEnabled() {
+      return cityData.toponymy?.layout?.engine === 'label_v1';
+    }
+
+    function labelInputsSignature() {
+      return JSON.stringify([currentCityFile, cityLoadVersion, cityData.city?.bbox,
+        cityData.city?.urban_core_polygon, cityData.places || [], cityData.deleted_places || [], cityData.toponymy]);
+    }
+
+    function toponymyOperationContext() {
+      return {file:currentCityFile, version:cityLoadVersion, snapshot:JSON.stringify(cityData)};
+    }
+
+    function currentToponymyOperation(context) {
+      return !!context && context.file === currentCityFile && context.version === cityLoadVersion &&
+        context.snapshot === JSON.stringify(cityData);
+    }
+
+    function topFieldsSnapshot() {
+      return JSON.parse(JSON.stringify(Object.fromEntries(['places','deleted_places','toponymy','toponymy_mode']
+        .filter(key=>cityData[key] !== undefined).map(key=>[key,cityData[key]]))));
+    }
+
+    function restoreTopFields(fields) {
+      for (const key of ['places','deleted_places','toponymy','toponymy_mode']) {
+        if (fields[key] === undefined) delete cityData[key];
+        else cityData[key] = JSON.parse(JSON.stringify(fields[key]));
+      }
+      automaticLabelPlan = null;
+      automaticLabelAttempt = '';
+    }
+
+    async function commitToponymyChange(places, removed = []) {
+      const context = toponymyOperationContext(), before = topFieldsSnapshot();
+      const oldHistory = placesHistorySnapshot, oldTopHistory = toponymyHistoryState;
+      cityData.places = places;
+      cityData.deleted_places = [...(cityData.deleted_places || []), ...removed];
+      const appliedSnapshot = JSON.stringify(cityData);
+      try {
+        if (!await saveCurrentCity(true)) throw new Error('No se guardaron los cambios de toponimia.');
+        if (context.file !== currentCityFile || context.version !== cityLoadVersion) return false;
+        placesHistorySnapshot = before.places || [];
+        toponymyHistoryState = {file:context.file,version:context.version,fields:before,
+          places:JSON.stringify(placesHistorySnapshot)};
+        selectedPlaceIndices.clear();
+        updateUndoButtonUI(); renderPlacesList(); renderPlacesMarkersOnMap();
+        return true;
+      } catch (error) {
+        if (context.file === currentCityFile && context.version === cityLoadVersion) {
+          if (JSON.stringify(cityData) === appliedSnapshot) restoreTopFields(before);
+          placesHistorySnapshot = oldHistory; toponymyHistoryState = oldTopHistory;
+          renderPlacesList(); renderPlacesMarkersOnMap();
+          showToast(error.message, 'error');
+        }
+        return false;
+      }
+    }
+
+    function cancelAutomaticToponymy() {
+      topPreparationController?.abort();
+      topPreparationController = null;
+      const cancel = document.getElementById('btnCancelPrepareLabels');
+      if (cancel) cancel.hidden = true;
+      const button = document.getElementById('btnPrepareLabels');
+      if (button) { button.disabled=false; button.setAttribute('aria-busy','false'); }
+    }
+
+    async function prepareAutomaticToponymy() {
+      if (!currentCityFile || topPreparationController) return;
+      cancelToponymyScan();
+      const file=currentCityFile, version=cityLoadVersion, controller=new AbortController();
+      topPreparationController=controller;
+      const button=document.getElementById('btnPrepareLabels'), cancel=document.getElementById('btnCancelPrepareLabels');
+      if (button) { button.disabled=true; button.setAttribute('aria-busy','true'); }
+      if (cancel) cancel.hidden=false;
+      let context=null, phase='Guardando configuración';
+      const started=Date.now(), active=()=>topPreparationController===controller && !controller.signal.aborted &&
+        file===currentCityFile && version===cityLoadVersion && (!context || currentToponymyOperation(context));
+      const progress=()=>{ if (active()) setToponymyScanStatus(phase+' · '+Math.floor((Date.now()-started)/1000)+' s', 'running'); };
+      const timer=setInterval(progress,1000);
+      try {
+        if (!await saveCurrentCity(true)) throw new Error('No se pudo guardar antes de preparar las etiquetas.');
+        if (!active()) return;
+        context=toponymyOperationContext();
+        const endpoint='/api/toponymy/prepare?file='+encodeURIComponent(file);
+        phase='Comprobando fuentes y preparando etiquetas'; progress();
+        let data=await fetchStartupJson(endpoint,'Preparación de etiquetas',controller.signal);
+        while (active() && data.status==='running') {
+          phase=data.message || phase; progress();
+          await new Promise(resolve=>setTimeout(resolve,750));
+          if (!active()) return;
+          data=await fetchStartupJson(endpoint+'&job='+encodeURIComponent(data.job_id),'Preparación de etiquetas',controller.signal);
+        }
+        if (!active()) return;
+        if (data.status!=='complete') throw new Error(data.error || data.message || 'No se pudieron preparar las etiquetas.');
+        phase='Guardando etiquetas preparadas'; progress();
+        // Serialize this commit with autosaves already queued in this browser.
+        if (autoSaveTimer) { clearTimeout(autoSaveTimer); autoSaveTimer=null; }
+        const appliedPromise=citySaveChain.then(async()=>{
+          if (!active()) return null;
+          // Cancellation remains available until the atomic save starts.
+          if (cancel) cancel.hidden=true;
+          const response=await fetch('/api/toponymy/apply-prepared',{method:'POST',
+            headers:{'Content-Type':'application/json'}, body:JSON.stringify({file,job_id:data.job_id}),
+            signal:controller.signal});
+          const applied=await response.json();
+          if (!response.ok || applied.status!=='ok') throw new Error(applied.error || applied.message || 'No se guardaron las etiquetas.');
+          return applied;
+        });
+        citySaveChain=appliedPromise.catch(()=>{});
+        const applied=await appliedPromise;
+        if (!active() || !applied) return;
+        restoreTopFields(applied.fields);
+        toponymyCommitEpoch++;
+        placesHistorySnapshot=applied.before.places || [];
+        toponymyHistoryState={file,version,fields:applied.before,places:JSON.stringify(placesHistorySnapshot)};
+        automaticLabelPlan=applied.layout; automaticLabelSignature=labelInputsSignature();
+        automaticLabelAttempt=automaticLabelSignature;
+        selectedPlaceIndices.clear(); toponymyCatalogView=false;
+        updateUndoButtonUI(); renderPlacesList(); renderPlacesMarkersOnMap(); renderAutomaticLabelSummary();
+        const s=applied.summary;
+        setToponymyScanStatus(s.added+' nombres incorporados · '+s.preserved+' conservados · '+s.eligible+
+          ' etiquetas en el núcleo · '+s.deferred+' diferidas por densidad · '+s.exceptions+' excepciones.'+
+          (applied.warnings.length ? ' Hay fuentes parciales: revisa el diagnóstico.' : ''),applied.warnings.length?'warning':'success');
+        showToast('Etiquetas preparadas y guardadas.','success');
+      } catch (error) {
+        if (file===currentCityFile && version===cityLoadVersion && !controller.signal.aborted) {
+          setToponymyScanStatus(error.message,'error'); showToast(error.message,'error');
+        }
+      } finally {
+        clearInterval(timer);
+        if (topPreparationController===controller) cancelAutomaticToponymy();
+      }
+    }
+
+    function requestAutomaticLabelPlan() {
+      const signature=labelInputsSignature();
+      if (!automaticLabelsEnabled() || automaticLabelSignature===signature || automaticLabelAttempt===signature) return;
+      automaticLabelAttempt=signature;
+      const request=++automaticLabelRequest;
+      clearTimeout(automaticLabelTimer);
+      automaticLabelTimer=setTimeout(async()=>{
+        try {
+          const config={city:cityData.city, places:cityData.places || [], toponymy:cityData.toponymy};
+          const response=await fetch('/api/toponymy/layout',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({config})});
+          const data=await response.json();
+          if (request!==automaticLabelRequest || signature!==labelInputsSignature()) return;
+          if (!response.ok || !data.layout) throw new Error(data.error || data.message || 'No se pudo calcular la vista de etiquetas.');
+          automaticLabelPlan=data.layout; automaticLabelSignature=signature;
+          renderPlacesList(); renderPlacesMarkersOnMap(); renderAutomaticLabelSummary();
+        } catch (error) {
+          if (request===automaticLabelRequest && signature===labelInputsSignature()) setToponymyScanStatus(error.message,'error');
+        }
+      },250);
+    }
+
+    function setToponymyCatalogView(value) {
+      toponymyCatalogView=value;
+      renderPlacesMarkersOnMap(); renderAutomaticLabelSummary();
+    }
+
+    function renderAutomaticLabelSummary() {
+      const panel=document.getElementById('automaticLabelSummary');
+      if (!panel) return;
+      panel.hidden=!automaticLabelsEnabled();
+      if (panel.hidden) return;
+      const summary=document.getElementById('automaticLabelCounts');
+      if (summary) summary.textContent=automaticLabelPlan && automaticLabelSignature===labelInputsSignature() ?
+        automaticLabelPlan.summary.eligible+' etiquetas · '+automaticLabelPlan.summary.hidden+' fuera de vista · '+
+        automaticLabelPlan.summary.deferred+' aparecen al acercar' : 'Calculando presentación…';
+      const check=document.getElementById('toponymyCatalogView');
+      if (check) check.checked=toponymyCatalogView;
+      const exceptions=document.getElementById('automaticLabelExceptions');
+      if (exceptions) {
+        const review=cityData.toponymy?.review || {}, resolved=new Set(review.resolved || []);
+        const issues=(review.exceptions || []).filter(e=>!resolved.has(e.id));
+        exceptions.innerHTML=issues.slice(0,automaticExceptionLimit).map((e)=>{
+          const p=(cityData.places || []).find(p=>p.id===e.candidate_id || p.id===e.id) || e;
+          const index=(review.exceptions || []).indexOf(e);
+          return '<div class="p-2 border-b border-stone-200"><strong>'+escapeHtml(p.name || e.id)+'</strong><small class="block">'+
+            escapeHtml([e.message,p.municipality || p.cve_mun,p.locality,p.source].filter(Boolean).join(' · '))+'</small>'+
+            '<button type="button" class="text-sky-700" onclick="showAutomaticLabelException('+index+')">Ver ubicación y registros</button>'+
+            (e.kind==='ambiguous_identity' ? ' · <button type="button" class="text-sky-700" onclick="keepAutomaticLabelsSeparate('+index+')">Conservar separados</button>' : '')+'</div>';
+        }).join('') || '<p class="p-2">Sin coincidencias ambiguas pendientes.</p>';
+        if (issues.length>automaticExceptionLimit) exceptions.innerHTML+='<button type="button" class="p-2 text-sky-700" onclick="showMoreAutomaticLabelExceptions()">Mostrar 60 excepciones más ('+(issues.length-automaticExceptionLimit)+' restantes)</button>';
+        exceptions.innerHTML+=(review.warnings || []).map(w=>'<p class="p-2 text-amber-800">'+escapeHtml(w)+'</p>').join('');
+      }
+    }
+
+    function showAutomaticLabelException(index) {
+      const exception=cityData.toponymy?.review?.exceptions?.[index];
+      if (!exception) return;
+      toponymyCatalogView=true;
+      const ids=[exception.candidate_id,...(exception.existing_ids || [])];
+      selectedPlaceIndices.clear();
+      (cityData.places || []).forEach((p,i)=>{if(ids.includes(p.id)) selectedPlaceIndices.add(i);});
+      renderPlacesMarkersOnMap(); renderPlacesList(); renderAutomaticLabelSummary();
+      const first=(cityData.places || []).findIndex(p=>ids.includes(p.id));
+      if (first>=0) flyToPlaceOnMap(first);
+      else openScanToponymyDialog();
+    }
+
+    function showMoreAutomaticLabelExceptions() {
+      automaticExceptionLimit+=60;
+      renderAutomaticLabelSummary();
+    }
+
+    async function keepAutomaticLabelsSeparate(index) {
+      const exception=cityData.toponymy?.review?.exceptions?.[index];
+      if (!exception || exception.kind!=='ambiguous_identity') return;
+      const before=topFieldsSnapshot(), context=toponymyOperationContext();
+      const review=cityData.toponymy.review;
+      review.resolved=[...new Set([...(review.resolved || []),exception.id])];
+      const saved=await saveCurrentCity(true);
+      if (context.file!==currentCityFile || context.version!==cityLoadVersion) return;
+      if (!saved) {restoreTopFields(before);showToast('No se guardó la resolución.','error');}
+      renderAutomaticLabelSummary();
+    }
+
+    async function restoreToponymyBackup() {
+      const file=currentCityFile, version=cityLoadVersion;
+      if (!file || topPreparationController) return;
+      try {
+        if (!await saveCurrentCity(true)) throw new Error('Guarda el proyecto antes de restaurar el respaldo.');
+        if (file!==currentCityFile || version!==cityLoadVersion) return;
+        const context=toponymyOperationContext();
+        const response=await fetch('/api/toponymy/restore',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({file})});
+        const restored=await response.json();
+        if (!currentToponymyOperation(context)) return;
+        if (!response.ok || restored.status!=='ok') throw new Error(restored.error || restored.message || 'No se pudo restaurar el respaldo.');
+        restoreTopFields(restored.fields);
+        toponymyCommitEpoch++;
+        placesHistorySnapshot=restored.before.places || [];
+        toponymyHistoryState={file,version,fields:restored.before,places:JSON.stringify(placesHistorySnapshot)};
+        selectedPlaceIndices.clear(); updateUndoButtonUI(); renderPlacesList(); renderPlacesMarkersOnMap();
+        showToast('Respaldo de toponimia restaurado; el resto del proyecto se conserva.','success');
+      } catch (error) {
+        if (file===currentCityFile && version===cityLoadVersion) showToast(error.message,'error');
+      }
+    }
+
+    async function setPlaceLabelOverride(index, field, value) {
+      const place=cityData.places?.[index];
+      if (!place || !['visible','priority','auto'].includes(field)) return;
+      const updated=JSON.parse(JSON.stringify(cityData.places));
+      if (field==='auto') delete updated[index].label_overrides;
+      else updated[index].label_overrides={...(place.label_overrides || {}),[field]:value};
+      await commitToponymyChange(updated);
+    }
 
     function isMicroPlace(p) {
       if (!p) return false;
@@ -7477,6 +7809,14 @@
     }
 
     function getPlaceScale(type) {
+      if (type && typeof type === 'object') {
+        if (type.label_overrides?.scale) return type.label_overrides.scale;
+        if (automaticLabelsEnabled()) {
+          const decision=automaticLabelPlan?.decisions?.[type.id];
+          if (decision) return decision.scale;
+        }
+        type=type.type;
+      }
       const t = String(type || '').trim().toLowerCase();
       if (t === 'city' || t === 'town' || t === 'borough' || t === 'large') return 'large';
       if (t === 'neighbourhood' || t === 'neighborhood' || t === 'village' || t === 'hamlet' || t === 'isolated_dwelling' || t === 'small') return 'small';
@@ -7579,7 +7919,7 @@
       const badge = document.getElementById('placeFontScaleBadge');
       if (badge) badge.innerText = `${Math.round(placeFontScale * 100)}%`;
       renderPlacesMarkersOnMap();
-      showToast(`Tamaño de rótulo en mapa: ${Math.round(placeFontScale * 100)}%`, "info", 1500);
+      showToast(`Tamaño de la vista: ${Math.round(placeFontScale * 100)}% (no cambia la exportación)`, "info", 1500);
     }
 
     function fitMapToPlaces() {
@@ -7630,8 +7970,20 @@
       renderPlacesMarkersOnMap();
     }
 
-    function undoPlacesLastAction() {
+    async function undoPlacesLastAction() {
       if (!placesHistorySnapshot) return;
+      if (typeof toponymyHistoryState !== 'undefined' && toponymyHistoryState && toponymyHistoryState.file===currentCityFile &&
+          toponymyHistoryState.version===cityLoadVersion &&
+          toponymyHistoryState.places===JSON.stringify(placesHistorySnapshot)) {
+        const before=topFieldsSnapshot(), history=toponymyHistoryState;
+        restoreTopFields(history.fields);
+        const saved=await saveCurrentCity(true);
+        if (history.file!==currentCityFile || history.version!==cityLoadVersion) return;
+        if (!saved) { restoreTopFields(before);showToast('No se pudo guardar la restauración.','error');return; }
+        toponymyHistoryState=null; placesHistorySnapshot=null;
+        selectedPlaceIndices.clear(); updateUndoButtonUI(); renderPlacesList(); renderPlacesMarkersOnMap();
+        showToast('Se restauró la toponimia anterior.','success');return;
+      }
       cityData.places = JSON.parse(JSON.stringify(placesHistorySnapshot));
       cityData.deleted_places = (cityData.deleted_places || []).filter(deleted =>
         !cityData.places.some(p => typeof deleted === 'string' ?
@@ -7664,12 +8016,19 @@
       placesMarkersGroup.clearLayers();
       placeMarkerMap.clear();
       const places = cityData.places || [];
+      renderAutomaticLabelSummary();
+      requestAutomaticLabelPlan();
       if (places.length === 0) return;
 
       const currentZoom = mapPoi.getZoom ? mapPoi.getZoom() : 11;
       const bounds = (places.length > 100 && mapPoi.getBounds) ? mapPoi.getBounds().pad(0.35) : null;
+      const automatic=automaticLabelsEnabled(), planCurrent=automaticLabelSignature===labelInputsSignature();
+      const screenBoxes=[];
+      const items=places.map((pl,idx)=>({pl,idx}));
+      if (automatic && planCurrent) items.sort((a,b)=>(automaticLabelPlan.decisions[b.pl.id]?.priority || 0)-
+        (automaticLabelPlan.decisions[a.pl.id]?.priority || 0) || String(a.pl.id).localeCompare(String(b.pl.id)));
 
-      places.forEach((pl, idx) => {
+      items.forEach(({pl, idx}) => {
         if (!pl.loc || pl.loc.length !== 2) return;
         const latLng = [pl.loc[1], pl.loc[0]];
 
@@ -7678,15 +8037,24 @@
           return;
         }
 
-        const scale = getPlaceScale(pl.type);
+        const scale = getPlaceScale(pl);
+        const decision=automatic && planCurrent ? automaticLabelPlan?.decisions?.[pl.id] : null;
+        if (automatic && !toponymyCatalogView && (!decision?.visible || currentZoom<decision.min_zoom)) return;
+        if (automatic && !toponymyCatalogView && placeDisplayMode!=='dots') {
+          const point=mapPoi.latLngToContainerPoint(latLng);
+          const width=decision.size[0]*placeFontScale, height=decision.size[1]*placeFontScale;
+          const rect=[point.x-width/2,point.y-height/2,point.x+width/2,point.y+height/2];
+          if (screenBoxes.some(r=>rect[0]<r[2] && rect[2]>r[0] && rect[1]<r[3] && rect[3]>r[1])) return;
+          screenBoxes.push(rect);
+        }
 
         let useCompactDot = false;
-        if (placeDisplayMode === 'dots') {
+        if (toponymyCatalogView && automatic || placeDisplayMode === 'dots') {
           useCompactDot = true;
-        } else if (placeDisplayMode === 'ingame') {
+        } else if (!automatic && placeDisplayMode === 'ingame') {
           if (currentZoom < 12 && scale !== 'large') return;
           if (currentZoom < 14 && scale === 'small') return;
-        } else if (!forceShowPlaceLabels) {
+        } else if (!automatic && !forceShowPlaceLabels) {
           if (currentZoom < 12.0) {
             useCompactDot = (scale !== 'large');
           } else if (currentZoom < 13.5) {
@@ -7699,14 +8067,14 @@
         const isSel = selectedPlaceIndices.has(idx);
 
         const marker = L.marker(latLng, {
-          icon: createPlaceIcon(pl.name, pl.type, isSel, useCompactDot),
-          draggable: !useCompactDot
+          icon: createPlaceIcon(pl.name, scale, isSel, useCompactDot),
+          draggable: !useCompactDot || (automatic && toponymyCatalogView)
         }).addTo(placesMarkersGroup);
 
         placeMarkerMap.set(idx, marker);
 
         const color = getPlaceTaxonomyColor(pl.name, pl.type);
-        const scaleLabel = scale === 'large' ? '👑 Grande (city)' : (scale === 'small' ? '🏘️ Chico (neighbourhood)' : '🏙️ Mediano (suburb)');
+        const scaleLabel = scale === 'large' ? '👑 Grande' : (scale === 'small' ? '🏘️ Pequeño' : '🏙️ Mediano');
         const tooltipHtml = `
           <div class="p-2 bg-white text-stone-900 rounded-lg shadow-xl text-xs space-y-1 min-w-[180px] border border-stone-200 font-sans">
             <div class="flex items-center justify-between space-x-2">
@@ -7749,7 +8117,7 @@
           }, 60);
         });
 
-        if (!useCompactDot) {
+        if (!useCompactDot || (automatic && toponymyCatalogView)) {
           marker.on('drag', (e) => {
             const newPos = e.target.getLatLng();
             pl.loc = [parseFloat(newPos.lng.toFixed(5)), parseFloat(newPos.lat.toFixed(5))];
@@ -7776,9 +8144,9 @@
     }
 
     function createPlacePopupHtml(pl, idx) {
-      const scale = getPlaceScale(pl.type);
+      const scale = getPlaceScale(pl);
       const scaleEmoji = scale === 'large' ? '👑' : (scale === 'small' ? '🏘️' : '🏙️');
-      const scaleLabel = scale === 'large' ? '👑 Ciudad (Grande)' : (scale === 'small' ? '🏘️ Colonia (Chico)' : '🏙️ Distrito (Mediano)');
+      const scaleLabel = scale === 'large' ? '👑 Grande' : (scale === 'small' ? '🏘️ Pequeño' : '🏙️ Mediano');
       const safeName = escapeHtml(pl.name || '');
       const loc = pl.loc || [0, 0];
       const color = getPlaceTaxonomyColor(pl.name, pl.type);
@@ -7812,7 +8180,7 @@
 
           <!-- Selector Rápido de Jerarquía -->
           <div class="space-y-1">
-            <label class="text-[10px] font-bold text-stone-600 block">Jerarquía de Rótulo:</label>
+            <label class="text-[10px] font-bold text-stone-600 block">Tamaño de etiqueta:</label>
             <div class="grid grid-cols-3 gap-1 text-[10px] font-bold">
               <button type="button" onclick="setPlaceScaleFromMap(${idx}, 'city')"
                       class="py-1 px-1 rounded-lg border text-center transition cursor-pointer ${scale === 'large' ? 'bg-amber-100 border-amber-400 text-amber-900 font-black ring-1 ring-amber-300 shadow-2xs' : 'bg-stone-50 border-stone-200 text-stone-600 hover:bg-stone-100'}">
@@ -7830,6 +8198,11 @@
           </div>
 
           <!-- Botones de Acción: Eliminar y Localizar en Panel Lateral -->
+          <div class="text-[10px] space-y-1 ${automaticLabelsEnabled() ? '' : 'hidden'}">
+            <button type="button" class="text-sky-700" onclick="setPlaceLabelOverride(${idx}, 'auto')">Volver al tamaño automático</button>
+            <label class="block"><input type="checkbox" ${pl.label_overrides?.visible===false ? '' : 'checked'} onchange="setPlaceLabelOverride(${idx}, 'visible', this.checked)"> Mostrar etiqueta dentro del núcleo</label>
+            <label class="block">Prioridad adicional <input type="number" min="-100" max="100" step="1" value="${pl.label_overrides?.priority || 0}" onchange="setPlaceLabelOverride(${idx}, 'priority', Number(this.value))" class="w-16 border rounded"></label>
+          </div>
           <div class="flex items-center justify-between pt-2 border-t border-stone-100 text-[11px]">
             <button type="button" onclick="deletePlaceFromMap(${idx})"
                     class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg font-bold flex items-center space-x-1 transition cursor-pointer"
@@ -7856,6 +8229,7 @@
         showToast("El nombre de la colonia no puede estar vacío", "warning");
         return;
       }
+      toponymyHistoryState = null;
       placesHistorySnapshot = JSON.parse(JSON.stringify(cityData.places));
       updateUndoButtonUI();
       if (!cityData.places[idx].original_name) cityData.places[idx].original_name = cityData.places[idx].name;
@@ -7872,16 +8246,10 @@
     }
 
     function setPlaceScaleFromMap(idx, newType) {
-      if (!cityData.places || !cityData.places[idx]) return;
-      placesHistorySnapshot = JSON.parse(JSON.stringify(cityData.places));
-      updateUndoButtonUI();
-      cityData.places[idx].type = newType;
+      updatePlaceScale(idx, newType === 'city' ? 'large' : newType === 'suburb' ? 'medium' : 'small');
       if (mapPoi) mapPoi.closePopup();
-      renderPlacesList();
-      renderPlacesMarkersOnMap();
-      triggerAutoSave();
       const scaleLabel = newType === 'city' ? '👑 Grande' : (newType === 'suburb' ? '🏙️ Mediano' : '🏘️ Chico');
-      showToast(`✓ Jerarquía cambiada a ${scaleLabel}`, "success", 2000);
+      showToast(`✓ Tamaño de etiqueta: ${scaleLabel}`, "success", 2000);
     }
 
     function deletePlaceFromMap(idx) {
@@ -7925,13 +8293,14 @@
       const places = cityData.places || [];
       const badge = document.getElementById('badgeDupCount');
       if (!badge) return;
-      const seen = new Set();
+      const seen = new Map();
       let dupCount = 0;
       places.forEach(p => {
         const n = (p.name || '').trim().toLowerCase();
         if (!n) return;
-        if (seen.has(n)) dupCount++;
-        else seen.add(n);
+        const peers=seen.get(n) || [];
+        if (peers.some(other=>sameToponymyPlace(p,other))) dupCount++;
+        peers.push(p); seen.set(n,peers);
       });
       if (dupCount > 0) {
         badge.innerText = dupCount;
@@ -7975,6 +8344,7 @@
         return;
       }
 
+      toponymyHistoryState = null;
       placesHistorySnapshot = JSON.parse(JSON.stringify(places));
       updateUndoButtonUI();
 
@@ -8042,7 +8412,7 @@
           osmPlaces.forEach(p => {
             if (!p.loc || p.loc.length !== 2) return;
             const latLng = [p.loc[1], p.loc[0]];
-            const isLarge = getPlaceScale(p.type) === 'large';
+            const isLarge = getPlaceScale(p) === 'large';
             const iconHtml = `
               <div class="px-2 py-0.5 rounded-md font-bold text-[10px] whitespace-nowrap shadow-md border flex items-center space-x-1 ${isLarge ? 'bg-amber-500 text-stone-950 border-amber-300 ring-2 ring-amber-400' : 'bg-indigo-600 text-white border-indigo-400'}">
                 <span>${isLarge ? '👑' : '📍'}</span>
@@ -8083,6 +8453,7 @@
       if (!confirm(`¿Deseas vaciar la lista curada de asentamientos y toponimia?\n\nAl dejar la lista vacía, el compilador cartográfico de Subway Builder México utilizará las etiquetas nativas originales del archivo OSM PBF sin reemplazos.\n\nPuedes revertir esto inmediatamente con el botón Deshacer (↩️).`)) {
         return;
       }
+      toponymyHistoryState = null;
       placesHistorySnapshot = JSON.parse(JSON.stringify(places));
       updateUndoButtonUI();
       cityData.places = [];
@@ -8102,10 +8473,13 @@
 
       if (totalPill) totalPill.innerText = places.length;
       const delivery = document.getElementById('toponymyDeliveryMode');
-      if (delivery) delivery.value = cityData.toponymy_mode || 'replace';
+      if (delivery) {delivery.value = cityData.toponymy_mode || 'replace';delivery.disabled=automaticLabelsEnabled();}
       const deliveryNote = document.getElementById('toponymyDeliveryNote');
-      if (deliveryNote) deliveryNote.textContent = cityData.toponymy_mode === 'merge' ?
+      if (deliveryNote) deliveryNote.textContent = automaticLabelsEnabled() ?
+        'Compila tamaños y visibilidad calculados; conserva el catálogo completo y respeta el núcleo urbano.' : cityData.toponymy_mode === 'merge' ?
         'Conserva OSM y aplica tus nombres y descartes locales. La vista de esta lista muestra solo los nombres guardados.' :
+        cityData.toponymy?.engine === 'official_v1' ?
+        'Compila exclusivamente la lista guardada. Una lista vacía deja el mapa sin etiquetas territoriales; descarga, revisa e incorpora nombres primero.' :
         'Una lista incompleta sustituye las etiquetas OSM de cada capa con nombres guardados. Complementar OSM evita esa pérdida.';
 
       // Actualizar contadores por categoría jerárquica
@@ -8113,7 +8487,7 @@
       let catSuburbCount = 0;
       let catNeighbourhoodCount = 0;
       places.forEach(p => {
-        const sc = getPlaceScale(p.type);
+        const sc = getPlaceScale(p);
         if (sc === 'large') catCityCount++;
         else if (sc === 'small') catNeighbourhoodCount++;
         else catSuburbCount++;
@@ -8130,7 +8504,11 @@
       // Banner de Estado de Modo Cartográfico (OSM Nativo vs Curado)
       const banner = document.getElementById('toponymyModeBanner');
       if (banner) {
-        if (places.length === 0) {
+        if (cityData.toponymy?.engine === 'official_v1') {
+          banner.innerHTML = '<div class="px-2.5 py-1 bg-sky-50 border border-sky-200 rounded-lg text-[11px]">' +
+            '<strong>Nombres territoriales · INEGI</strong> · ' + places.length + ' guardados' +
+            (cityData.toponymy_mode === 'merge' ? ' · complementa OSM al compilar' : ' · lista exclusiva al compilar') + '</div>';
+        } else if (places.length === 0) {
           banner.innerHTML = `
             <div class="px-2.5 py-1 bg-gradient-to-r from-sky-50 to-indigo-50 border border-sky-200 rounded-lg flex items-center justify-between text-[11px] shadow-2xs">
               <div class="flex items-center space-x-1.5 min-w-0">
@@ -8170,7 +8548,7 @@
       const filtered = places.map((pl, idx) => ({ ...pl, originalIndex: idx })).filter(item => {
         const matchesText = !textQuery || toponymyNameKey(
           [item.name, ...(item.aliases || []), item.municipality || '', item.locality || ''].join(' ')).includes(textQuery);
-        const scale = getPlaceScale(item.type);
+        const scale = getPlaceScale(item);
 
         let matchesCategory = true;
         if (placeFilterCategory === 'city') {
@@ -8188,6 +8566,8 @@
           matchesType = isMicroPlace(item);
         } else if (typeQuery === 'denue') {
           matchesType = (item.source || '').toUpperCase().includes('DENUE');
+        } else if (typeQuery === 'official') {
+          matchesType = ['INEGI_LOCALITIES','INEGI_DCAH'].includes(item.source);
         } else if (typeQuery === 'manual') {
           matchesType = item.source === 'YAML_CURATED';
         } else if (typeQuery === 'unknown') {
@@ -8216,11 +8596,11 @@
           <div class="p-6 text-center text-metro-muted text-xs bg-metro-panel/50 rounded-xl border border-metro-border space-y-2.5">
             <i data-lucide="map-pin-off" class="w-8 h-8 mx-auto text-stone-400"></i>
             <span class="block font-bold text-stone-800 text-sm">No hay toponimia curada asignada.</span>
-            <p class="text-[11px] text-stone-500 max-w-xs mx-auto">Escanea automáticamente asentamientos desde OpenStreetMap y microdatos DENUE del INEGI para rotular el mapa.</p>
+            <p class="text-[11px] text-stone-500 max-w-xs mx-auto">Prepara nombres oficiales, tamaños y visibilidad automáticamente. Revisa después las coincidencias ambiguas.</p>
             <div class="flex flex-col sm:flex-row justify-center items-center gap-2 pt-2">
-              <button type="button" onclick="quickScanAndPopulateToponymy(this)" id="btnEmptyStateScan" class="w-full sm:w-auto px-4 py-2 bg-sky-700 hover:bg-sky-600 text-white font-bold rounded-lg shadow transition flex items-center justify-center space-x-1.5 text-xs cursor-pointer">
+              <button type="button" onclick="prepareAutomaticToponymy()" id="btnEmptyStateScan" class="w-full sm:w-auto px-4 py-2 bg-sky-700 hover:bg-sky-600 text-white font-bold rounded-lg shadow transition flex items-center justify-center space-x-1.5 text-xs cursor-pointer">
                 <i data-lucide="scan" class="w-4 h-4"></i>
-                <span>Escanear y revisar nombres</span>
+                <span>Preparar etiquetas</span>
               </button>
               <div class="flex items-center gap-1.5">
                 <button type="button" onclick="openScanToponymyDialog()" class="px-2.5 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 font-semibold rounded-lg border border-stone-200 text-[11px] transition cursor-pointer" title="Opciones avanzadas de escaneo">
@@ -8256,7 +8636,7 @@
       visibleItems.forEach(item => {
         const idx = item.originalIndex;
         const isChecked = selectedPlaceIndices.has(idx);
-        const scale = getPlaceScale(item.type);
+        const scale = getPlaceScale(item);
         const isMicro = isMicroPlace(item);
         const scaleEmoji = isMicro ? '🚪' : (scale === 'large' ? '👑' : (scale === 'small' ? '🏘️' : '🏙️'));
         const loc = item.loc || [0, 0];
@@ -8295,7 +8675,7 @@
           <div class="flex items-center justify-between text-[11px] pt-1 border-t border-stone-100">
             <!-- Selector de Escala Segmentado Instantáneo -->
             <div class="flex items-center space-x-1 bg-stone-100/90 p-0.5 rounded-lg border border-stone-200/80">
-              <button type="button" onclick="updatePlaceScale(${idx}, 'large')" class="px-2 py-0.5 rounded text-[10px] font-bold transition cursor-pointer ${scale === 'large' ? 'bg-white text-amber-900 shadow-xs ring-1 ring-amber-300 font-black' : 'text-stone-500 hover:text-stone-800'}" title="👑 Grande (18px) - Cabecera / Ciudad">👑 Grande</button>
+              <button type="button" onclick="updatePlaceScale(${idx}, 'large')" class="px-2 py-0.5 rounded text-[10px] font-bold transition cursor-pointer ${scale === 'large' ? 'bg-white text-amber-900 shadow-xs ring-1 ring-amber-300 font-black' : 'text-stone-500 hover:text-stone-800'}" title="👑 Grande - Cabecera / Ciudad">👑 Grande</button>
               <button type="button" onclick="updatePlaceScale(${idx}, 'medium')" class="px-2 py-0.5 rounded text-[10px] font-bold transition cursor-pointer ${scale === 'medium' ? 'bg-white text-sky-900 shadow-xs ring-1 ring-sky-300 font-black' : 'text-stone-500 hover:text-stone-800'}" title="🏙️ Mediano (13px) - Distrito / Suburbio">🏙️ Mediano</button>
               <button type="button" onclick="updatePlaceScale(${idx}, 'small')" class="px-2 py-0.5 rounded text-[10px] font-bold transition cursor-pointer ${scale === 'small' ? 'bg-white text-emerald-900 shadow-xs ring-1 ring-emerald-300 font-black' : 'text-stone-500 hover:text-stone-800'}" title="🏘️ Chico (10px) - Fracc. / Colonia">🏘️ Chico</button>
             </div>
@@ -8335,11 +8715,11 @@
 
     function updatePlaceScale(idx, scale) {
       if (!cityData.places || !cityData.places[idx]) return;
+      toponymyHistoryState = null;
       placesHistorySnapshot = JSON.parse(JSON.stringify(cityData.places));
       updateUndoButtonUI();
-      if (scale === 'large') cityData.places[idx].type = 'city';
-      else if (scale === 'small') cityData.places[idx].type = 'neighbourhood';
-      else cityData.places[idx].type = 'suburb';
+      if (!['large','medium','small'].includes(scale)) return;
+      cityData.places[idx].label_overrides = {...(cityData.places[idx].label_overrides || {}), scale};
       renderPlacesMarkersOnMap();
       renderPlacesList();
       if (document.getElementById('modalToponymyStudio') && !document.getElementById('modalToponymyStudio').classList.contains('hidden')) {
@@ -8350,12 +8730,13 @@
 
     function batchSetPlaceScale(scale) {
       if (!cityData.places || selectedPlaceIndices.size === 0) return;
+      toponymyHistoryState = null;
       placesHistorySnapshot = JSON.parse(JSON.stringify(cityData.places));
       updateUndoButtonUI();
-      const targetType = scale === 'large' ? 'city' : (scale === 'small' ? 'neighbourhood' : 'suburb');
+      if (!['large','medium','small'].includes(scale)) return;
       selectedPlaceIndices.forEach(idx => {
         if (cityData.places[idx]) {
-          cityData.places[idx].type = targetType;
+          cityData.places[idx].label_overrides = {...(cityData.places[idx].label_overrides || {}), scale};
         }
       });
       renderPlacesMarkersOnMap();
@@ -8404,7 +8785,7 @@
       let cLarge = 0, cMedium = 0, cSmall = 0, cMicro = 0;
       places.forEach(p => {
         if (isMicroPlace(p)) cMicro++;
-        const sc = getPlaceScale(p.type);
+        const sc = getPlaceScale(p);
         if (sc === 'large') cLarge++;
         else if (sc === 'small') cSmall++;
         else cMedium++;
@@ -8424,7 +8805,7 @@
 
       const filtered = places.map((pl, idx) => ({ ...pl, originalIndex: idx })).filter(item => {
         const matchesText = !tsSearchQuery || (item.name && item.name.toLowerCase().includes(tsSearchQuery));
-        const scale = getPlaceScale(item.type);
+        const scale = getPlaceScale(item);
         let matchesType = false;
         if (tsScaleFilterVal === 'all') {
           matchesType = true;
@@ -8432,6 +8813,8 @@
           matchesType = isMicroPlace(item);
         } else if (tsScaleFilterVal === 'denue') {
           matchesType = (item.source || '').toUpperCase().includes('DENUE');
+        } else if (tsScaleFilterVal === 'official') {
+          matchesType = ['INEGI_LOCALITIES','INEGI_DCAH'].includes(item.source);
         } else if (tsScaleFilterVal === 'osm') {
           matchesType = (item.source || '').toUpperCase().includes('OSM');
         } else {
@@ -8455,7 +8838,7 @@
       filtered.forEach(item => {
         const idx = item.originalIndex;
         const isChecked = selectedPlaceIndices.has(idx);
-        const scale = getPlaceScale(item.type);
+        const scale = getPlaceScale(item);
         const isMicro = isMicroPlace(item);
         const loc = item.loc || [0, 0];
         const safeName = escapeHtml(item.name || '');
@@ -8468,7 +8851,7 @@
           </td>
           <td class="p-2.5">
             <div class="inline-flex items-center space-x-1 bg-stone-100 p-0.5 rounded-lg border border-stone-200">
-              <button type="button" onclick="updatePlaceScale(${idx}, 'large')" class="px-2 py-0.5 rounded text-[10px] font-bold transition cursor-pointer ${scale === 'large' ? 'bg-white text-amber-900 shadow-xs ring-1 ring-amber-300 font-black' : 'text-stone-500 hover:text-stone-800'}" title="👑 Grande (18px)">👑 Grande</button>
+              <button type="button" onclick="updatePlaceScale(${idx}, 'large')" class="px-2 py-0.5 rounded text-[10px] font-bold transition cursor-pointer ${scale === 'large' ? 'bg-white text-amber-900 shadow-xs ring-1 ring-amber-300 font-black' : 'text-stone-500 hover:text-stone-800'}" title="👑 Grande">👑 Grande</button>
               <button type="button" onclick="updatePlaceScale(${idx}, 'medium')" class="px-2 py-0.5 rounded text-[10px] font-bold transition cursor-pointer ${scale === 'medium' ? 'bg-white text-sky-900 shadow-xs ring-1 ring-sky-300 font-black' : 'text-stone-500 hover:text-stone-800'}" title="🏙️ Mediano (13px)">🏙️ Mediano</button>
               <button type="button" onclick="updatePlaceScale(${idx}, 'small')" class="px-2 py-0.5 rounded text-[10px] font-bold transition cursor-pointer ${scale === 'small' ? 'bg-white text-emerald-900 shadow-xs ring-1 ring-emerald-300 font-black' : 'text-stone-500 hover:text-stone-800'}" title="🏘️ Chico (10px)">🏘️ Chico</button>
             </div>
@@ -8506,6 +8889,7 @@
       const places = cityData.places || [];
       if (places.length === 0) return;
 
+      toponymyHistoryState = null;
       placesHistorySnapshot = JSON.parse(JSON.stringify(places));
       updateUndoButtonUI();
 
@@ -8544,6 +8928,7 @@
       const places = cityData.places || [];
       if (places.length === 0) return;
 
+      toponymyHistoryState = null;
       placesHistorySnapshot = JSON.parse(JSON.stringify(places));
       updateUndoButtonUI();
 
@@ -8690,6 +9075,7 @@
       const count = selectedPlaceIndices.size;
       if (!confirm(`¿Eliminar ${count} colonias seleccionadas?`)) return;
 
+      toponymyHistoryState = null;
       placesHistorySnapshot = JSON.parse(JSON.stringify(cityData.places));
       updateUndoButtonUI();
 
@@ -8739,7 +9125,8 @@
 
     function deletePlaceByIndex(idx) {
       if (cityData.places && cityData.places[idx]) {
-        placesHistorySnapshot = JSON.parse(JSON.stringify(cityData.places));
+        toponymyHistoryState = null;
+      placesHistorySnapshot = JSON.parse(JSON.stringify(cityData.places));
         updateUndoButtonUI();
         const delName = (cityData.places[idx].name || '').trim();
         if (delName) {
@@ -8787,6 +9174,7 @@
     }
 
     function cancelToponymyScan() {
+      if (typeof topPreparationController !== 'undefined') cancelAutomaticToponymy();
       if (toponymyScanController) toponymyScanController.abort();
       toponymyScanController = null;
       scannedPlacesCatalog = null;
@@ -8813,9 +9201,12 @@
       return s.replace(/[^\p{L}\p{N}]/gu, '');
     }
 
-    function sameToponymyPlace(a, b) {
+    function sameToponymyPlace(a, b, maximumDistance = null) {
       if (['cve_ent', 'cve_mun', 'cve_loc'].some(k => a[k] && b[k] && String(a[k]) !== String(b[k]))) return false;
+      if (a.feature_kind && b.feature_kind && a.feature_kind !== b.feature_kind) return false;
+      if (a.official_code && b.official_code && a.official_code !== b.official_code) return false;
       if (a.id && b.id && a.id === b.id) return true;
+      if (a.official_code && a.official_code === b.official_code) return true;
       const keys = p => [p.name,p.original_name].filter(Boolean).map(toponymyNameKey);
       if (!keys(a).some(key=>keys(b).includes(key))) return false;
       if (!a.loc || !b.loc || ![...a.loc, ...b.loc].every(Number.isFinite)) return false;
@@ -8823,13 +9214,13 @@
       const h = Math.sin(rad(b.loc[1] - a.loc[1]) / 2) ** 2 +
         Math.cos(rad(a.loc[1])) * Math.cos(rad(b.loc[1])) * Math.sin(rad(b.loc[0] - a.loc[0]) / 2) ** 2;
       const distance = 12742000 * Math.asin(Math.min(1, Math.sqrt(h)));
-      const radius = ['city', 'town'].includes(a.type) && ['city', 'town'].includes(b.type) ? 7500 : 500;
+      const radius = maximumDistance ?? (['city', 'town'].includes(a.type) && ['city', 'town'].includes(b.type) ? 7500 : 500);
       return distance <= radius;
     }
 
     function mergeScannedToponymy(existing, scanned) {
       const places = JSON.parse(JSON.stringify(existing || []));
-      const buckets = new Map(), identities = new Map();
+      const buckets = new Map(), identities = new Map(), codes = new Map();
       for (const p of places) {
         const key = toponymyNameKey(p.name);
         if (!buckets.has(key)) buckets.set(key, []);
@@ -8840,15 +9231,32 @@
           buckets.get(originalKey).push(p);
         }
         if (p.id) identities.set(p.id, p);
+        if (p.official_code) {
+          if (!codes.has(p.official_code)) codes.set(p.official_code, []);
+          codes.get(p.official_code).push(p);
+        }
+      }
+      // Establish ownership before enriching any legacy record. Two official
+      // homonyms near one old marker must remain separate, regardless of order.
+      const matches = new Map(), owners = new Map();
+      for (const item of scanned) {
+        const strong = [...new Set([identities.get(item.id), ...(codes.get(item.official_code) || [])])]
+          .filter(p=>p && sameToponymyPlace(p,item) &&
+            ((p.id && p.id===item.id) || (p.official_code && p.official_code===item.official_code)));
+        const choices = strong.length ? strong : [...new Set([
+          ...(buckets.get(toponymyNameKey(item.name)) || []),
+          ...(buckets.get(toponymyNameKey(item.original_name)) || [])
+        ])].filter(p=>sameToponymyPlace(p,item,500));
+        matches.set(item, choices);
+        for (const p of choices) owners.set(p,(owners.get(p) || 0)+1);
       }
       for (const item of scanned) {
         const deleted = (cityData.deleted_places || []).some(p =>
           typeof p === 'string' ? toponymyNameKey(p) === toponymyNameKey(item.name) : sameToponymyPlace(p, item));
         if (deleted) continue;
         const key = toponymyNameKey(item.name);
-        const choices = [...(buckets.get(key) || [])];
-        if (item.id && identities.has(item.id)) choices.unshift(identities.get(item.id));
-        const old = choices.find(p => sameToponymyPlace(p, item));
+        const choices = matches.get(item) || [];
+        const old = choices.length===1 && owners.get(choices[0])===1 ? choices[0] : null;
         if (!old) {
           const fresh = JSON.parse(JSON.stringify(item));
           places.push(fresh);
@@ -8874,6 +9282,16 @@
     }
 
     function toponymyScanSummary(cat) {
+      if (cat.engine === 'official_v1') {
+        const sources = cat.sources || [];
+        const rejected = sources.reduce((n,s)=>n+(s.counts?.invalid || 0)+(s.provenance?.counts?.invalid || 0),0);
+        const failures = sources.filter(s=>['error','missing'].includes(s.status));
+        return (cat.partial ? 'Resultado parcial. ' : 'Fuentes consultadas. ') + cat.total +
+          ' nombres en ' + (cat.coverage?.length || 0) + ' municipios; ' + (cat.preserved || 0) +
+          ' existentes conservados. ' + (cat.unlocated?.length || 0) + ' asentamientos sin polígono. ' +
+          rejected + ' registros rechazados.' + (failures.length ? ' ' + failures.map(s=>s.message || s.status).join(' ') : '') +
+          (cat.conflicts?.length ? ' Hay claves con ediciones contradictorias.' : '') + ' Consulta el diagnóstico de fuentes.';
+      }
       const files = (cat.sources || []).map(s => {
         const name = (s.path || '').split(/[\\/]/).pop() || s.kind;
         return name + ': ' + (s.status === 'ok' ? (s.cached ? 'caché válida' : 'consultado') : (s.message || s.status));
@@ -8881,11 +9299,14 @@
       const municipalities = (cat.coverage || []).map(m => m.municipality || m.cve_mun).filter(Boolean);
       return (cat.partial ? 'Resultado parcial. ' : 'Fuentes consultadas. ') + files +
         (municipalities.length ? '. Municipios: ' + municipalities.join(', ') : '') +
-        '. ' + cat.total + ' nombres; ' + (cat.preserved || 0) + ' existentes conservados.';
+        '. ' + cat.total + ' nombres; ' + (cat.preserved || 0) + ' existentes conservados.' +
+        (cat.unlocated?.length ? ' ' + cat.unlocated.length + ' asentamientos sin polígono disponible.' : '') +
+        (cat.conflicts?.length ? ' Hay claves con ediciones contradictorias: revisa las fuentes.' : '');
     }
 
     function toponymyInputsSignature() {
-      return JSON.stringify([cityData.city?.bbox, cityData.data_dir, cityData.data_exclusions || []]);
+      return JSON.stringify([cityData.city?.bbox, cityData.city?.urban_core_polygon,
+        cityData.data_dir, cityData.data_exclusions || [], cityData.toponymy]);
     }
 
     function ensureToponymyPlaceIds() {
@@ -8894,7 +9315,7 @@
       }
     }
 
-    async function runToponymyScan(minCount, consume) {
+    async function runToponymyScan(minCount, consume, acquire = false) {
       if (!currentCityFile || toponymyScanController) return;
       const file = currentCityFile, version = cityLoadVersion, controller = new AbortController();
       toponymyScanController = controller;
@@ -8903,7 +9324,7 @@
       const current = () => currentCityFile === file && cityLoadVersion === version && toponymyScanController === controller;
       const started = Date.now();
       let phase = 'Guardando configuración';
-      const progress = () => { if (current()) setToponymyScanStatus(phase + ' · ' + Math.floor((Date.now() - started) / 1000) + ' s. La primera extracción OSM puede tardar varios minutos.'); };
+      const progress = () => { if (current()) setToponymyScanStatus(phase + ' · ' + Math.floor((Date.now() - started) / 1000) + ' s.'); };
       for (const id of ['btnScanPlaces', 'btnEmptyStateScan', 'btnExecuteScan', 'btnConfirmImportScan']) {
         const button = document.getElementById(id);
         if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); }
@@ -8913,17 +9334,33 @@
       progress();
       const timer = setInterval(progress, 1000);
       try {
+        cityData.toponymy = {...(cityData.toponymy || {}), engine:'official_v1',
+          osm_fallback:document.getElementById('scanOsmFallback')?.checked || false};
         ensureToponymyPlaceIds();
         const saved = await saveCurrentCity(true);
         if (!current()) return;
         if (!saved) throw new Error('No se pudo guardar la configuración antes del escaneo.');
         const snapshot = JSON.stringify(cityData.places || []);
         const inputsSnapshot = toponymyInputsSignature();
-        phase = 'Consultando OpenStreetMap y todas las fuentes DENUE';
+        phase = acquire ? 'Consultando catálogos oficiales INEGI' : 'Leyendo localidades y polígonos de asentamientos';
         progress();
-        const data = await fetchStartupJson('/api/toponymy/scan?file=' + encodeURIComponent(file) +
-          '&min_count=' + encodeURIComponent(minCount), 'Toponimia', 600000, controller.signal);
+        const endpoint = '/api/toponymy/' + (acquire ? 'acquire' : 'scan') + '?file=' + encodeURIComponent(file) +
+          (acquire === 'dcah' ? '&source=dcah' : '');
+        let data = await fetchStartupJson(endpoint, 'Toponimia', 60000, controller.signal);
+        while (current() && data.status === 'running') {
+          phase = data.message || phase;
+          progress();
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          if (!current() || controller.signal.aborted) return;
+          data = await fetchStartupJson(endpoint + '&job=' + encodeURIComponent(data.job_id), 'Toponimia', 60000, controller.signal);
+        }
         if (!current()) return;
+        if (data.status === 'error') throw new Error(data.error || data.message || 'Falló el pipeline de nombres.');
+        if (acquire) {
+          setToponymyScanStatus((data.partial ? 'Descarga parcial. ' : 'Catálogos descargados. ') +
+            (data.files?.length || 0) + ' archivos. ' + (data.errors || []).map(e=>e.message).join(' · '), data.partial ? 'warning' : 'success');
+          return;
+        }
         const cat = data.catalog;
         if (toponymyInputsSignature() !== inputsSnapshot) {
           throw new Error('El área o las fuentes cambiaron durante el escaneo. Ejecuta Escanear nuevamente.');
@@ -8958,7 +9395,8 @@
     function openScanToponymyDialog() {
       const modal = document.getElementById('modalScanToponymy');
       if (modal) modal.classList.remove('hidden');
-      document.getElementById('scanMinCount')?.focus?.();
+      const fallback = document.getElementById('scanOsmFallback');
+      if (fallback) fallback.checked = cityData.toponymy?.osm_fallback || false;
       if (scannedPlacesCatalog && scannedPlacesContext &&
           scannedPlacesContext.file === currentCityFile && scannedPlacesContext.version === cityLoadVersion &&
           scannedPlacesContext.inputsSnapshot === toponymyInputsSignature()) {
@@ -8976,8 +9414,7 @@
     }
 
     async function executeCityToponymyScan() {
-      const minCount = document.getElementById('scanMinCount')?.value || 8;
-      await runToponymyScan(minCount, async (cat, current, context) => {
+      await runToponymyScan(null, async (cat, current, context) => {
         scannedPlacesCatalog = cat;
         scannedPlacesContext = context;
         prepareScanReview(cat);
@@ -8989,8 +9426,45 @@
       const source = String(place.source || 'UNKNOWN');
       const labels = {UNKNOWN:'Origen no registrado', YAML_CURATED:'Añadido manualmente',
         OSM_NODE:'OSM · punto', OSM_POLYGON:'OSM · polígono',
-        INEGI_DENUE:'DENUE · asentamiento', INEGI_DENUE_LOCALIDAD:'DENUE · localidad sugerida'};
+        INEGI_DENUE:'DENUE · asentamiento anterior', INEGI_DENUE_LOCALIDAD:'DENUE · localidad anterior',
+        INEGI_LOCALITIES:'INEGI · localidad oficial', INEGI_DCAH:'INEGI · polígono de asentamiento'};
       return labels[source] || source;
+    }
+
+    async function downloadOfficialToponymy(dcah = false) {
+      await runToponymyScan(null, null, dcah ? 'dcah' : true);
+    }
+
+    function setToponymyOsmFallback(checked) {
+      cityData.toponymy = {...(cityData.toponymy || {}), engine:'official_v1', osm_fallback:checked};
+      cancelToponymyScan();
+      triggerAutoSave();
+    }
+
+    async function importOfficialToponymy(input) {
+      const source = input.files?.[0];
+      if (!source || !currentCityFile) return;
+      const file = currentCityFile, version = cityLoadVersion;
+      const current = () => file === currentCityFile && version === cityLoadVersion;
+      cancelToponymyScan();
+      input.disabled = true;
+      try {
+        cityData.toponymy = {...(cityData.toponymy || {}), engine:'official_v1'};
+        if (!await saveCurrentCity(true)) throw new Error('Guarda el proyecto antes de importar la fuente.');
+        if (!current()) return;
+        setToponymyScanStatus('Validando ' + source.name + '…');
+        const response = await fetch('/api/toponymy/import?file=' + encodeURIComponent(file) +
+          '&kind=' + encodeURIComponent(input.dataset.kind) + '&name=' + encodeURIComponent(source.name),
+          {method:'POST', headers:{'Content-Type':'application/octet-stream'}, body:source});
+        const data = await response.json();
+        if (!current()) return;
+        if (!response.ok || data.status !== 'ok') throw new Error(data.error || data.message || 'Fuente rechazada.');
+        setToponymyScanStatus(data.labels + ' etiquetas válidas en la fuente. Pulsa Escanear para revisarlas.', 'success');
+      } catch (error) {
+        if (current()) { setToponymyScanStatus(error.message, 'error'); showToast(error.message, 'error'); }
+      } finally {
+        input.value = ''; input.disabled = false;
+      }
     }
 
     function prepareScanReview(cat) {
@@ -9097,6 +9571,12 @@
       const row = scanReviewRows[index];
       if (!row || !mapPoi) return;
       document.getElementById('modalScanToponymy')?.classList.add('hidden');
+      if (scanCandidateBoundary) mapPoi.removeLayer(scanCandidateBoundary);
+      scanCandidateBoundary = null;
+      if (row.p.boundary) {
+        scanCandidateBoundary = L.geoJSON(row.p.boundary, {style:{color:'#0369a1',weight:2,fillOpacity:0.12}}).addTo(mapPoi);
+        scanCandidateBoundary.bindTooltip(escapeHtml(row.p.name));
+      }
       mapPoi.flyTo([row.p.loc[1], row.p.loc[0]], 15);
       showToast(row.p.name + ' · ' + placeSourceLabel(row.p) + '. Pulsa Escanear para volver a la revisión.', 'info');
     }
@@ -9132,6 +9612,8 @@
           '</strong><small>' + escapeHtml([placeSourceLabel(p),p.municipality || p.cve_mun,
           status === 'new' ? 'Nuevo' : status === 'kept' ? 'Conservado: ' + old.name : 'Descartado previamente',
           p.hierarchy_inferred ? 'Escala inferida, revisar' : '',
+          p.position_method === 'polygon_interior' ? 'Etiqueta dentro del polígono' : '',
+          p.population != null ? p.population + ' habitantes (fuente original)' : '',
           p.establishments ? p.establishments + ' establecimientos; no es población' : '',
           isMicroPlace(p) ? 'Micro-asentamiento' : ''].filter(Boolean).join(' · ')) +
           '</small></span></label><button type="button" onclick="showScanCandidateOnMap(' + index +
@@ -9145,17 +9627,36 @@
 
     function setToponymyDeliveryMode(mode) {
       if (!['merge','replace'].includes(mode)) return;
+      if (automaticLabelsEnabled() && mode==='merge') {
+        showToast('Las etiquetas automáticas utilizan el catálogo preparado.','info');return;
+      }
       cityData.toponymy_mode = mode;
       renderPlacesList();
       triggerAutoSave();
     }
 
     function renderScanResultsUI(cat) {
+      const diagnostics = document.getElementById('scanSourceDiagnostics');
+      if (diagnostics) diagnostics.innerHTML = (cat.sources || []).map(s=>{
+        const errors = [...(s.errors || []), ...(s.provenance?.errors || [])];
+        return '<div class="mb-2"><strong>' + escapeHtml((s.path || '').split(/[\\/]/).pop() || s.kind) +
+          '</strong>: ' + escapeHtml(s.message || s.status) + ' · ' + (s.labels || 0) + ' etiquetas' +
+          errors.map(e=>'<div>' + escapeHtml('Registro ' + e.row + ': ' + e.message) + '</div>').join('') + '</div>';
+      }).join('');
+      document.getElementById('scanInferSmall')?.parentElement?.classList.toggle('hidden', cat.engine === 'official_v1');
       const resultsSec = document.getElementById('scanResultsSection');
       if (!resultsSec) return;
       resultsSec.classList.remove('hidden');
       document.getElementById('scanTotalCount').innerText = cat.total || 0;
-      const diag = cat.diagnosis?.categories || {};
+      let diag = cat.diagnosis?.categories || {};
+      if (cat.engine === 'official_v1') {
+        diag = {SUPERMANZANA:0, REGION:0, FRACCIONAMIENTO:0, GENERIC:0};
+        for (const p of cat.places || []) {
+          const category = p.tipo_asent || p.category;
+          const key = ['SUPERMANZANA','REGION','FRACCIONAMIENTO'].includes(category) ? category : category === 'REGIÓN' ? 'REGION' : 'GENERIC';
+          diag[key]++;
+        }
+      }
       document.getElementById('scanSmCount').innerText = (diag.SUPERMANZANA || 0) + (diag.REGION || 0);
       document.getElementById('scanFraccCount').innerText = diag.FRACCIONAMIENTO || 0;
       document.getElementById('scanColCount').innerText = (diag.COLONIA || 0) + (diag.GENERIC || 0);
@@ -9186,7 +9687,8 @@
       const confirm = document.getElementById('btnConfirmImportScan');
       if (confirm) confirm.disabled = true;
       try {
-        placesHistorySnapshot = JSON.parse(JSON.stringify(before));
+        toponymyHistoryState = null;
+      placesHistorySnapshot = JSON.parse(JSON.stringify(before));
         updateUndoButtonUI();
         cityData.places = preview.places;
         // Persist explicit removals so a later scan/OSM merge respects this review.
@@ -9243,6 +9745,7 @@
     }
 
     async function runHomogenizerDiagnosis() {
+      const context=toponymyOperationContext();
       const places = cityData.places || [];
       document.getElementById('homoTotalBadge').innerText = places.length;
       const badgesCont = document.getElementById('homoDiagnosisBadges');
@@ -9257,6 +9760,7 @@
           body: JSON.stringify({ places: places, options: {} })
         });
         const data = await res.json();
+        if (!currentToponymyOperation(context)) return;
         if (data.status === 'ok' && data.result && data.result.diagnosis) {
           const cats = data.result.diagnosis.categories || {};
           badgesCont.innerHTML = `
@@ -9273,6 +9777,7 @@
     }
 
     async function previewHomogenizeAction(actionType) {
+      const context=toponymyOperationContext(), request=++homogenizeVersion;
       const places = cityData.places || [];
       if (places.length === 0) {
         showToast("No hay colonias en la lista para homogeneizar", "info");
@@ -9310,7 +9815,9 @@
           body: JSON.stringify({ places: places, options: options })
         });
         const data = await res.json();
+        if (!currentToponymyOperation(context) || request!==homogenizeVersion) return;
         if (data.status === 'ok' && data.result) {
+          homogenizeContext=context;
           pendingHomogenizeResult = data.result;
           renderHomogenizerDiffUI(data.result);
         } else {
@@ -9357,22 +9864,19 @@
       }
     }
 
-    function applyPendingHomogenization() {
+    async function applyPendingHomogenization() {
       if (!pendingHomogenizeResult || !pendingHomogenizeResult.places) return;
-      const count = pendingHomogenizeResult.diffs ? pendingHomogenizeResult.diffs.length : 0;
-      if (cityData.places && cityData.places.length > 0) {
-        placesHistorySnapshot = JSON.parse(JSON.stringify(cityData.places));
-        updateUndoButtonUI();
+      if (!currentToponymyOperation(homogenizeContext)) {
+        resetHomogenizerPreview();showToast('La configuración cambió; vuelve a previsualizar.','warning');return;
       }
-      cityData.places = pendingHomogenizeResult.places;
-      renderPlacesList();
-      renderPlacesMarkersOnMap();
-      triggerAutoSave();
+      const count = pendingHomogenizeResult.diffs ? pendingHomogenizeResult.diffs.length : 0;
+      if (!await commitToponymyChange(pendingHomogenizeResult.places)) return;
       closeHomogenizerModal();
       showToast(`¡Homogeneización aplicada con éxito! (${count} nombres actualizados)`, "success");
     }
 
     async function deduplicateNearbyPlaces() {
+      const context=toponymyOperationContext();
       const places = cityData.places || [];
       if (places.length < 2) {
         showToast("Se requieren al menos 2 colonias para deduplicar", "info");
@@ -9383,9 +9887,6 @@
         return;
       }
 
-      placesHistorySnapshot = JSON.parse(JSON.stringify(cityData.places));
-      updateUndoButtonUI();
-
       showToast("Buscando duplicados espaciales cercanos...", "info");
       try {
         const res = await fetch('/api/toponymy/deduplicate', {
@@ -9394,13 +9895,10 @@
           body: JSON.stringify({ places: places, distance_m: 500.0 })
         });
         const data = await res.json();
+        if (!currentToponymyOperation(context)) return;
         if (data.status === 'ok') {
           const removed = data.removed_count || 0;
-          cityData.places = data.kept;
-          selectedPlaceIndices.clear();
-          renderPlacesList();
-          renderPlacesMarkersOnMap();
-          triggerAutoSave();
+          if (!await commitToponymyChange(data.kept,data.removed || [])) return;
           if (removed > 0) {
             showToast(`Deduplicación exitosa: se eliminaron ${removed} colonias duplicadas`, "success");
           } else {
@@ -10509,7 +11007,8 @@
             context.snapshot !== JSON.stringify(cityData.places || [])) return;
         if (data.status === 'ok') {
           if (places.length > 0) {
-            placesHistorySnapshot = JSON.parse(JSON.stringify(places));
+            toponymyHistoryState = null;
+      placesHistorySnapshot = JSON.parse(JSON.stringify(places));
             updateUndoButtonUI();
           }
 
@@ -10550,11 +11049,15 @@
     }
 
     function closeDuplicateResolverModal() {
+      duplicateScanVersion++;
+      duplicateReviewContext=null;
       const modal = document.getElementById('modalDuplicateResolver');
       if (modal) modal.classList.add('hidden');
     }
 
     async function scanForToponymyDuplicates() {
+      const context=toponymyOperationContext(), request=++duplicateScanVersion;
+      currentDuplicateGroups=[]; duplicateReviewContext=null;
       const statusEl = document.getElementById('dupResolutionStatus');
       const container = document.getElementById('dupGroupsContainer');
       const badge = document.getElementById('dupTotalBadge');
@@ -10591,6 +11094,8 @@
           })
         });
         const data = await resp.json();
+        if (!currentToponymyOperation(context) || request!==duplicateScanVersion) return;
+        duplicateReviewContext=context;
         currentDuplicateGroups = data.groups || [];
 
         if (badge) {
@@ -10650,7 +11155,7 @@
           const isRec = cand.is_recommended;
           const isChecked = isRec;
           const scaleIcon = cand.scale === 'large' ? '👑' : (cand.scale === 'small' ? '🏘️' : '🏙️');
-          const scaleText = cand.scale === 'large' ? 'Grande (18px)' : (cand.scale === 'small' ? 'Chico (10px)' : 'Mediano (13px)');
+          const scaleText = cand.scale === 'large' ? 'Grande' : (cand.scale === 'small' ? 'Chico (10px)' : 'Mediano (13px)');
 
           candidatesHtml += `
             <label class="flex items-start space-x-2.5 p-2 rounded-lg border transition cursor-pointer ${isRec ? 'bg-emerald-50/70 border-emerald-300 ring-1 ring-emerald-200' : 'bg-stone-50/50 border-stone-200 hover:bg-stone-100/60'}">
@@ -10715,6 +11220,10 @@
     }
 
     async function applyDuplicateResolutions() {
+      const context=duplicateReviewContext;
+      if (!currentToponymyOperation(context)) {
+        showToast('La configuración cambió; vuelve a buscar duplicados.','warning');return;
+      }
       if (!currentDuplicateGroups || currentDuplicateGroups.length === 0) {
         closeDuplicateResolverModal();
         return;
@@ -10757,14 +11266,9 @@
           })
         });
         const result = await resp.json();
+        if (!currentToponymyOperation(context)) return;
         if (result.status === "ok") {
-          placesHistorySnapshot = JSON.parse(JSON.stringify(cityData.places));
-          updateUndoButtonUI();
-          cityData.places = result.places;
-          selectedPlaceIndices.clear();
-          renderPlacesList();
-          renderPlacesMarkersOnMap();
-          triggerAutoSave();
+          if (!await commitToponymyChange(result.places,result.removed || [])) return;
           closeDuplicateResolverModal();
           showToast(`✨ Se resolvieron los duplicados: ${result.total_pruned} elementos redundantes eliminados`, "success");
         } else {
@@ -11737,9 +12241,19 @@
     }
 
     async function loadDemandDataPreview() {
+      const previewFile = currentCityFile;
+      const previewState = JSON.stringify(cityData);
       try {
         const res = await fetch(`/api/demand-preview?file=${encodeURIComponent(currentCityFile)}`);
         const data = await res.json();
+        if (previewFile !== currentCityFile || previewState !== JSON.stringify(cityData)) return;
+        if (data.metadata?.beta_allocation) {
+          const previous = window.demandV2CohortMetadata;
+          window.demandV2CohortMetadata = {file:previewFile,state:previewState,
+            report:previous?.file === previewFile && previous.state === previewState ? previous.report : undefined,
+            allocation:data.metadata.beta_allocation};
+          updateDemandEngineControls();
+        }
         const points = data.points || [];
         const isNotCompiled = !data || data.metadata?.status === 'not_compiled' || points.length === 0;
         const packageAvailable = data.metadata?.package_available === true;

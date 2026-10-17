@@ -356,6 +356,7 @@ def execute_pipeline(
             places=cfg.get("places", []),
             deleted_places=cfg.get("deleted_places", []),
             toponymy_mode=cfg.get("toponymy_mode", "replace"),
+            toponymy_pipeline=cfg.get("toponymy"),
             output_dir=out_dir
         )
     else:

@@ -16,12 +16,12 @@ function harness() {
       let value = '';
       controls.set(id, {get value(){return value;}, set value(v){value=String(v);},
         textContent:'', innerText:'', checked:false, dataset:{}, options:[], listeners:new Map(),
-        classList:{contains(){return true;}}, appendChild(option){this.options.push(option);},
+        classList:{contains(){return true;},add(){},remove(){}}, appendChild(option){this.options.push(option);},
         addEventListener(name, callback){this.listeners.set(name, callback);}});
     }
     return controls.get(id);
   }
-  const context = {console:{warn(){},log:console.log}, currentCityFile:'city.yaml', cityData:{city:{code:'TST'}, macroeconomics:{}},
+  const context = {window:{},console:{warn(){},log:console.log}, currentCityFile:'city.yaml', cityData:{city:{code:'TST'}, macroeconomics:{}},
     densityRequestId:0, densityLoadedCityFile:null, densityPoints:[], conapoCommitPromise:null,
     autoSaveTimer:null, isBboxLocked:false, activeEditingPoiIndex:-1,
     document:{getElementById:element, createElement(){return {}; }},

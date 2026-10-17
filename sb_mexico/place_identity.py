@@ -44,7 +44,14 @@ def same_territory(a, b):
 def same_place(a, b, radius_m=None):
     if not same_territory(a, b):
         return False
+    if a.get('feature_kind') and b.get('feature_kind') and a['feature_kind'] != b['feature_kind']:
+        return False
+    if (a.get('official_code') and b.get('official_code') and
+            a['official_code'] != b['official_code']):
+        return False
     if a.get('id') and a.get('id') == b.get('id'):
+        return True
+    if a.get('official_code') and a['official_code'] == b.get('official_code'):
         return True
     if radius_m is None:
         radius_m = 7500 if a.get('type') in ('city', 'town') and b.get('type') in ('city', 'town') else 500
@@ -52,6 +59,71 @@ def same_place(a, b, radius_m=None):
     b_keys = {place_name_key(b.get(k, '')) for k in ('name', 'original_name')} - {''}
     return (bool(a_keys & b_keys) and
             distance_m(a, b) <= radius_m)
+
+
+def compatible_identity(a, b):
+    """Different official keys and levels are never fuzzy duplicate candidates."""
+    return (same_territory(a, b) and
+            not (a.get('feature_kind') and b.get('feature_kind') and a['feature_kind'] != b['feature_kind']) and
+            not (a.get('official_code') and b.get('official_code') and a['official_code'] != b['official_code']))
+
+
+def strong_identity(a, b):
+    return compatible_identity(a, b) and bool(
+        (a.get('id') and a['id'] == b.get('id')) or
+        (a.get('official_code') and a['official_code'] == b.get('official_code')))
+
+
+def numeric_tokens(name):
+    return tuple(re.findall(r'\d+[a-z]?', unicodedata.normalize('NFC', str(name)).casefold()))
+
+
+def merge_official_places(existing, candidates, deleted=()):
+    """One-to-one migration: preserve edits; never guess a legacy official match."""
+    result = serialize_places(existing)
+    incoming = serialize_places(candidates)
+    for candidate in incoming:
+        candidate.setdefault('official_type', candidate.get('type'))
+    incoming = [p for p in incoming if not any(
+        place_name_key(p['name']) == place_name_key(d) if isinstance(d, str)
+        else same_place(p, d) for d in deleted)]
+    by_id, by_code, by_name = defaultdict(list), defaultdict(list), defaultdict(list)
+    for index, old in enumerate(result):
+        by_id[old['id']].append(index)
+        if old.get('official_code'):
+            by_code[old['official_code']].append(index)
+        for key in {place_name_key(old.get('name')), place_name_key(old.get('original_name'))} - {''}:
+            by_name[key].append(index)
+    matches = {}
+    for candidate in incoming:
+        indices = set(by_id[candidate['id']] + by_code.get(candidate.get('official_code'), []))
+        strong = [i for i in sorted(indices) if strong_identity(result[i], candidate)]
+        names = {place_name_key(candidate.get('name')), place_name_key(candidate.get('original_name'))} - {''}
+        possible = {i for key in names for i in by_name[key]}
+        choices = strong or [i for i in sorted(possible) if same_place(result[i], candidate, 500)]
+        matches[candidate['id']] = choices
+    owners = defaultdict(list)
+    for candidate_id, choices in matches.items():
+        for index in choices:
+            owners[index].append(candidate_id)
+    exceptions = []
+    for candidate in sorted(incoming, key=lambda p: p['id']):
+        choices = matches[candidate['id']]
+        if len(choices) == 1 and len(owners[choices[0]]) == 1:
+            old = result[choices[0]]
+            for key, value in candidate.items():
+                if key not in ('id', 'name', 'loc', 'type', 'source', 'label_overrides'):
+                    old[key] = value
+            old['official_type'] = candidate['type']
+            if old.get('source') != candidate.get('source'):
+                old['matched_source'] = candidate.get('source')
+        else:
+            result.append(candidate)
+            if choices:
+                exceptions.append(dict(id='match_' + candidate['id'], kind='ambiguous_identity',
+                    candidate_id=candidate['id'], existing_ids=[result[i]['id'] for i in choices],
+                    message='Coincidencia territorial ambigua; se conservan ambos registros.'))
+    return sorted(result, key=lambda p: p['id']), exceptions
 
 
 def place_id(place):

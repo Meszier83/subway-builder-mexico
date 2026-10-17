@@ -364,7 +364,6 @@ class ToponymyHomogenizer:
                     new_name = target_format.replace("{num}", num)
                     if new_name != name:
                         item["name"] = new_name
-                        item["type"] = "suburb"
                         modified_count += 1
             output.append(item)
 
@@ -492,6 +491,8 @@ class ToponymyHomogenizer:
             return [], []
 
         source_weights = {
+            "INEGI_LOCALITIES": 5,
+            "INEGI_DCAH": 5,
             "YAML_CURATED": 4,
             "OSM_POLYGON": 3,
             "OSM_NODE": 2,
@@ -507,8 +508,6 @@ class ToponymyHomogenizer:
             key = cls.canonical_key(name)
             src = p.get("source", "UNKNOWN")
             weight = source_weights.get(src, 0)
-            if p.get("original_name"):
-                weight = 4  # Preserve an explicit manual rename.
             decorated.append({
                 "index": idx,
                 "place": dict(p),
@@ -549,9 +548,9 @@ class ToponymyHomogenizer:
                 cand = decorated[j]
 
                 dist = haversine_distance_m(curr["lon"], curr["lat"], cand["lon"], cand["lat"])
-                from .place_identity import same_territory
-                if dist <= distance_threshold_m and same_territory(curr['place'], cand['place']):
-                    is_match = False
+                from .place_identity import same_place
+                if same_place(curr['place'], cand['place'], distance_threshold_m):
+                    is_match = True  # Shared identity already established the match.
                     if curr["key"] and curr["key"] == cand["key"]:
                         is_match = True
                     elif curr["name"].strip().lower() == cand["name"].strip().lower():
@@ -655,8 +654,9 @@ class ToponymyHomogenizer:
 def place_score_components(place: Dict[str, Any], heuristic: str = "balanced") -> Dict[str, float]:
     """Reviewable label policy, without interpreting commerce as population."""
     source = str(place.get("source", "")).upper()
-    origin = 600.0 if "CURATED" in source or place.get("original_name") else (
-        350.0 if "OSM_POLYGON" in source else 200.0 if "OSM_NODE" in source else 50.0 if "DENUE" in source else 0.0)
+    origin = 600.0 if "CURATED" in source else (
+        450.0 if source == 'INEGI_LOCALITIES' else 350.0 if source == 'INEGI_DCAH' or "OSM_POLYGON" in source
+        else 200.0 if "OSM_NODE" in source else 50.0 if "DENUE" in source else 0.0)
     category = place.get("category") or ToponymyAnalyzer.classify_name(str(place.get("name", "")))["category"]
     taxonomy = {"SUPERMANZANA": 350, "REGION": 350, "COLONIA": 200, "BARRIO_PUEBLO": 180,
                 "FRACCIONAMIENTO": 120, "RESIDENCIAL": 70, "UNIDAD_HABITACIONAL": 90,
@@ -1133,8 +1133,10 @@ def find_exact_and_fuzzy_duplicates(
             is_duplicate = False
             match_type = "EXACT"
 
-            from .place_identity import same_territory
-            if not same_territory(curr['place'], cand['place']):
+            from .place_identity import compatible_identity, numeric_tokens
+            if not compatible_identity(curr['place'], cand['place']) or numeric_tokens(curr_name) != numeric_tokens(cand_name):
+                continue
+            if any(not compatible_identity(m['place'], cand['place']) for m in matches):
                 continue
             # Homonyms need spatial agreement, even when spelling is identical.
             if curr_name == cand_name and dist <= distance_threshold_m:
@@ -1165,6 +1167,9 @@ def find_exact_and_fuzzy_duplicates(
                 dist_to_winner = haversine_distance_m(winner["lon"], winner["lat"], m["lon"], m["lat"])
                 p_item = m["place"]
                 candidates_data.append({
+                    "id": p_item.get('id'),
+                    "official_code": p_item.get('official_code'),
+                    "feature_kind": p_item.get('feature_kind'),
                     "original_index": m["original_index"],
                     "name": m["name"],
                     "loc": [m["lon"], m["lat"]],
@@ -1221,6 +1226,16 @@ def resolve_duplicate_groups(
 
         # Si vienen directamente los candidatos en la resolucion
         if cand_indices and sel_idx is not None:
+            if sel_idx not in cand_indices or any(not isinstance(i, int) or not 0 <= i < len(places) for i in cand_indices):
+                raise ValueError('La selección de duplicados ya no corresponde al catálogo.')
+            from .place_identity import compatible_identity, numeric_tokens
+            for candidate in candidates:
+                index = candidate['original_index']
+                if candidate.get('id') and candidate['id'] != places[index].get('id'):
+                    raise ValueError('La identidad de un candidato cambió.')
+                if not compatible_identity(places[sel_idx], places[index]) or (
+                    numeric_tokens(places[sel_idx].get('name')) != numeric_tokens(places[index].get('name'))):
+                    raise ValueError('No se pueden eliminar identidades territoriales distintas como duplicados.')
             for idx in cand_indices:
                 if idx != sel_idx:
                     indices_to_drop.add(idx)
@@ -1236,5 +1251,6 @@ def resolve_duplicate_groups(
         "total_kept": len(kept_places),
         "total_pruned": len(indices_to_drop),
         "pruned_indices": sorted(list(indices_to_drop)),
-        "places": kept_places
+        "places": kept_places,
+        "removed": [p for i, p in enumerate(places) if i in indices_to_drop]
     }

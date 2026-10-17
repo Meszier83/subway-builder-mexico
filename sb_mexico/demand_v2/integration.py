@@ -81,13 +81,15 @@ def execute_candidate(config, root, project_dir, output_dir, include_driving_pat
                                   result['game']['points'], result['game']['pops'], result['report']['export']['commuters'])
 
 
-def preview_candidate(config, root, project_dir=None, roads_path=None, stage='points'):
+def preview_candidate(config, root, project_dir=None, roads_path=None, stage='points', progress=None):
     from .request import prepare_request
     from .engine import build_demand
     request = prepare_request(config, root, project_dir,
+                              progress=progress,
                               roads=demand_roads(config, root, roads_path),
-                              route_provider=osrm_provider(config.get('routing',{})),
+                              route_provider=None if stage == 'sensitivity' else osrm_provider(config.get('routing',{})),
                               route_identity=(config.get('routing',{}).get('network_identity') or 'canonical')+':car:v2')
     result = build_demand(request, stage)
     return dict(identity=result['identity'], stage=stage, engine='v2',
-                points=result.get('points', []), report=result['report'])
+                points=[] if stage == 'sensitivity' else result.get('points', []),
+                report={'sensitivity':result['report']['sensitivity']} if stage == 'sensitivity' else result['report'])

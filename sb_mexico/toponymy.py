@@ -440,6 +440,12 @@ def _load_osm_places(city_file, context, sources):
 
 
 def scan_city_settlements_catalog(city_file: str, min_count: int = 8) -> Dict[str, Any]:
+    # Existing scripts keep their legacy behavior until the project adopts the
+    # official contract; every entry point then uses the same source pipeline.
+    context = _toponymy_context(city_file)
+    if context[2].get('toponymy', {}).get('engine') == 'official_v1':
+        from .toponymy_official import scan_official_catalog
+        return scan_official_catalog(city_file)
     from .demand_sources import select_sources
     from .toponymy_sources import read_denue_sources, denue_places
     from .place_identity import merge_places
@@ -473,6 +479,12 @@ def scan_city_settlements_catalog(city_file: str, min_count: int = 8) -> Dict[st
 
 def city_settlement_suggestions(city_file, min_count=10):
     """Legacy suggestion endpoints use the same authorized DENUE set."""
+    context = _toponymy_context(city_file)
+    if context[2].get('toponymy', {}).get('engine') == 'official_v1':
+        from .toponymy_official import scan_official_catalog
+        catalog = scan_official_catalog(city_file)
+        return dict(suggestions=catalog['candidates'], sources=catalog['sources'],
+                    partial=catalog['partial'], warnings=catalog['warnings'])
     from .demand_sources import select_sources
     from .toponymy_sources import read_denue_sources, denue_places
     root, project, config, bbox = _toponymy_context(city_file)

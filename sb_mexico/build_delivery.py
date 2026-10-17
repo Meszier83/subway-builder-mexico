@@ -96,6 +96,14 @@ def execute_wizard_build(config_path, output_dir, data_dir, skip_map=False):
     result['cartography_config'] = {key: value for key, value in config['city'].items()
                                     if key in map_keys}
     result['cartography_config']['places'] = config.get('places', [])
+    result['cartography_config']['deleted_places'] = config.get('deleted_places', [])
+    result['cartography_config']['toponymy_mode'] = config.get('toponymy_mode', 'replace')
+    result['cartography_config']['toponymy'] = config.get('toponymy')
+    from .toponymy_layout import enabled
+    if enabled(config.get('toponymy')):
+        result['cartography_config']['label_planner_code'] = {
+            name: file_hash(Path(__file__).parent / name) for name in (
+                'toponymy_layout.py', 'toponymy_tiles.py', 'toponymy_delivery.py', 'place_identity.py')}
     result['cartography_config']['data_dir'] = str(Path(data_dir).resolve())
     previous = None
     manifest = root / 'wizard-build.json'
@@ -113,7 +121,7 @@ def execute_wizard_build(config_path, output_dir, data_dir, skip_map=False):
             if previous and (previous.get('cartography_config') != result['cartography_config']
                              or previous.get('config_path') != str(config_path)):
                 asset_root = stage  # Changed BBOX/map settings require fresh cartography.
-            assets = [f'{code}.pmtiles', 'roads.geojson', 'buildings_index.bin.gz',
+            assets = ['toponymy-layout.json', f'{code}.pmtiles', 'roads.geojson', 'buildings_index.bin.gz',
                       'runways_taxiways.geojson', 'ocean_depth_index.json.gz']
             result['reused_cartography'] = {}
             for name in assets:

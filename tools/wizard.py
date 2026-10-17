@@ -49,9 +49,90 @@ source_download_manager = None
 source_download_manager_lock = threading.Lock()
 candidate_preview_lock = threading.Lock()
 candidate_preview_jobs = {}
+city_save_lock = threading.RLock()
 
 
-def candidate_preview_job(resolved, stage, compute, job_id=None):
+def apply_prepared_toponymy(resolved, job_id):
+    """Compare-and-swap only toponymy fields, retaining the rest of the YAML."""
+    from sb_mexico.build_delivery import config_hash
+    from sb_mexico.source_downloads import atomic_json
+    from sb_mexico.toponymy import _toponymy_context
+    from pathlib import Path
+    import tempfile
+    import copy
+    with city_save_lock:
+        with candidate_preview_lock:
+            job = candidate_preview_jobs.get(job_id)
+            if not job or job['status'] != 'complete' or job['key'][0] != resolved or job['key'][1] != 'toponymy-prepare':
+                raise ValueError('Preparación ausente, incompleta o de otra ciudad.')
+            if job['key'][2] != config_hash(resolved):
+                raise ValueError('La configuración cambió; prepara las etiquetas nuevamente.')
+            prepared = copy.deepcopy(job['data']['prepared'])
+        _, project, config, _ = _toponymy_context(resolved)
+        keys = ('places', 'deleted_places', 'toponymy', 'toponymy_mode')
+        before = {key: config[key] for key in keys if key in config}
+        backup_name = config_hash(resolved) + '.json'
+        backup = project / '.toponymy' / 'backups' / backup_name
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        if not backup.exists():
+            atomic_json(backup, dict(city_file=str(Path(resolved).resolve()), fields=before))
+        for key in keys:
+            config[key] = prepared[key]
+        config['toponymy']['backup'] = backup_name
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', newline='\n',
+                    dir=str(Path(resolved).parent), delete=False) as stream:
+                temporary = stream.name
+                yaml.safe_dump(config, stream, allow_unicode=True, sort_keys=False)
+            # Check again after serialization, before publishing.
+            if config_hash(resolved) != job['key'][2]:
+                raise ValueError('La configuración cambió durante el guardado.')
+            os.replace(temporary, resolved)
+            temporary = None
+        finally:
+            if temporary and os.path.exists(temporary):
+                os.unlink(temporary)
+        return dict(status='ok', fields={key: config[key] for key in keys}, before=before,
+                    layout=prepared['layout'], summary=prepared['summary'],
+                    exceptions=prepared['exceptions'], warnings=prepared['warnings'], backup=str(backup))
+
+
+def restore_toponymy_backup(resolved):
+    from pathlib import Path
+    import tempfile
+    from sb_mexico.toponymy import _toponymy_context
+    with city_save_lock:
+        _, project, config, _ = _toponymy_context(resolved)
+        name = (config.get('toponymy') or {}).get('backup', '')
+        if not re.fullmatch(r'[0-9a-f]{64}\.json', name):
+            raise ValueError('No hay un respaldo de toponimia recuperable.')
+        backup = json.loads((project / '.toponymy' / 'backups' / name).read_text(encoding='utf-8'))
+        if backup['city_file'] != str(Path(resolved).resolve()):
+            raise ValueError('El respaldo pertenece a otra ciudad.')
+        keys = ('places', 'deleted_places', 'toponymy', 'toponymy_mode')
+        before = {key: config[key] for key in keys if key in config}
+        fields = backup['fields']
+        for key in keys:
+            if key in fields:
+                config[key] = fields[key]
+            else:
+                config.pop(key, None)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', newline='\n',
+                    dir=str(Path(resolved).parent), delete=False) as stream:
+                temporary = stream.name
+                yaml.safe_dump(config, stream, allow_unicode=True, sort_keys=False)
+            os.replace(temporary, resolved)
+            temporary = None
+        finally:
+            if temporary and os.path.exists(temporary):
+                os.unlink(temporary)
+        return dict(status='ok', fields=fields, before=before)
+
+
+def candidate_preview_job(resolved, stage, compute, job_id=None, with_progress=False):
     """Keep long candidate calculations outside an idle HTTP connection."""
     from sb_mexico.build_delivery import config_hash
     fingerprint = config_hash(resolved)
@@ -71,11 +152,15 @@ def candidate_preview_job(resolved, stage, compute, job_id=None):
                         del candidate_preview_jobs[old_id]
                 if sum(j['status']=='running' for j in candidate_preview_jobs.values()) >= 2:
                     raise ValueError('Hay otras evaluaciones en curso; espera a que terminen.')
-                job = dict(id=uuid.uuid4().hex, key=key, status='running')
+                message = 'Preparando fuentes de nombres territoriales' if stage.startswith('toponymy-') else 'Preparando fuentes y demanda'
+                job = dict(id=uuid.uuid4().hex, key=key, status='running', message=message)
                 candidate_preview_jobs[job['id']] = job
                 def worker():
                     try:
-                        data = compute()
+                        def progress(message):
+                            with candidate_preview_lock:
+                                job['message'] = str(message)
+                        data = compute(progress=progress) if with_progress else compute()
                         if config_hash(resolved) != fingerprint:
                             raise ValueError('La configuración cambió; vuelve a evaluar el candidato.')
                         update = dict(status='complete', data=data)
@@ -86,7 +171,8 @@ def candidate_preview_job(resolved, stage, compute, job_id=None):
                 threading.Thread(target=worker, daemon=True).start()
         if job['status'] == 'complete':
             return dict(job['data'], status='complete', job_id=job['id'])
-        return dict(status=job['status'], job_id=job['id'], stage=stage, error=job.get('error'))
+        return dict(status=job['status'], job_id=job['id'], stage=stage,
+                    message=job.get('message'), error=job.get('error'))
 
 
 def get_source_download_manager():
@@ -628,7 +714,12 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
                 norm_b = raw_b
             lines.append(f'  - id: {_yaml_quote(z_id)}')
             lines.append(f'    name: {_yaml_quote(z_name)}')
-            lines.append(f'    bbox: {norm_b}')
+            if z.get('polygon'):
+                lines.append(f"    polygon: {z['polygon']}")
+            else:
+                lines.append(f'    bbox: {norm_b}')
+            if 'enabled' in z:
+                lines.append(f"    enabled: {str(bool(z['enabled'])).lower()}")
         lines.append("")
 
     # Bloque de Zonas de Alta Afluencia (High Attraction Zones)
@@ -767,6 +858,12 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
 
     if data.get("toponymy_mode") in ("merge", "replace"):
         lines.append("toponymy_mode: " + data["toponymy_mode"])
+
+    if data.get('toponymy') is not None:
+        from sb_mexico.toponymy_official import options
+        options(data)
+        lines.append(yaml.safe_dump({'toponymy': data['toponymy']},
+                                    allow_unicode=True, sort_keys=False).rstrip())
 
     if data.get("deleted_places"):
         lines.append(yaml.safe_dump({"deleted_places": data["deleted_places"]},
@@ -1656,6 +1753,22 @@ def validate_city_configuration(city_file: str) -> Dict[str, Any]:
         z_bbox = z.get("bbox", [])
         if not z_id:
             errors.append(f"Zona aislada #{idx+1} carece de identificador 'id'.")
+        if z.get('polygon'):
+            try:
+                from shapely.geometry import Polygon
+                vertices = z['polygon']
+                if not isinstance(vertices, (list, tuple)) or len(vertices) < 3:
+                    raise ValueError('se requieren al menos 3 vértices')
+                import math
+                if any(len(p) != 2 or not all(math.isfinite(float(v)) for v in p)
+                       or abs(float(p[0])) > 180 or abs(float(p[1])) > 90 for p in vertices):
+                    raise ValueError('coordenadas fuera de rango')
+                shape = Polygon(vertices)
+                if not shape.is_valid or shape.area <= 0:
+                    raise ValueError('contorno cruzado o sin área')
+            except Exception as error:
+                errors.append(f"Zona aislada '{z_id}': polígono inválido ({error}).")
+            continue
         if not isinstance(z_bbox, (list, tuple)) or len(z_bbox) != 4:
             errors.append(f"Zona aislada '{z_id or idx+1}' debe tener un 'bbox' de 4 valores [min_lon, min_lat, max_lon, max_lat].")
         else:
@@ -2136,16 +2249,54 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
             except Exception as error:
                 self.serve_json({"suggestions": [], "error": str(error)})
 
+        elif path == '/api/toponymy/prepare':
+            try:
+                from sb_mexico.toponymy_prepare import prepare_labels
+                resolved = _resolve_city_path(query.get('file', [''])[0])
+                result = candidate_preview_job(resolved, 'toponymy-prepare',
+                    lambda progress: {'prepared': prepare_labels(resolved, progress)},
+                    query.get('job', [None])[0], with_progress=True)
+                self.serve_json(result)
+            except Exception as error:
+                self.serve_error(str(error), 409)
+        elif path == '/api/toponymy/layout':
+            try:
+                from sb_mexico.toponymy_layout import plan_labels, enabled
+                resolved = _resolve_city_path(query.get('file', [''])[0])
+                from sb_mexico.toponymy import _toponymy_context
+                _, _, config, bbox = _toponymy_context(resolved)
+                if not enabled(config.get('toponymy')):
+                    self.serve_json(dict(status='ok', layout=None))
+                else:
+                    self.serve_json(dict(status='ok', layout=plan_labels(config.get('places', []), bbox,
+                        config['city'].get('urban_core_polygon'), config.get('toponymy'))))
+            except Exception as error:
+                self.serve_error(str(error), 400)
         elif path == "/api/toponymy/scan":
             try:
                 city_file = query.get("file", [""])[0]
-                min_count = int(query.get("min_count", ["8"])[0])
-                from sb_mexico.toponymy import scan_city_settlements_catalog
+                from sb_mexico.toponymy_official import scan_official_catalog
                 resolved_f = _resolve_city_path(city_file) if city_file else ""
-                catalog = scan_city_settlements_catalog(resolved_f, min_count=min_count)
-                self.serve_json({"status": "ok", "catalog": catalog})
+                result = candidate_preview_job(resolved_f, 'toponymy-official-scan',
+                    lambda progress: {'catalog': scan_official_catalog(resolved_f, progress)},
+                    query.get('job', [None])[0], with_progress=True)
+                self.serve_json(result)
             except Exception as e:
                 self.serve_json({"status": "error", "message": str(e), "catalog": {"total": 0, "places": []}})
+        elif path == '/api/toponymy/acquire':
+            try:
+                from sb_mexico.toponymy_official import acquire_catalogs, acquire_dcah
+                resolved = _resolve_city_path(query.get('file', [''])[0])
+                source = query.get('source', ['catalogs'])[0]
+                if source not in ('catalogs', 'dcah'):
+                    raise ValueError('Fuente de adquisición desconocida.')
+                acquire = acquire_dcah if source == 'dcah' else acquire_catalogs
+                result = candidate_preview_job(resolved, 'toponymy-official-acquire-' + source,
+                    lambda progress: acquire(resolved, progress),
+                    query.get('job', [None])[0], with_progress=True)
+                self.serve_json(result)
+            except Exception as error:
+                self.serve_error(str(error), 400)
         elif path == "/api/toponymy/osm-preview":
             try:
                 city_file = query.get("file", [""])[0]
@@ -2162,16 +2313,16 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 config = load_city_data(resolved)
                 config.setdefault('demand', {})['engine'] = 'v2'
                 stage = query.get('stage', ['points'])[0]
-                if stage not in ('points', 'allocation'):
-                    raise ValueError('Preview stage must be points or allocation')
+                if stage not in ('points', 'sensitivity', 'allocation'):
+                    raise ValueError('Preview stage must be points, sensitivity or allocation')
                 base = os.path.splitext(os.path.basename(resolved))[0].lower()
                 from sb_mexico.build_delivery import resolve_preview_roads
                 roads_path = resolve_preview_roads(resolved, os.path.join(DIST_DIR, base))
                 if query.get('async', [''])[0] == '1':
                     root = ROOT_DIR
                     result = candidate_preview_job(resolved, stage,
-                        lambda: preview_candidate(config, root, roads_path=roads_path, stage=stage),
-                        query.get('job', [None])[0])
+                        lambda progress: preview_candidate(config, root, roads_path=roads_path, stage=stage, progress=progress),
+                        query.get('job', [None])[0], with_progress=True)
                 else:
                     result = preview_candidate(config, ROOT_DIR, roads_path=roads_path, stage=stage)
                 self.serve_json(result)
@@ -2215,6 +2366,14 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                         demand_json['metadata']['demand_engine'] = candidate.get('engine')
                         demand_json['metadata']['candidate_identity'] = candidate.get('identity')
                         demand_json['metadata']['game_validation'] = candidate.get('game_validation')
+                        pipeline_report = os.path.join(os.path.dirname(target_path), 'demand_pipeline_report.json')
+                        if candidate.get('engine') == 'v2' and os.path.isfile(pipeline_report):
+                            with open(pipeline_report, encoding='utf-8') as stream:
+                                compiled_allocation = json.load(stream).get('allocation', {})
+                            if compiled_allocation.get('beta_policy'):
+                                demand_json['metadata']['beta_allocation'] = {
+                                    key: compiled_allocation.get(key) for key in
+                                    ('beta', 'beta_calibrated', 'beta_policy', 'distance_summary')}
                     allocation_path = os.path.join(os.path.dirname(target_path), 'od_allocation_report.json')
                     if os.path.isfile(allocation_path):
                         with open(allocation_path, encoding='utf-8') as stream:
@@ -2274,7 +2433,51 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
         path = parsed.path
         query = parse_qs(parsed.query)
 
-        if path in ('/api/sources/plan', '/api/sources/start'):
+        if path == '/api/toponymy/restore':
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                if not 0 < length <= 16384:
+                    raise ValueError('Solicitud de restauración inválida.')
+                request = json.loads(self.rfile.read(length).decode('utf-8'))
+                self.serve_json(restore_toponymy_backup(_resolve_city_path(request['file'])))
+            except Exception as error:
+                self.serve_error(str(error), 409)
+        elif path == '/api/toponymy/apply-prepared':
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                if not 0 < length <= 16384:
+                    raise ValueError('Solicitud de aplicación inválida.')
+                request = json.loads(self.rfile.read(length).decode('utf-8'))
+                self.serve_json(apply_prepared_toponymy(_resolve_city_path(request['file']), request['job_id']))
+            except Exception as error:
+                self.serve_error(str(error), 409)
+        elif path == '/api/toponymy/layout':
+            try:
+                from sb_mexico.toponymy_layout import plan_labels, enabled
+                length = int(self.headers.get('Content-Length', 0))
+                if not 0 < length <= 32 * 1024 * 1024:
+                    raise ValueError('Catálogo de etiquetas fuera de tamaño permitido.')
+                request = json.loads(self.rfile.read(length).decode('utf-8'))
+                config = request['config']
+                if not enabled(config.get('toponymy')):
+                    raise ValueError('Activa la preparación automática para calcular etiquetas.')
+                self.serve_json(dict(status='ok', layout=plan_labels(config.get('places', []),
+                    config['city']['bbox'], config['city'].get('urban_core_polygon'), config.get('toponymy'))))
+            except Exception as error:
+                self.serve_error(str(error), 400)
+        elif path == '/api/toponymy/import':
+            try:
+                from sb_mexico.toponymy_official import import_source, MAX_BYTES
+                length = int(self.headers.get('Content-Length', 0))
+                if not 0 < length <= MAX_BYTES:
+                    raise ValueError('La fuente debe pesar entre 1 byte y 768 MB.')
+                resolved = _resolve_city_path(query.get('file', [''])[0])
+                result = import_source(resolved, query.get('kind', [''])[0],
+                                       query.get('name', [''])[0], self.rfile.read(length))
+                self.serve_json(dict(status='ok', **result))
+            except Exception as error:
+                self.serve_error(str(error), 400)
+        elif path in ('/api/sources/plan', '/api/sources/start'):
             try:
                 length = int(self.headers.get('Content-Length', 0))
                 if not 0 < length <= 16384:
@@ -2301,7 +2504,8 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                     self.serve_error("Falta el parámetro 'file'", 400)
                     return
 
-                saved_path = save_full_city_data(city_file, req_data)
+                with city_save_lock:
+                    saved_path = save_full_city_data(city_file, req_data)
                 self.serve_json({"status": "ok", "saved_path": saved_path,
                                  "demographic_reference": req_data.get('macroeconomics', {}).get('demographic_reference')})
             except Exception as e:

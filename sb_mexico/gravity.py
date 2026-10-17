@@ -852,18 +852,20 @@ def assign_zones(coords: np.ndarray, isolated_zones: Optional[List[Dict]] = None
     for idx, z in enumerate(isolated_zones, start=1):
         if not z.get('enabled', True):
             continue
-        if "bbox" in z:
-            b = z["bbox"]  # [min_lon, min_lat, max_lon, max_lat]
-            mask = (lons >= b[0]) & (lons <= b[2]) & (lats >= b[1]) & (lats <= b[3])
-            zones[mask] = idx
-        elif "polygon" in z:
+        if "polygon" in z:
             from shapely.geometry import Point, Polygon
             poly = z["polygon"]
             if isinstance(poly, (list, tuple)):
                 poly = Polygon(poly)
+            if not poly.is_valid or poly.area <= 0:
+                raise ValueError(f"Invalid isolated zone polygon: {z.get('id', idx)}")
             for i in range(n):
-                if poly.contains(Point(lons[i], lats[i])):
+                if poly.covers(Point(lons[i], lats[i])):
                     zones[i] = idx
+        elif "bbox" in z:
+            b = z["bbox"]
+            mask = (lons >= b[0]) & (lons <= b[2]) & (lats >= b[1]) & (lats <= b[3])
+            zones[mask] = idx
     return zones
 
 

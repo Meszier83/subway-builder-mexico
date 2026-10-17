@@ -43,14 +43,21 @@ def read_mobility(paths, municipalities):
                             k = (origin, destination)
                             row = flows.setdefault(k, dict(weight=0., weight_squared=0., records=0,
                                                            training_weight=0., validation_weight=0.,
-                                                           training_weight_squared=0., training_records=0))
+                                                           training_weight_squared=0., training_records=0,
+                                                           selection_weight=0., guard_weight=0.,
+                                                           selection_weights={}, guard_weights={}))
                             row['weight'] += w
                             row['weight_squared'] += w*w
                             row['records'] += 1
                             split = hashlib.sha256(repr(key).encode()).hexdigest()
-                            validation = int(split[:8], 16) % 5 == 0
-                            row['validation_weight' if validation else 'training_weight'] += w
-                            if not validation:
+                            bucket = int(split[:8], 16) % 10
+                            partition = 'guard' if bucket < 2 else 'selection' if bucket < 4 else 'training'
+                            row[partition+'_weight'] += w
+                            if partition != 'training':
+                                row['validation_weight'] += w
+                                weights = row[partition+'_weights']
+                                weights[str(w)] = weights.get(str(w), 0) + 1
+                            else:
                                 row['training_weight_squared'] += w*w
                                 row['training_records'] += 1
                             h = histograms.setdefault(origin, {str(i): 0 for i in range(1, 7)})
@@ -62,6 +69,7 @@ def read_mobility(paths, municipalities):
                     effective_sample_size=v['training_weight']**2/v['training_weight_squared'] if v['training_weight_squared'] else 0.)
                for (o, d), v in sorted(flows.items())]
     return dict(flows=records, travel_time_categories=histograms,
+                beta_split='identity_hash_60_train_20_select_20_guard_v1',
                 precision_basis='Kish effective sample size; not a survey-design confidence interval',
                 time_semantics='Reported multimodal category; not OSRM driving time')
 
