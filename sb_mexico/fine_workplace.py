@@ -20,12 +20,29 @@ def supported(row):
 def level(code):
     return {2:'sector',3:'subsector',4:'rama',5:'subrama',6:'class'}[len(code.split('-')[0])]
 
+_FINE_WORKPLACE_CACHE = {}
+
+
 def load_fine_workplaces(paths, bbox, macro, ce_paths=(), source_root=None, retain_full_scope=False):
+    import copy
     from sb_mexico.inegi import load_denue, resolve_projection_year
     from sb_mexico.historical_benchmark import classify_scope
     from sb_mexico.workplace_employment import band, bounded_fit, source_hashes
     from sb_mexico.residential_employment import file_sha256
     hashes = dict(denue=source_hashes(paths), ce=source_hashes(ce_paths))
+    cache_key = (
+        tuple(hashes['denue']),
+        tuple(hashes['ce']),
+        tuple(sorted((k, float(v)) for k, v in bbox.items())),
+        bool(retain_full_scope),
+        resolve_projection_year(macro)
+    )
+    if cache_key in _FINE_WORKPLACE_CACHE:
+        cached_clipped, cached_empty, cached_report = _FINE_WORKPLACE_CACHE[cache_key]
+        cloned_clipped = cached_clipped.copy()
+        cloned_report = copy.deepcopy(cached_report)
+        cloned_clipped.attrs['workplace_employment'] = cloned_report
+        return cloned_clipped, dict(cached_empty), cloned_report
     controls = read_saic_controls(ce_paths)
     frame = classify_scope(load_denue(paths, bbox, full_scope=True).reset_index(drop=True), paths)
     for column in ('workplace_industry', 'workplace_band'):
@@ -112,10 +129,11 @@ def load_fine_workplaces(paths, bbox, macro, ce_paths=(), source_root=None, reta
     for name,mask in [('full_scope',np.ones(len(frame),dtype=bool)),('bbox',inside.to_numpy())]:
         total = float(frame.loc[mask,'calibrated_jobs'].sum())
         mass = float(frame.loc[mask & changed,'calibrated_jobs'].sum())
+        level_map = {key: level(key[1]) for key in groups}
         by_level = {}
         for node_level in ('sector','subsector','rama','subrama','class'):
-            idx=[i for key,entries in groups.items() if level(key[1])==node_level for i in entries if i in transferred and mask[i]]
-            by_level[node_level]=dict(establishments=len(idx),attraction=float(frame.loc[idx,'calibrated_jobs'].sum()))
+            idx = [i for key, entries in groups.items() if level_map[key] == node_level for i in entries if i in transferred and mask[i]]
+            by_level[node_level] = dict(establishments=len(idx), attraction=float(frame.loc[idx, 'calibrated_jobs'].sum()) if idx else 0.0)
         coverage[name]=dict(establishments=int(mask.sum()),transferred_establishments=int((mask & changed).sum()),
             attraction=total,transferred_attraction=mass,attraction_share=mass/total if total else 0.,by_level=by_level)
     if hashes!=dict(denue=source_hashes(paths),ce=source_hashes(ce_paths)):
@@ -137,4 +155,5 @@ def load_fine_workplaces(paths, bbox, macro, ce_paths=(), source_root=None, reta
                      'No TIL1 expansion or synthetic job locations.'])
     clipped = frame.loc[np.ones(len(frame),dtype=bool) if retain_full_scope else inside].drop(columns='_scope').copy()
     clipped.attrs['workplace_employment']=report
+    _FINE_WORKPLACE_CACHE[cache_key] = (clipped.copy(), {}, copy.deepcopy(report))
     return clipped, {}, report

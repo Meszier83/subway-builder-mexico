@@ -73,19 +73,30 @@ def scope_disposition(code, activity):
     return 'candidate', 'ownership_and_vintage_unverified'
 
 
+_CLASSIFY_SCOPE_LABELS_CACHE = {}
+
+
 def classify_scope(frame, denue_paths):
     """Shared class-label triage; this does not certify institutional ownership."""
-    labels = {}
-    for path in denue_paths:
-        raw = Path(path).read_bytes()
-        for encoding in ('utf-8-sig', 'cp1252', 'latin1'):
-            try:
-                text = raw.decode(encoding)
-                break
-            except UnicodeDecodeError:
-                continue
-        for row in csv.DictReader(io.StringIO(text)):
-            labels.setdefault(str(row.get('codigo_act', '')).strip(), set()).add(row.get('nombre_act', ''))
+    from sb_mexico.workplace_employment import source_hashes
+    cache_key = tuple(source_hashes(denue_paths))
+    if cache_key in _CLASSIFY_SCOPE_LABELS_CACHE:
+        labels = _CLASSIFY_SCOPE_LABELS_CACHE[cache_key]
+    else:
+        labels = {}
+        for path in denue_paths:
+            for encoding in ('utf-8-sig', 'cp1252', 'latin1'):
+                try:
+                    with open(path, 'r', encoding=encoding, errors='replace') as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            code = row.get('codigo_act')
+                            if code:
+                                labels.setdefault(code.strip(), set()).add(row.get('nombre_act', ''))
+                    break
+                except UnicodeDecodeError:
+                    continue
+        _CLASSIFY_SCOPE_LABELS_CACHE[cache_key] = labels
     dispositions = []
     for code in frame.workplace_industry:
         names = labels.get(code, set())

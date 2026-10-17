@@ -319,19 +319,30 @@ def execute_pipeline(
         return _dedup_glob(candidates)
 
     src_dir = search_dirs[0] if search_dirs else ROOT_DIR
-    if macro.get('workplace_employment') == 'auto':
+    if cfg.get('demand', {}).get('engine') != 'v2':
+        if macro.get('workplace_employment') == 'auto':
+            from sb_mexico.demand_sources import select_sources
+            from sb_mexico.automatic_workplace import resolve_automatic_workplace
+            # Fail conflicting source controls before expensive cartography.
+            resolve_automatic_workplace(
+                select_sources(project_dir or national_data_dir, national_data_dir, 'denue', cfg.get('data_exclusions', [])),
+                select_sources(project_dir or national_data_dir, national_data_dir, 'ce', cfg.get('data_exclusions', [])),
+                macro, ROOT_DIR)
+        if macro.get('workplace_employment') == 'historical_transfer':
+            from sb_mexico.demand_sources import select_sources
+            from sb_mexico.historical_transfer import checked_sources
+            checked_sources(select_sources(project_dir or national_data_dir, national_data_dir,
+                                           'denue', cfg.get('data_exclusions', [])), macro, ROOT_DIR)
+    elif macro.get('workplace_employment') == 'auto':
+        # Fast preflight check for v2: verify CE activity years without loading DENUE CSVs
         from sb_mexico.demand_sources import select_sources
-        from sb_mexico.automatic_workplace import resolve_automatic_workplace
-        # Fail conflicting source controls before expensive cartography.
-        resolve_automatic_workplace(
-            select_sources(project_dir or national_data_dir, national_data_dir, 'denue', cfg.get('data_exclusions', [])),
-            select_sources(project_dir or national_data_dir, national_data_dir, 'ce', cfg.get('data_exclusions', [])),
-            macro, ROOT_DIR)
-    if macro.get('workplace_employment') == 'historical_transfer':
-        from sb_mexico.demand_sources import select_sources
-        from sb_mexico.historical_transfer import checked_sources
-        checked_sources(select_sources(project_dir or national_data_dir, national_data_dir,
-                                       'denue', cfg.get('data_exclusions', [])), macro, ROOT_DIR)
+        from sb_mexico.ce_controls import read_saic_controls
+        ce_sources = select_sources(project_dir or national_data_dir, national_data_dir, 'ce', cfg.get('data_exclusions', []))
+        if ce_sources:
+            controls = read_saic_controls(ce_sources)
+            years = {r['reference_year'] for r in controls.values() if r.get('reference_year') is not None}
+            if len(years) > 1:
+                raise ValueError('Automatic CE transfer found multiple activity years; select one year of CE sources')
 
     # =========================================================================
     # 1. COMPILACIÓN CARTOGRÁFICA (SI NO SE OMITE)

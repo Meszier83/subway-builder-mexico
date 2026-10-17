@@ -2030,6 +2030,40 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
         port = getattr(self.server, "server_port", 8080) if hasattr(self, "server") and self.server else 8080
         return f"http://127.0.0.1:{port}"
 
+    def handle_shutdown_request(self):
+        """Detiene ordenadamente el servidor del Wizard, libera contenedores y termina el proceso."""
+        try:
+            city_cfg = active_build.get('config_file')
+            if city_cfg:
+                try:
+                    from sb_mexico.osrm import stop_osrm_daemon_wsl
+                    city_code = os.path.splitext(os.path.basename(city_cfg))[0]
+                    stop_osrm_daemon_wsl(city_code)
+                except Exception:
+                    pass
+
+            self.serve_json({
+                "status": "shutting_down",
+                "message": "Servidor del Wizard detenido correctamente.",
+                "pid": os.getpid()
+            })
+
+            server_ref = self.server
+
+            def _delayed_shutdown():
+                time.sleep(0.4)
+                try:
+                    server_ref.shutdown()
+                    server_ref.server_close()
+                except Exception:
+                    pass
+                time.sleep(0.2)
+                os._exit(0)
+
+            threading.Thread(target=_delayed_shutdown, daemon=True).start()
+        except Exception as e:
+            self.serve_error(str(e), 500)
+
     def do_OPTIONS(self):
         self.send_response(200)
         self.send_header('Content-Length', '0')
@@ -2043,6 +2077,10 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query, keep_blank_values=True)
+
+        if path in ('/api/shutdown', '/api/terminate'):
+            self.handle_shutdown_request()
+            return
 
         if path in ["/", "/index.html"]:
             self.serve_html()
@@ -2957,6 +2995,10 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.serve_error(str(e), 500)
 
+        elif path in ('/api/shutdown', '/api/terminate'):
+            self.handle_shutdown_request()
+            return
+
         else:
             self.serve_error("Método no permitido", 405)
 
@@ -3088,8 +3130,9 @@ def run_server(port: int = 8080, initial_city: str = None, open_browser: bool = 
     try:
         httpd = WizardHTTPServer(server_address, WizardRequestHandler)
     except OSError as error:
-        print(f'[ERROR] No se pudo iniciar {host}:{port}: {error}. '
-              'Comprueba la instancia existente o elige --port explícitamente.')
+        print(f'[ERROR] No se pudo iniciar {host}:{port}: {error}.')
+        print(f'       Ya existe un servidor en ejecución o el puerto {port} está ocupado.')
+        print(f'       Ejecuta "stop_wizard.bat" o "python tools/stop_wizard.py" para liberarlo.')
         sys.exit(1)
 
     port = httpd.server_port

@@ -79,6 +79,12 @@
         <i data-lucide="save" class="w-4 h-4"></i>
         <span>Guardar YAML</span>
       </button>
+
+      <!-- Botón Detener Servidor -->
+      <button onclick="openShutdownModal()" id="btnShutdownGlobal" title="Detener servidor y terminar todos los procesos del Wizard" class="flex items-center space-x-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition shadow">
+        <i data-lucide="power" class="w-4 h-4"></i>
+        <span class="hidden sm:inline">Detener</span>
+      </button>
     </div>
   </header>
 
@@ -3415,6 +3421,31 @@
             Listo y Cerrar
           </button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Detener Servidor y Procesos -->
+  <div id="modalShutdown" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div id="modalShutdownCard" class="bg-white border border-stone-200 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
+      <div class="flex items-center space-x-3 text-rose-600 border-b border-stone-200 pb-3">
+        <div class="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
+          <i data-lucide="power" class="w-6 h-6 text-rose-600"></i>
+        </div>
+        <div>
+          <h3 class="text-base font-bold text-stone-900">Detener Wizard</h3>
+          <p class="text-xs text-stone-500">Cierre de servidor y liberación de recursos</p>
+        </div>
+      </div>
+      <p class="text-xs text-stone-700 leading-relaxed">
+        ¿Estás seguro de que deseas detener el servidor local del Wizard y terminar todos los procesos asociados (incluyendo compilaciones y servicios OSRM)?
+      </p>
+      <div class="flex justify-end space-x-2 pt-2">
+        <button onclick="closeShutdownModal()" class="px-4 py-2 bg-stone-100 text-stone-700 text-xs font-bold rounded-lg hover:bg-stone-200 transition">Cancelar</button>
+        <button onclick="submitShutdownWizard()" class="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg transition shadow flex items-center space-x-1.5">
+          <i data-lucide="power" class="w-4 h-4"></i>
+          <span>Detener Ahora</span>
+        </button>
       </div>
     </div>
   </div>

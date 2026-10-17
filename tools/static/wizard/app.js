@@ -205,6 +205,41 @@
       if (modal) modal.classList.add('hidden');
     }
 
+    function openShutdownModal() {
+      const modal = document.getElementById('modalShutdown');
+      if (modal) modal.classList.remove('hidden');
+      if (window.lucide) lucide.createIcons();
+    }
+
+    function closeShutdownModal() {
+      const modal = document.getElementById('modalShutdown');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    async function submitShutdownWizard() {
+      const card = document.getElementById('modalShutdownCard');
+      if (card) {
+        card.innerHTML = `
+          <div class="text-center py-4 space-y-3">
+            <div class="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
+              <i data-lucide="check-circle" class="w-7 h-7"></i>
+            </div>
+            <h3 class="text-base font-bold text-stone-900">Servidor Detenido</h3>
+            <p class="text-xs text-stone-600 leading-relaxed">
+              El servidor local del Wizard ha finalizado su ejecución y liberado los puertos.<br>
+              Ya puedes cerrar esta pestaña del navegador.
+            </p>
+          </div>
+        `;
+        if (window.lucide) lucide.createIcons();
+      }
+      try {
+        await fetch('/api/shutdown', { method: 'POST' });
+      } catch (e) {
+        // Servidor desconectado como se esperaba
+      }
+    }
+
     function openNewProjectModal() {
       openProjectsModal();
       const input = document.getElementById('newProj_name');
@@ -12330,9 +12365,8 @@
           const missing = Object.keys(names).filter(key => sources[key]?.status !== 'ok');
           if (missing.length) throw new Error(`Faltan fuentes del nuevo motor: ${missing.map(key => names[key]).join(', ')}. Ve a Fuentes y usa Preparar descargas.`);
         }
-        const sourceReport = await refreshWorkplaceSourceStatus(true);
+        refreshWorkplaceSourceStatus().catch(() => {});
         if (file !== currentCityFile || state !== JSON.stringify(cityData)) throw new Error('La configuración cambió; vuelve a compilar.');
-        appendTerminalLog({timestamp: new Date().toLocaleTimeString(), line: workplaceSourceStatus(sourceReport)});
         const res = await fetch('/api/build/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
