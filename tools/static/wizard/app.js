@@ -31,6 +31,7 @@
 
     let bboxHandlesGroup = null;
     let bboxCornerMarkers = { NW: null, NE: null, SE: null, SW: null };
+    let bboxCenterMarker = null;
     let bboxMainGroup = null;
     let isolatedZonesGroup = null;
     let isolatedHandlesGroup = null;
@@ -822,6 +823,38 @@
       });
     }
 
+    function createCenterCrosshairIcon() {
+      return L.divIcon({
+        className: 'bbox-center-handle',
+        html: `
+          <div style="
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            background: #E8E1D3;
+            border: 2px solid #D95F18;
+            border-radius: 50%;
+            box-shadow: 0 0 12px rgba(217,95,24,0.7);
+            cursor: grab;
+            transition: transform 0.1s ease;
+          ">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#D95F18" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="6" stroke-width="1.8"></circle>
+              <line x1="12" y1="2" x2="12" y2="6"></line>
+              <line x1="12" y1="18" x2="12" y2="22"></line>
+              <line x1="2" y1="12" x2="6" y2="12"></line>
+              <line x1="18" y1="12" x2="22" y2="12"></line>
+              <circle cx="12" cy="12" r="2" fill="#D95F18"></circle>
+            </svg>
+          </div>
+        `,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14]
+      });
+    }
+
     function updateBboxLayer(bbox, fit = true) {
       if (!mapBbox || !bbox || bbox.length !== 4) return;
       if (bboxRectangle) {
@@ -829,6 +862,8 @@
         else mapBbox.removeLayer(bboxRectangle);
       }
       if (bboxHandlesGroup) bboxHandlesGroup.clearLayers();
+      bboxCenterMarker = null;
+      bboxCornerMarkers = { NW: null, NE: null, SE: null, SW: null };
 
       let minLon = Math.min(parseFloat(bbox[0]), parseFloat(bbox[2]));
       let minLat = Math.min(parseFloat(bbox[1]), parseFloat(bbox[3]));
@@ -919,6 +954,14 @@
         if (bboxCornerMarkers.NE) bboxCornerMarkers.NE.setLatLng([newB3, newB2]);
         if (bboxCornerMarkers.SE) bboxCornerMarkers.SE.setLatLng([newB1, newB2]);
         if (bboxCornerMarkers.SW) bboxCornerMarkers.SW.setLatLng([newB1, newB0]);
+        if (bboxCenterMarker) {
+          const cLat = (newB1 + newB3) / 2;
+          const cLng = (newB0 + newB2) / 2;
+          bboxCenterMarker.setLatLng([cLat, cLng]);
+          if (bboxCenterMarker.getTooltip()) {
+            bboxCenterMarker.setTooltipContent(`<strong>⨁ Centro BBOX (Arrastrar para mover)</strong><br><span class='text-[11px] font-mono'>${cLat.toFixed(4)}, ${cLng.toFixed(4)}</span>`);
+          }
+        }
         updateZoomPreviewLayer();
         updateBboxDimensionsDisplay([newB0, newB1, newB2, newB3]);
       }
@@ -949,8 +992,99 @@
         mapBbox.fitBounds(bounds, { padding: [40, 40] });
       }
 
-      // Crear las 4 guías visuales en las esquinas si no está bloqueado
+      // Crear las 4 guías visuales en las esquinas y el centro si no está bloqueado
       if (!isBboxLocked) {
+        const centerLat = (minLat + maxLat) / 2;
+        const centerLng = (minLon + maxLon) / 2;
+
+        bboxCenterMarker = L.marker([centerLat, centerLng], {
+          icon: createCenterCrosshairIcon(),
+          draggable: true,
+          zIndexOffset: 1100
+        }).addTo(bboxHandlesGroup);
+
+        bboxCenterMarker.bindTooltip(
+          `<strong>⨁ Centro BBOX (Arrastrar para mover)</strong><br><span class='text-[11px] font-mono'>${centerLat.toFixed(4)}, ${centerLng.toFixed(4)}</span>`,
+          { direction: 'top', offset: [0, -14], className: 'poi-custom-tooltip' }
+        );
+
+        let centerDragStartBbox = null;
+        let centerDragStartCenter = null;
+
+        bboxCenterMarker.on('dragstart', (e) => {
+          if (isDrawingUrbanCore || isDrawingIsolated || isDrawingExclusion) {
+            return;
+          }
+          let b0 = parseFloat(document.getElementById('cfg_bbox_0').value);
+          let b1 = parseFloat(document.getElementById('cfg_bbox_1').value);
+          let b2 = parseFloat(document.getElementById('cfg_bbox_2').value);
+          let b3 = parseFloat(document.getElementById('cfg_bbox_3').value);
+          if (isNaN(b0)) b0 = minLon;
+          if (isNaN(b1)) b1 = minLat;
+          if (isNaN(b2)) b2 = maxLon;
+          if (isNaN(b3)) b3 = maxLat;
+
+          centerDragStartBbox = [b0, b1, b2, b3];
+          centerDragStartCenter = {
+            lng: (b0 + b2) / 2,
+            lat: (b1 + b3) / 2
+          };
+          mapBbox.dragging.disable();
+        });
+
+        bboxCenterMarker.on('drag', (e) => {
+          if (!centerDragStartBbox || !centerDragStartCenter) return;
+          const currentLatLng = e.target.getLatLng();
+          const deltaLng = currentLatLng.lng - centerDragStartCenter.lng;
+          const deltaLat = currentLatLng.lat - centerDragStartCenter.lat;
+
+          const newB0 = parseFloat((centerDragStartBbox[0] + deltaLng).toFixed(4));
+          const newB1 = parseFloat((centerDragStartBbox[1] + deltaLat).toFixed(4));
+          const newB2 = parseFloat((centerDragStartBbox[2] + deltaLng).toFixed(4));
+          const newB3 = parseFloat((centerDragStartBbox[3] + deltaLat).toFixed(4));
+
+          document.getElementById('cfg_bbox_0').value = newB0.toFixed(4);
+          document.getElementById('cfg_bbox_1').value = newB1.toFixed(4);
+          document.getElementById('cfg_bbox_2').value = newB2.toFixed(4);
+          document.getElementById('cfg_bbox_3').value = newB3.toFixed(4);
+
+          const presetSel = document.getElementById('cfg_bbox_preset');
+          if (presetSel && presetSel.value !== 'custom') {
+            presetSel.value = 'custom';
+          }
+
+          cityData.city.bbox = [newB0, newB1, newB2, newB3];
+          bboxRectangle.setBounds([[newB1, newB0], [newB3, newB2]]);
+
+          if (bboxCornerMarkers.NW) bboxCornerMarkers.NW.setLatLng([newB3, newB0]);
+          if (bboxCornerMarkers.NE) bboxCornerMarkers.NE.setLatLng([newB3, newB2]);
+          if (bboxCornerMarkers.SE) bboxCornerMarkers.SE.setLatLng([newB1, newB2]);
+          if (bboxCornerMarkers.SW) bboxCornerMarkers.SW.setLatLng([newB1, newB0]);
+
+          if (bboxCenterMarker.getTooltip()) {
+            bboxCenterMarker.setTooltipContent(`<strong>⨁ Centro BBOX (Arrastrar para mover)</strong><br><span class='text-[11px] font-mono'>${currentLatLng.lat.toFixed(4)}, ${currentLatLng.lng.toFixed(4)}</span>`);
+          }
+
+          updateZoomPreviewLayer();
+          updateBboxDimensionsDisplay([newB0, newB1, newB2, newB3]);
+        });
+
+        bboxCenterMarker.on('dragend', () => {
+          if (centerDragStartBbox) {
+            let b0 = parseFloat(document.getElementById('cfg_bbox_0').value);
+            let b1 = parseFloat(document.getElementById('cfg_bbox_1').value);
+            let b2 = parseFloat(document.getElementById('cfg_bbox_2').value);
+            let b3 = parseFloat(document.getElementById('cfg_bbox_3').value);
+            if (!isNaN(b0) && !isNaN(b1) && !isNaN(b2) && !isNaN(b3)) {
+              bboxCenterMarker.setLatLng([(b1 + b3) / 2, (b0 + b2) / 2]);
+            }
+          }
+          centerDragStartBbox = null;
+          centerDragStartCenter = null;
+          mapBbox.dragging.enable();
+          triggerAutoSave();
+        });
+
         const corners = {
           NW: { latLng: [maxLat, minLon], label: '⇱ Noroeste (Arrastrar para ajustar)' },
           NE: { latLng: [maxLat, maxLon], label: '⇲ Noreste (Arrastrar para ajustar)' },
@@ -1015,6 +1149,14 @@
             if (bboxCornerMarkers.NE && key !== 'NE') bboxCornerMarkers.NE.setLatLng([b3, b2]);
             if (bboxCornerMarkers.SE && key !== 'SE') bboxCornerMarkers.SE.setLatLng([b1, b2]);
             if (bboxCornerMarkers.SW && key !== 'SW') bboxCornerMarkers.SW.setLatLng([b1, b0]);
+            if (bboxCenterMarker) {
+              const cLat = (b1 + b3) / 2;
+              const cLng = (b0 + b2) / 2;
+              bboxCenterMarker.setLatLng([cLat, cLng]);
+              if (bboxCenterMarker.getTooltip()) {
+                bboxCenterMarker.setTooltipContent(`<strong>⨁ Centro BBOX (Arrastrar para mover)</strong><br><span class='text-[11px] font-mono'>${cLat.toFixed(4)}, ${cLng.toFixed(4)}</span>`);
+              }
+            }
             updateZoomPreviewLayer();
             updateBboxDimensionsDisplay([b0, b1, b2, b3]);
           });

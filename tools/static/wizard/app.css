@@ -202,9 +202,14 @@
     .leaflet-drawing-active .draggable-bbox-rect,
     .leaflet-drawing-active .draggable-isolated-rect,
     .leaflet-drawing-active .bbox-corner-handle,
+    .leaflet-drawing-active .bbox-center-handle,
     .leaflet-drawing-active .isolated-corner-handle {
       pointer-events: none !important;
       cursor: crosshair !important;
+    }
+
+    .bbox-center-handle:active div {
+      cursor: grabbing !important;
     }
 
     .draggable-isolated-rect {
