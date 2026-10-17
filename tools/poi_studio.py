@@ -696,6 +696,8 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "", ignore_urb
 
 
 class PoiStudioRequestHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def log_message(self, format, *args):
         # Silenciar logs ruidosos de polling/tile requests
         pass

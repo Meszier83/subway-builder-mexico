@@ -1178,6 +1178,7 @@ def package_demand_outputs(out_dir, city_code, demand_out_path, clean_demand_poi
                 console.print(f"  + Empaquetado: [dim]{fname}[/dim]")
 
     if allocation_report is not None:
+        from .od_allocation import validate_integer_margins
         with zipfile.ZipFile(zip_path) as archive:
             delivered = json.loads(archive.read('demand_data.json'))
         validate_integer_margins(delivered['pops'], allocation_report)

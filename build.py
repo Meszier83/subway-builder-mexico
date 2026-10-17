@@ -12,6 +12,10 @@ import argparse
 from sb_mexico.pipeline import execute_pipeline
 
 def main():
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(
         description="Subway Builder México Engine v7.2 - Compilador de Mapas y Demanda"
     )
