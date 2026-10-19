@@ -1816,35 +1816,35 @@
     <!-- --------------------------------------------------------------------- -->
     <!-- PASO 5: COMPILADOR Y TERMINAL DE TELEMETRÍA EN VIVO -->
     <!-- --------------------------------------------------------------------- -->
-    <section id="stepView-5" class="step-view hidden absolute inset-0 p-6 flex flex-col gap-6 overflow-hidden w-full h-full">
+    <section id="stepView-5" class="step-view hidden absolute inset-0 p-6 flex flex-col gap-6 overflow-y-auto w-full h-full pb-16">
       <!-- Control Superior de Ejecución & Panel Modular -->
-      <div class="bg-metro-card border border-metro-border rounded-xl p-5 shrink-0 shadow-xl space-y-4">
-        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 border-b border-metro-border/60 pb-3">
+      <div class="bg-white border border-stone-200 rounded-xl p-5 shrink-0 shadow-sm space-y-4">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 border-b border-stone-200/80 pb-3">
           <div>
             <div class="flex items-center space-x-3">
-              <h2 class="text-lg font-bold text-white flex items-center space-x-2">
+              <h2 class="text-lg font-bold text-stone-900 flex items-center space-x-2">
                 <i data-lucide="terminal" class="w-5 h-5 text-metro-orange"></i>
                 <span>Compilación y Generación en Vivo</span>
               </h2>
-              <span id="wslStatusBadge" class="text-[11px] px-2.5 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700 flex items-center space-x-1.5">
-                <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>
+              <span id="wslStatusBadge" class="text-[11px] px-2.5 py-0.5 rounded-full bg-stone-100 text-stone-600 border border-stone-200 flex items-center space-x-1.5 font-medium">
+                <span class="w-1.5 h-1.5 rounded-full bg-stone-400"></span>
                 <span>Comprobando WSL...</span>
               </span>
             </div>
-            <p class="text-xs text-gray-400 mt-0.5">Selecciona el alcance modular de la compilación o usa un preset rápido.</p>
+            <p class="text-xs text-stone-500 mt-0.5">Selecciona el alcance modular de la compilación o usa un preset rápido.</p>
           </div>
 
           <!-- Botones de Acción Principal -->
           <div class="flex items-center space-x-2.5 w-full md:w-auto justify-end">
-            <button onclick="startBuild()" id="btnStartBuild" class="px-5 py-2.5 bg-metro-orange hover:bg-orange-600 text-white text-xs font-bold rounded-lg shadow-lg flex items-center space-x-2 transition cursor-pointer">
+            <button onclick="startBuild()" id="btnStartBuild" class="px-5 py-2.5 bg-metro-orange hover:bg-orange-600 text-white text-xs font-bold rounded-lg shadow-sm flex items-center space-x-2 transition cursor-pointer">
               <i data-lucide="play" class="w-4 h-4" id="iconStartBuild"></i>
               <span id="textStartBuild">Iniciar Compilación</span>
             </button>
-            <button onclick="goToStep(6)" id="btnGoToResults" class="hidden px-5 py-2.5 bg-metro-green hover:bg-emerald-600 text-white text-xs font-bold rounded-lg shadow-lg flex items-center space-x-2 transition">
+            <button onclick="goToStep(6)" id="btnGoToResults" class="hidden px-5 py-2.5 bg-metro-green hover:bg-emerald-600 text-white text-xs font-bold rounded-lg shadow-sm flex items-center space-x-2 transition">
               <span>Ver Demanda &rarr;</span>
               <i data-lucide="arrow-right" class="w-4 h-4"></i>
             </button>
-            <a id="btnDownloadZipStep5" href="#" class="hidden px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg shadow-lg flex items-center space-x-2 transition" download>
+            <a id="btnDownloadZipStep5" href="#" class="hidden px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg shadow-sm flex items-center space-x-2 transition" download>
               <i data-lucide="package" class="w-4 h-4"></i>
               <span id="lblDownloadZip">Descargar ZIP</span>
             </a>
@@ -1853,107 +1853,110 @@
 
         <!-- Presets Rápidos de Compilación Modular (1 Clic) -->
         <div>
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-xs font-bold text-gray-300 flex items-center space-x-1.5">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5">
+            <span class="text-xs font-bold text-stone-800 flex items-center space-x-1.5 uppercase tracking-wide">
               <i data-lucide="layers" class="w-3.5 h-3.5 text-metro-orange"></i>
               <span>Presets de Compilación Modular</span>
             </span>
-            <span id="modularPresetHelp" class="text-[11px] text-gray-400 font-mono">Modo: Compilación Completa</span>
+            <span id="modularPresetHelp" class="text-[11px] text-stone-700 bg-stone-100 border border-stone-200 px-2.5 py-1 rounded-md font-mono font-medium shadow-2xs">Modo: Compilación Completa</span>
           </div>
 
-          <div class="grid grid-cols-2 sm:grid-cols-5 gap-2">
-            <button type="button" id="btnPresetFull" onclick="setModularPreset('full')" class="modular-preset-btn p-2.5 rounded-lg border text-left transition flex flex-col justify-between bg-stone-800/90 border-metro-orange text-white shadow-xs cursor-pointer">
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            <button type="button" id="btnPresetFull" onclick="setModularPreset('full')" class="modular-preset-btn p-3 rounded-xl border-2 border-metro-orange bg-orange-50/80 text-stone-900 shadow-sm text-left transition flex flex-col justify-between cursor-pointer">
               <div class="flex items-center justify-between w-full">
-                <span class="font-bold text-xs">🚀 Completa</span>
-                <span id="dotPresetFull" class="w-2 h-2 rounded-full bg-metro-orange"></span>
+                <span class="font-extrabold text-xs text-stone-900">🚀 Completa</span>
+                <span id="dotPresetFull" class="w-2.5 h-2.5 rounded-full bg-metro-orange ring-4 ring-orange-200/70"></span>
               </div>
-              <p class="text-[10px] text-gray-400 mt-1 leading-tight">Cartografía 3D + Demanda + Config + ZIP</p>
+              <p class="text-[11px] text-stone-600 mt-1 leading-snug">Cartografía 3D + Demanda + Config + ZIP</p>
             </button>
 
-            <button type="button" id="btnPresetMapOnly" onclick="setModularPreset('map_only')" class="modular-preset-btn p-2.5 rounded-lg border border-gray-700 bg-stone-900/60 hover:bg-stone-800 text-gray-300 text-left transition flex flex-col justify-between cursor-pointer">
+            <button type="button" id="btnPresetMapOnly" onclick="setModularPreset('map_only')" class="modular-preset-btn p-3 rounded-xl border border-stone-200 hover:border-stone-300 bg-stone-50/90 hover:bg-stone-100 text-stone-800 text-left transition flex flex-col justify-between cursor-pointer">
               <div class="flex items-center justify-between w-full">
-                <span class="font-bold text-xs">🗺️ Solo Mapa</span>
-                <span id="dotPresetMapOnly" class="w-2 h-2 rounded-full bg-gray-600"></span>
+                <span class="font-extrabold text-xs text-stone-900">🗺️ Solo Mapa</span>
+                <span id="dotPresetMapOnly" class="w-2.5 h-2.5 rounded-full bg-stone-300"></span>
               </div>
-              <p class="text-[10px] text-gray-400 mt-1 leading-tight">Cartografía 3D (reutiliza demanda previa)</p>
+              <p class="text-[11px] text-stone-600 mt-1 leading-snug">Cartografía 3D (reutiliza demanda previa)</p>
             </button>
 
-            <button type="button" id="btnPresetLabels" onclick="setModularPreset('labels_only')" class="modular-preset-btn p-2.5 rounded-lg border border-gray-700 bg-stone-900/60 hover:bg-stone-800 text-gray-300 text-left transition flex flex-col justify-between cursor-pointer">
+            <button type="button" id="btnPresetLabels" onclick="setModularPreset('labels_only')" class="modular-preset-btn p-3 rounded-xl border border-stone-200 hover:border-stone-300 bg-stone-50/90 hover:bg-stone-100 text-stone-800 text-left transition flex flex-col justify-between cursor-pointer">
               <div class="flex items-center justify-between w-full">
-                <span class="font-bold text-xs">🏷️ Solo Etiquetas</span>
-                <span id="dotPresetLabels" class="w-2 h-2 rounded-full bg-gray-600"></span>
+                <span class="font-extrabold text-xs text-stone-900">🏷️ Solo Etiquetas</span>
+                <span id="dotPresetLabels" class="w-2.5 h-2.5 rounded-full bg-stone-300"></span>
               </div>
-              <p class="text-[10px] text-gray-400 mt-1 leading-tight">Toponimia sobre mapa base previo</p>
+              <p class="text-[11px] text-stone-600 mt-1 leading-snug">Toponimia sobre mapa base previo</p>
             </button>
 
-            <button type="button" id="btnPresetDemand" onclick="setModularPreset('demand_only')" class="modular-preset-btn p-2.5 rounded-lg border border-gray-700 bg-stone-900/60 hover:bg-stone-800 text-gray-300 text-left transition flex flex-col justify-between cursor-pointer">
+            <button type="button" id="btnPresetDemand" onclick="setModularPreset('demand_only')" class="modular-preset-btn p-3 rounded-xl border border-stone-200 hover:border-stone-300 bg-stone-50/90 hover:bg-stone-100 text-stone-800 text-left transition flex flex-col justify-between cursor-pointer">
               <div class="flex items-center justify-between w-full">
-                <span class="font-bold text-xs">📊 Solo Demanda</span>
-                <span id="dotPresetDemand" class="w-2 h-2 rounded-full bg-gray-600"></span>
+                <span class="font-extrabold text-xs text-stone-900">📊 Solo Demanda</span>
+                <span id="dotPresetDemand" class="w-2.5 h-2.5 rounded-full bg-stone-300"></span>
               </div>
-              <p class="text-[10px] text-gray-400 mt-1 leading-tight">Demanda y POIs (reutiliza mapa previo)</p>
+              <p class="text-[11px] text-stone-600 mt-1 leading-snug">Demanda y POIs (reutiliza mapa previo)</p>
             </button>
 
-            <button type="button" id="btnPresetConfig" onclick="setModularPreset('config_only')" class="modular-preset-btn p-2.5 rounded-lg border border-gray-700 bg-stone-900/60 hover:bg-stone-800 text-gray-300 text-left transition flex flex-col justify-between cursor-pointer">
+            <button type="button" id="btnPresetConfig" onclick="setModularPreset('config_only')" class="modular-preset-btn p-3 rounded-xl border border-stone-200 hover:border-stone-300 bg-stone-50/90 hover:bg-stone-100 text-stone-800 text-left transition flex flex-col justify-between cursor-pointer">
               <div class="flex items-center justify-between w-full">
-                <span class="font-bold text-xs">⚙️ Solo Config</span>
-                <span id="dotPresetConfig" class="w-2 h-2 rounded-full bg-gray-600"></span>
+                <span class="font-extrabold text-xs text-stone-900">⚙️ Solo Config</span>
+                <span id="dotPresetConfig" class="w-2.5 h-2.5 rounded-full bg-stone-300"></span>
               </div>
-              <p class="text-[10px] text-gray-400 mt-1 leading-tight">Zoom, metadatos y re-empaquetado</p>
+              <p class="text-[11px] text-stone-600 mt-1 leading-snug">Zoom, metadatos y re-empaquetado</p>
             </button>
           </div>
         </div>
 
         <!-- Opciones Granulares & Estado de Caché -->
-        <details id="detailsModularAdvanced" class="bg-stone-900/60 p-3 rounded-lg border border-gray-800 text-xs group">
-          <summary class="font-bold text-gray-300 cursor-pointer flex items-center justify-between select-none">
-            <span class="flex items-center space-x-1.5">
-              <i data-lucide="sliders" class="w-3.5 h-3.5 text-gray-400"></i>
-              <span>Ajustes Granulares de Módulos & Estado de Caché</span>
+        <details id="detailsModularAdvanced" class="bg-stone-50/80 p-3.5 rounded-xl border border-stone-200 text-xs group">
+          <summary class="font-bold text-stone-800 hover:text-stone-950 cursor-pointer flex items-center justify-between select-none">
+            <span class="flex items-center space-x-2">
+              <i data-lucide="sliders" class="w-4 h-4 text-metro-orange"></i>
+              <span class="text-xs uppercase tracking-wide">Ajustes Granulares de Módulos & Estado de Caché</span>
             </span>
-            <span class="text-[10px] text-gray-500 group-open:rotate-180 transition-transform">▼</span>
+            <span class="text-[11px] text-stone-500 group-open:rotate-180 transition-transform font-mono">▼</span>
           </summary>
-          <div class="pt-3 grid grid-cols-1 md:grid-cols-3 gap-3 border-t border-gray-800 mt-2">
+          <div class="pt-3 grid grid-cols-1 md:grid-cols-3 gap-3 border-t border-stone-200 mt-2.5">
             <!-- Módulo 1: Cartografía -->
-            <div class="bg-stone-950/70 p-2.5 rounded border border-gray-800 space-y-1.5">
-              <label class="block font-bold text-gray-300 text-[11px]">Cartografía 3D (WSL 2)</label>
-              <select id="selModularCartography" onchange="onModularCartographyChanged(this.value)" class="w-full bg-stone-900 border border-gray-700 rounded px-2 py-1 text-white font-medium text-xs">
+            <div class="bg-white p-3 rounded-lg border border-stone-200 space-y-2 shadow-2xs">
+              <label class="block font-bold text-stone-800 text-[11px] uppercase tracking-wider">Cartografía 3D (WSL 2)</label>
+              <select id="selModularCartography" onchange="onModularCartographyChanged(this.value)" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-medium text-xs">
                 <option value="full">Compilar Mapa Completo</option>
                 <option value="labels_only">Solo Etiquetas (Rápido)</option>
                 <option value="skip">Omitir (Reutilizar existente)</option>
               </select>
-              <div id="cacheStatusCartography" class="text-[10px] text-gray-500 flex items-center space-x-1">
-                <span>Caché mapa:</span> <strong id="lblCacheCartography" class="text-gray-400">Consultando...</strong>
+              <div id="cacheStatusCartography" class="text-[11px] text-stone-600 flex items-center justify-between pt-1">
+                <span>Caché mapa:</span> <strong id="lblCacheCartography" class="font-normal">Consultando...</strong>
               </div>
             </div>
 
             <!-- Módulo 2: Demanda -->
-            <div class="bg-stone-950/70 p-2.5 rounded border border-gray-800 space-y-1.5">
-              <label class="block font-bold text-gray-300 text-[11px]">Demanda INEGI / OSRM</label>
-              <select id="selModularDemand" onchange="onModularDemandChanged(this.value)" class="w-full bg-stone-900 border border-gray-700 rounded px-2 py-1 text-white font-medium text-xs">
+            <div class="bg-white p-3 rounded-lg border border-stone-200 space-y-2 shadow-2xs">
+              <label class="block font-bold text-stone-800 text-[11px] uppercase tracking-wider">Demanda INEGI / OSRM</label>
+              <select id="selModularDemand" onchange="onModularDemandChanged(this.value)" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-medium text-xs">
                 <option value="compile">Compilar Demanda Completa</option>
                 <option value="skip">Reutilizar demand_data.json</option>
               </select>
-              <div id="cacheStatusDemand" class="text-[10px] text-gray-500 flex items-center space-x-1">
-                <span>Caché demanda:</span> <strong id="lblCacheDemand" class="text-gray-400">Consultando...</strong>
+              <div id="cacheStatusDemand" class="text-[11px] text-stone-600 flex items-center justify-between pt-1">
+                <span>Caché demanda:</span> <strong id="lblCacheDemand" class="font-normal">Consultando...</strong>
               </div>
             </div>
 
             <!-- Módulo 3: Empaquetado & Opciones -->
-            <div class="bg-stone-950/70 p-2.5 rounded border border-gray-800 space-y-1.5">
-              <label class="block font-bold text-gray-300 text-[11px]">Empaquetado & Opciones</label>
-              <label class="flex items-center space-x-2 text-xs text-gray-300 cursor-pointer">
-                <input type="checkbox" id="chkPackageZip" checked onchange="syncModularCheckboxes()" class="w-3.5 h-3.5 accent-metro-orange rounded">
-                <span>Empaquetar archivo .ZIP final</span>
-              </label>
-              <label class="flex items-center space-x-2 text-xs text-gray-300 cursor-pointer" title="Excluir macro-selvas y reservas rurales">
-                <input type="checkbox" id="chkUrbanParksStep5" onchange="syncUrbanParksFromStep5(this.checked)" class="w-3.5 h-3.5 accent-metro-orange rounded">
-                <span>Solo parques urbanos</span>
-              </label>
+            <div class="bg-white p-3 rounded-lg border border-stone-200 space-y-2 shadow-2xs flex flex-col justify-between">
+              <div>
+                <label class="block font-bold text-stone-800 text-[11px] uppercase tracking-wider mb-2">Empaquetado & Opciones</label>
+                <div class="space-y-2">
+                  <label class="flex items-center space-x-2 text-xs text-stone-800 cursor-pointer select-none">
+                    <input type="checkbox" id="chkPackageZip" checked onchange="syncModularCheckboxes()" class="w-4 h-4 accent-metro-orange rounded">
+                    <span>Empaquetar archivo .ZIP final</span>
+                  </label>
+                  <label class="flex items-center space-x-2 text-xs text-stone-800 cursor-pointer select-none" title="Excluir macro-selvas y reservas rurales">
+                    <input type="checkbox" id="chkUrbanParksStep5" onchange="syncUrbanParksFromStep5(this.checked)" class="w-4 h-4 accent-metro-orange rounded">
+                    <span>Solo parques urbanos</span>
+                  </label>
+                </div>
+              </div>
             </div>
           </div>
         </details>
-
         <!-- Hidden legacy checkboxes for backward compatibility with existing JS calls -->
         <input type="checkbox" id="chkSkipMap" class="hidden">
         <input type="checkbox" id="chkLabelsOnly" class="hidden">
@@ -1963,29 +1966,29 @@
       </div>
 
       <!-- Barra de Progreso y Fases -->
-      <div class="bg-metro-card border border-metro-border rounded-xl p-4 shrink-0 space-y-2 shadow-xl">
-        <div class="flex justify-between text-xs font-bold">
-          <span id="buildStepLabel" class="text-gray-300">Estado: En espera</span>
-          <span id="buildPercentLabel" class="text-metro-orange font-mono">0%</span>
+      <div class="bg-white border border-stone-200 rounded-xl p-4 shrink-0 space-y-2 shadow-sm">
+        <div class="flex justify-between items-center text-xs font-bold">
+          <span id="buildStepLabel" class="text-stone-800">Estado: En espera</span>
+          <span id="buildPercentLabel" class="text-metro-orange font-mono font-bold text-sm">0%</span>
         </div>
-        <div class="w-full bg-metro-panel rounded-full h-3 overflow-hidden border border-metro-border">
+        <div class="w-full bg-stone-100 rounded-full h-3.5 overflow-hidden border border-stone-200">
           <div id="buildProgressBar" class="h-full bg-gradient-to-r from-metro-orange via-metro-green to-metro-pink w-0 transition-all duration-300"></div>
         </div>
       </div>
 
       <!-- Terminal de Consola Vintage Wyman -->
-      <div class="flex-1 bg-black/95 border border-metro-border rounded-xl p-4 font-mono text-xs flex flex-col overflow-hidden shadow-2xl relative">
-        <div class="flex justify-between items-center pb-2 border-b border-gray-800 text-gray-400 shrink-0">
+      <div class="min-h-[280px] h-80 shrink-0 bg-stone-950 border border-stone-800 rounded-xl p-4 font-mono text-xs flex flex-col overflow-hidden shadow-sm relative">
+        <div class="flex justify-between items-center pb-2 border-b border-stone-800 text-stone-400 shrink-0">
           <span class="flex items-center space-x-2">
             <span class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span>
             <span class="w-2.5 h-2.5 rounded-full bg-yellow-500 inline-block"></span>
             <span class="w-2.5 h-2.5 rounded-full bg-green-500 inline-block"></span>
-            <span class="text-[11px] ml-2 text-gray-500">pipeline_stdout_stream.log</span>
+            <span class="text-[11px] ml-2 text-stone-500 font-sans">pipeline_stdout_stream.log</span>
           </span>
-          <button onclick="clearTerminal()" class="text-[11px] hover:text-white transition">Limpiar Consola</button>
+          <button onclick="clearTerminal()" class="text-[11px] text-stone-400 hover:text-white transition cursor-pointer">Limpiar Consola</button>
         </div>
-        <div id="terminalOutput" class="flex-1 overflow-y-auto pt-3 space-y-1 terminal-scroll text-green-400">
-          <p class="text-gray-500">// Terminal lista. Haz clic en 'Iniciar Compilación' para arrancar el pipeline.</p>
+        <div id="terminalOutput" class="flex-1 overflow-y-auto pt-3 space-y-1 terminal-scroll text-green-400 font-mono text-[11px] leading-relaxed">
+          <p class="text-stone-500">// Terminal lista. Haz clic en 'Iniciar Compilación' para arrancar el pipeline.</p>
         </div>
       </div>
     </section>

@@ -12536,10 +12536,10 @@
         systemHealthPolls = 0;
 
         if (data.wsl_ready) {
-          badge.className = "text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center space-x-1.5";
+          badge.className = "text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center space-x-1.5 font-medium";
           badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> <span>WSL 2 + MapGen Listo</span>`;
         } else {
-          badge.className = "text-[11px] px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center space-x-1.5";
+          badge.className = "text-[11px] px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 flex items-center space-x-1.5 font-medium";
           badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> <span>WSL No Detectado (Modo Demanda)</span>`;
         }
       } catch (e) { wizardLifecycle.warn('system', e.message, checkSystemHealth); }
@@ -12614,11 +12614,11 @@
         const d = dotMap[p];
         if (!b) return;
         if (p === activePreset) {
-          b.className = "modular-preset-btn p-2.5 rounded-lg border text-left transition flex flex-col justify-between bg-stone-800/90 border-metro-orange text-white shadow-xs cursor-pointer";
-          if (d) d.className = "w-2 h-2 rounded-full bg-metro-orange";
+          b.className = "modular-preset-btn p-3 rounded-xl border-2 border-metro-orange bg-orange-50/80 text-stone-900 shadow-sm text-left transition flex flex-col justify-between cursor-pointer";
+          if (d) d.className = "w-2.5 h-2.5 rounded-full bg-metro-orange ring-4 ring-orange-200/70";
         } else {
-          b.className = "modular-preset-btn p-2.5 rounded-lg border border-gray-700 bg-stone-900/60 hover:bg-stone-800 text-gray-300 text-left transition flex flex-col justify-between cursor-pointer";
-          if (d) d.className = "w-2 h-2 rounded-full bg-gray-600";
+          b.className = "modular-preset-btn p-3 rounded-xl border border-stone-200 hover:border-stone-300 bg-stone-50/90 hover:bg-stone-100 text-stone-800 text-left transition flex flex-col justify-between cursor-pointer";
+          if (d) d.className = "w-2.5 h-2.5 rounded-full bg-stone-300";
         }
       });
 
@@ -12691,17 +12691,17 @@
 
         if (lblCarto) {
           if (data.map_available) {
-            lblCarto.innerHTML = `<span class="text-emerald-400 font-semibold">✅ Disponible (${escapeHtml(data.map_file || 'pmtiles')})</span>`;
+            lblCarto.innerHTML = `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 font-mono">✅ Disponible (${escapeHtml(data.map_file || 'pmtiles')})</span>`;
           } else {
-            lblCarto.innerHTML = `<span class="text-amber-400">⚠️ No compilado</span>`;
+            lblCarto.innerHTML = `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200 font-mono">⚠️ No compilado</span>`;
           }
         }
 
         if (lblDemand) {
           if (data.demand_available) {
-            lblDemand.innerHTML = `<span class="text-emerald-400 font-semibold">✅ Disponible (${data.demand_cohorts || 0} cohortes)</span>`;
+            lblDemand.innerHTML = `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 font-mono">✅ Disponible (${data.demand_cohorts || 0} cohortes)</span>`;
           } else {
-            lblDemand.innerHTML = `<span class="text-amber-400">⚠️ No compilado</span>`;
+            lblDemand.innerHTML = `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200 font-mono">⚠️ No compilado</span>`;
           }
         }
 
@@ -12760,7 +12760,7 @@
       document.getElementById('buildStepLabel').innerText = "Fase: Iniciando Pipeline...";
       document.getElementById('buildPercentLabel').innerText = "0%";
       document.getElementById('buildStatusText').innerText = "Compilando...";
-      document.getElementById('buildStatusBadge').className = "flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-mono bg-metro-card text-metro-text border border-metro-border shadow-sm";
+      document.getElementById('buildStatusBadge').className = "flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-mono bg-stone-100 text-stone-800 border border-stone-200 shadow-2xs";
 
       showToast("Iniciando pipeline de compilación...", "info");
 
