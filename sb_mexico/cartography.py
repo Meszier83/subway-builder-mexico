@@ -248,7 +248,12 @@ def build_city_map_wsl(
     curated_places_geojson: Optional[str] = None,
     deleted_places: Optional[List] = None,
     toponymy_mode: str = "replace",
-    toponymy_pipeline: Optional[Dict] = None
+    toponymy_pipeline: Optional[Dict] = None,
+    create_building_foundations: bool = True,
+    max_building_tile_size: Optional[int] = None,
+    color_military_like_aerodrome: bool = True,
+    places_suffix: str = "",
+    labels_only: bool = False
 ) -> Dict[str, str]:
     """
     Ejecuta la compilación cartográfica dentro de WSL Ubuntu vía subprocess con streaming en vivo.
@@ -266,6 +271,16 @@ def build_city_map_wsl(
         "--building-filter-size", str(building_filter_size),
         "--building-simplification", str(building_simplification)
     ]
+    if not create_building_foundations:
+        wsl_cmd.append("--no-building-foundations")
+    if max_building_tile_size is not None and int(max_building_tile_size) > 0:
+        wsl_cmd.extend(["--max-building-tile-size", str(int(max_building_tile_size))])
+    if not color_military_like_aerodrome:
+        wsl_cmd.append("--no-color-military-like-aerodrome")
+    if places_suffix:
+        wsl_cmd.extend(["--places-suffix", str(places_suffix)])
+    if labels_only:
+        wsl_cmd.append("--labels-only")
     if include_ocean:
         wsl_cmd.append("--include-ocean")
     if urban_parks_only:
@@ -410,7 +425,12 @@ def build_city_map(
     denue_csv: Optional[str] = None,
     deleted_places: Optional[List] = None,
     toponymy_mode: str = "replace",
-    toponymy_pipeline: Optional[Dict] = None
+    toponymy_pipeline: Optional[Dict] = None,
+    create_building_foundations: bool = True,
+    max_building_tile_size: Optional[int] = None,
+    color_military_like_aerodrome: bool = True,
+    places_suffix: str = "",
+    labels_only: bool = False
 ) -> Dict[str, str]:
     """
     Ejecuta el pipeline cartográfico completo de depot.maps.MapGen.
@@ -451,7 +471,12 @@ def build_city_map(
                 denue_csv=denue_csv,
                 deleted_places=deleted_places,
                 toponymy_mode=toponymy_mode,
-                toponymy_pipeline=toponymy_pipeline
+                toponymy_pipeline=toponymy_pipeline,
+                create_building_foundations=create_building_foundations,
+                max_building_tile_size=max_building_tile_size,
+                color_military_like_aerodrome=color_military_like_aerodrome,
+                places_suffix=places_suffix,
+                labels_only=labels_only
             )
 
         else:
@@ -612,26 +637,48 @@ def build_city_map(
     try:
         MapGen = planned_mapgen(MapGen, collection)
         os.chdir(native_build_dir)
-        m = MapGen(
-            city=city_code,
-            bbox=bbox,
-            osmpbf=osm_pbf_name,
-            outputdir=build_output_dir,
-            RAM=ram_mb,
-            ncores=cores,
-            cities=ETIQUETAS_CITIES,
-            suburbs=ETIQUETAS_SUBURBS,
-            neighborhoods=ETIQUETAS_NEIGHBORHOODS,
-            label_name_language="prefer:es",
-            road_name_preferred_language="es",
-            building_index_filter_size=building_filter_size,
-            building_index_simplification=building_simplification,
-            create_ocean_foundations=include_ocean,
-            redownload_buildings=not buildings_cache_valid
-        )
+        mapgen_kwargs = {
+            "city": city_code,
+            "bbox": bbox,
+            "osmpbf": osm_pbf_name,
+            "outputdir": build_output_dir,
+            "RAM": ram_mb,
+            "ncores": cores,
+            "cities": ETIQUETAS_CITIES,
+            "suburbs": ETIQUETAS_SUBURBS,
+            "neighborhoods": ETIQUETAS_NEIGHBORHOODS,
+            "label_name_language": "prefer:es",
+            "road_name_preferred_language": "es",
+            "building_index_filter_size": building_filter_size,
+            "building_tile_filter_size": building_filter_size,
+            "building_index_simplification": building_simplification,
+            "building_tile_simplification": building_simplification,
+            "create_building_foundations": bool(create_building_foundations),
+            "create_ocean_foundations": include_ocean,
+            "color_military_like_aerodrome": bool(color_military_like_aerodrome),
+            "places_suffix": str(places_suffix or ""),
+            "redownload_buildings": not buildings_cache_valid,
+        }
+        if max_building_tile_size is not None and int(max_building_tile_size) > 0:
+            mapgen_kwargs["max_building_tile_size"] = int(max_building_tile_size)
 
-        print("-> Ejecutando extracción de geometrías, vialidades, toponimia y edificios 3D...")
-        m.run_all()
+        m = MapGen(**mapgen_kwargs)
+
+        can_run_labels_only = (
+            bool(labels_only)
+            and (
+                os.path.exists(os.path.join(build_output_dir, "base.pmtiles"))
+                or os.path.exists(os.path.join(native_build_dir, f"{city_code}.pmtiles"))
+            )
+        )
+        if can_run_labels_only:
+            print("-> [Modo Rápido labels_only] Regenerando capas toponímicas con MapGen.add_labels()...")
+            m.add_labels()
+        else:
+            if labels_only:
+                print(f"-> [AVISO] Capas base previas no encontradas en {build_output_dir}. Ejecutando MapGen.run_all() completo...")
+            print("-> Ejecutando extracción de geometrías, vialidades, toponimia y edificios 3D...")
+            m.run_all()
 
         try:
             with open(buildings_meta_file, "w", encoding="utf-8") as bf:

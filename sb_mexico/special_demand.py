@@ -8,6 +8,8 @@ al estándar canónico de Subway Builder Modded / Foundry (@subway-builder-modde
 import os
 import re
 import json
+import math
+import statistics
 import datetime
 from typing import Dict, List, Any, Tuple, Optional
 
@@ -262,3 +264,203 @@ def save_special_demand_points(content: Dict[str, Any], output_path: str) -> Non
     """Exporta el archivo JSON con formato limpio y validado."""
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(content, f, indent=2, ensure_ascii=False)
+
+
+def write_railyard_metadata_dir(out_dir: str, special_demand_points_doc: Dict[str, Any]) -> str:
+    """
+    Escribe el subdirectorio .railyard_map/ conforme al estándar canónico de depot y Railyard:
+    - .railyard_map/special_demand_points.json
+    - .railyard_map/special_demand_types.json
+    """
+    railyard_dir = os.path.join(out_dir, ".railyard_map")
+    os.makedirs(railyard_dir, exist_ok=True)
+
+    sp_target = os.path.join(railyard_dir, "special_demand_points.json")
+    with open(sp_target, "w", encoding="utf-8") as f:
+        json.dump(special_demand_points_doc, f, indent=2, ensure_ascii=False)
+
+    types_target = os.path.join(railyard_dir, "special_demand_types.json")
+    types_doc = load_special_demand_types()
+    with open(types_target, "w", encoding="utf-8") as f:
+        json.dump(types_doc, f, indent=2, ensure_ascii=False)
+
+    return railyard_dir
+
+
+def generate_railyard_description_md(
+    city_info: Dict[str, Any],
+    demand_payload: Dict[str, Any],
+    special_demand_points_doc: Optional[Dict[str, Any]] = None,
+    out_dir: Optional[str] = None
+) -> str:
+    """
+    Genera el archivo description.md conforme a la especificación de DemandData.create_description() de depot
+    para la publicación oficial de mapas en Railyard.
+    """
+    name = city_info.get("name", "Map")
+    code = str(city_info.get("code", "MAP")).upper()
+    version = str(city_info.get("version", "7.2.0"))
+    description_text = city_info.get("description", f"Mapa oficial de {name} para Subway Builder.")
+    creator = city_info.get("creator", "Subway Builder México Pipeline")
+    bbox = [float(x) for x in city_info.get("bbox", [-99.3, 19.2, -98.9, 19.6])[:4]]
+
+    # Cálculo esferoidal del área del BBOX (equivalente a depot / DemandData.create_description)
+    minlon, minlat, maxlon, maxlat = [math.radians(v) for v in bbox]
+    area_sq_km = int(math.floor((6371.0 ** 2) * abs(math.sin(minlat) - math.sin(maxlat)) * abs(minlon - maxlon)))
+
+    bbox_str = f"{bbox[0]}, {bbox[1]}, {bbox[2]}, {bbox[3]}"
+    points = demand_payload.get("points", [])
+    pops = demand_payload.get("pops", [])
+
+    total_demand = sum(int(p.get("size", 0)) for p in pops)
+    if total_demand == 0 and points:
+        total_demand = sum(int(p.get("residents", 0)) for p in points)
+
+    sp_points = (special_demand_points_doc.get("points", []) if special_demand_points_doc else [])
+    types_doc = load_special_demand_types()
+    type_labels = {t["id"]: t["label"].get("__default__", t["id"]) for t in types_doc.get("types", [])}
+    type_by_code = {t["code"]: t["label"].get("__default__", t["code"]) for t in types_doc.get("types", [])}
+
+    categories: Dict[str, Dict[str, Any]] = {}
+    pops_by_id = {p.get("id"): p for p in pops if "id" in p}
+
+    for sp in sp_points:
+        p_id = sp.get("point_id", "")
+        prefix = p_id.split("_")[0] if "_" in p_id else sp.get("type", "POI")
+        cat_label = type_by_code.get(prefix) or type_labels.get(sp.get("type", "")) or prefix
+        p_name = sp.get("name", {}).get("__default__", p_id)
+
+        if prefix not in categories:
+            categories[prefix] = {"label": cat_label, "total": 0, "entries": {}}
+        if p_name not in categories[prefix]["entries"]:
+            categories[prefix]["entries"][p_name] = {"type": sp.get("type"), "size": 0}
+
+        for pid in sp.get("pop_ids", []):
+            if pid in pops_by_id:
+                pop_sz = int(pops_by_id[pid].get("size", 0))
+                categories[prefix]["entries"][p_name]["size"] += pop_sz
+                categories[prefix]["total"] += pop_sz
+
+    nspec = sum(c["total"] for c in categories.values())
+    normal_demand = max(0, total_demand - nspec)
+
+    def fmt(v: Any) -> str:
+        if isinstance(v, (int, float)):
+            if isinstance(v, float):
+                return f"{v:,.1f}" if v >= 10000 else str(v)
+            return f"{v:,}" if v >= 10000 else str(v)
+        return str(v)
+
+    md: List[str] = [
+        f"<h1>{name}</h1>",
+        f"<h3>{code} · {version}</h3>",
+        "",
+        f"<p>{description_text}</p>",
+        "",
+        "<h2>Coverage</h2>",
+        '<table style="width: auto">',
+        f"<tr><td><strong>Bounding box</strong></td><td>{bbox_str}</td></tr>",
+        f"<tr><td><strong>Bounding Box Area</strong></td><td>{area_sq_km:,} km²</td></tr>",
+        "</table>",
+        "",
+        "<h2>Population Summary</h2>",
+        '<table style="width: auto">',
+        f'<tr><td><strong>Total Modeled Demand</strong></td><td align="right">{fmt(total_demand)}</td></tr>',
+        f'<tr><td><strong>Modeled Normal Demand</strong></td><td align="right">{fmt(normal_demand)}</td></tr>',
+        f'<tr><td><strong>Modeled Special Demand</strong></td><td align="right">{fmt(nspec)}</td></tr>',
+        "</table>",
+        ""
+    ]
+
+    # Estadísticas del mapa
+    if points:
+        pt_sizes = [p.get("jobs", 0) + p.get("residents", 0) for p in points]
+        med_point = int(statistics.median(pt_sizes)) if pt_sizes else 0
+        avg_point = round(float(statistics.mean(pt_sizes)), 1) if pt_sizes else 0.0
+    else:
+        med_point, avg_point = 0, 0.0
+
+    if pops:
+        pop_sizes = [p.get("size", 0) for p in pops]
+        med_pop = int(statistics.median(pop_sizes)) if pop_sizes else 0
+        avg_pop = round(float(statistics.mean(pop_sizes)), 1) if pop_sizes else 0.0
+
+        distances = [float(p.get("drivingDistance", 0)) / 1000.0 for p in pops]
+        med_dist = round(float(statistics.median(distances)), 2) if distances else 0.0
+        avg_dist = round(float(statistics.mean(distances)), 2) if distances else 0.0
+
+        times = [float(p.get("drivingSeconds", 0)) / 60.0 for p in pops]
+        med_time = round(float(statistics.median(times)), 1) if times else 0.0
+        avg_time = round(float(statistics.mean(times)), 1) if times else 0.0
+    else:
+        med_pop, avg_pop, med_dist, avg_dist, med_time, avg_time = 0, 0.0, 0.0, 0.0, 0.0, 0.0
+
+    stats = [
+        ("Demand Points", len(points)),
+        ("Populations", len(pops)),
+        ("Median Point Size", med_point),
+        ("Mean Point Size", avg_point),
+        ("Median Population Size", med_pop),
+        ("Mean Population Size", avg_pop),
+        ("Median Commute Distance (km)", med_dist),
+        ("Mean Commute Distance (km)", avg_dist),
+        ("Median Commute Time (min)", med_time),
+        ("Mean Commute Time (min)", avg_time),
+    ]
+
+    md.append("<h2>Map Statistics</h2>")
+    md.append('<table style="width: auto">')
+    for label, val in stats:
+        md.append(f'<tr><td><strong>{label}</strong></td><td align="right">{fmt(val)}</td></tr>')
+    md.append("</table>\n")
+
+    if categories:
+        md.append("<h2>Special Demand</h2>\n")
+        for cat in sorted(categories.keys()):
+            c_data = categories[cat]
+            if c_data["total"] == 0 and not c_data["entries"]:
+                continue
+            md.append("<details>")
+            md.append(f"<summary>{c_data['label']} — {fmt(c_data['total'])}</summary>\n")
+            md.append('<table style="width: auto">')
+            md.append('<tr><th align="left">Name</th><th align="right">Modeled Demand</th></tr>')
+            for entry, ent_data in sorted(c_data["entries"].items(), key=lambda x: x[1]["size"], reverse=True):
+                md.append(f'<tr><td align="left">&nbsp;&nbsp;{entry}&nbsp;&nbsp;</td><td align="right">&nbsp;&nbsp;{fmt(ent_data["size"])}&nbsp;&nbsp;</td></tr>')
+            md.append("</table>\n</details>\n")
+        md.append("<br>\n")
+
+    use_bld = city_info.get("use_buildings", True)
+    bld_foundations = city_info.get("create_building_foundations", True)
+    ocean = city_info.get("include_ocean", False)
+
+    md.extend([
+        "<h2>Additional Features</h2>",
+        "<ul>",
+        f"<li><strong>Building Collision</strong> — {'Included (Overture Maps 3D)' if use_bld else 'Disabled'}. "
+        f"{'Buildings have underground foundations ranging from -10 m to -80 m calculated from height and footprint.' if bld_foundations else ''}</li>",
+        f"<li><strong>Water Depths</strong> — {'Included (GEBCO bathymetry / flat -5 m ocean depths).' if ocean else 'Disabled / standard.'}</li>",
+        "<li><strong>Place Labels</strong> — Included city, suburb, and neighborhood labels extracted from OpenStreetMap and curated toponymy.</li>",
+        "</ul>",
+        "<h2>Methodology</h2>",
+        "<ul>",
+        "<p>This map was generated using the Subway Builder México pipeline and Depot mapmaking utilities. "
+        "Origin-destination commuter trips are allocated using a bounded multinomial gravity model calibrated on municipal and inter-AGEB commuting margins.</p>",
+        "</ul>",
+        "<h2>Data Sources</h2>",
+        "<ul>",
+        "<p><strong>INEGI</strong> — Censo de Población y Vivienda 2020 (RESAGEBURB / CPV universal por manzana).</p>",
+        "<p><strong>INEGI DENUE / SAIC</strong> — Directorio Estadístico Nacional de Unidades Económicas y Censos Económicos.</p>",
+        "<p><strong>CONAPO</strong> — Proyecciones de la Población de los Municipios de México 2020–2026.</p>",
+        "<p><strong>OpenStreetMap & Overture Maps</strong> — Vías peatonales/carreteras, toponimia y volumetría de edificios 3D.</p>",
+        "</ul>",
+        "<h2>License</h2>",
+        '<p>This map data is released under the <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU General Public License v3.0</a>.</p>',
+        "<h2>Credits</h2>",
+        f"<p>Map authored by {creator}. Powered by Subway Builder México & Subway-Builder-Modded/depot.</p>"
+    ])
+
+    full_md = "\n".join(md) + "\n"
+    if out_dir:
+        with open(os.path.join(out_dir, "description.md"), "w", encoding="utf-8") as f:
+            f.write(full_md)
+    return full_md

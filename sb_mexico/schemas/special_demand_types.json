@@ -26,7 +26,7 @@
             "en": "Domestic Terminal"
           },
           "metadata": {
-            "classification": "Derived from terminal_service_scope field in airport data; serves national/domestic routes only"
+            "classification": "Serves national/domestic routes only"
           }
         },
         {
@@ -37,13 +37,10 @@
             "en": "International Terminal"
           },
           "metadata": {
-            "classification": "Derived from terminal_service_scope field in airport data; serves international routes"
+            "classification": "Serves international routes"
           }
         }
-      ],
-      "metadata": {
-        "source": "mlit_airport_combined.csv"
-      }
+      ]
     },
     {
       "id": "amusement_park",
@@ -63,21 +60,23 @@
         {
           "id": "amusement_park",
           "label": {
-            "__default__": "遊園地",
+            "__default__": "Amusement Park",
+            "en": "Amusement Park",
             "ja": "遊園地"
           },
           "metadata": {
-            "classification": "Custom attraction code 'yuuenchi'; traditional amusement parks with rides and attractions (遊園地)"
+            "classification": "Traditional amusement parks with rides and attractions"
           }
         },
         {
           "id": "theme_park",
           "label": {
-            "__default__": "テーマパーク",
+            "__default__": "Theme Park",
+            "en": "Theme Park",
             "ja": "テーマパーク"
           },
           "metadata": {
-            "classification": "Custom attraction code 'theme_park'; themed entertainment complexes, farm parks, and tourist villages"
+            "classification": "Themed entertainment complexes, farm parks, and tourist villages"
           }
         }
       ]
@@ -110,29 +109,7 @@
         "ja": "温泉・銭湯・サウナなど入浴を目的とした施設",
         "en": "Communal bathing facilities including hot spring resorts, public bathhouses, and saunas"
       },
-      "icon": "flame",
-      "sub_types": [
-        {
-          "id": "onsen",
-          "label": {
-            "__default__": "温泉",
-            "ja": "温泉"
-          },
-          "metadata": {
-            "classification": "Custom attraction code 'hot_spring'; a single onsen resort or bathing complex"
-          }
-        },
-        {
-          "id": "onsen_district",
-          "label": {
-            "__default__": "温泉郷",
-            "ja": "温泉郷"
-          },
-          "metadata": {
-            "classification": "Custom attraction code 'hot_spring'; an onsen district (温泉郷) comprising a cluster of ryokan and bathhouses in a geographic area"
-          }
-        }
-      ]
+      "icon": "flame"
     },
     {
       "id": "convention_center",
@@ -167,42 +144,46 @@
         {
           "id": "childrens_center",
           "label": {
-            "__default__": "児童館",
-            "ja": "児童館"
+            "__default__": "Children Center",
+            "en": "Children Center",
+            "ja": "児童館",
+            "es": "Centro Infantil"
           },
           "metadata": {
-            "classification": "MLIT P27 code 03002; facility name contains '児童館'. Reclassified from museum to cultural_center as these are community activity centers, not exhibitions",
-            "mlit_compound_name": "博物館・児童館等"
+            "classification": "Community activity centers"
           }
         },
         {
-          "id": "civic_hall",
+          "id": "civic_center",
           "label": {
-            "__default__": "文化会館",
+            "__default__": "Civic Center",
+            "en": "Civic Center",
             "ja": "文化会館"
           },
           "metadata": {
-            "classification": "Custom attraction code 'cultural_center'; facility name contains '文化会館' or '文化センター'"
+            "classification": "Community civic centers"
           }
         },
         {
           "id": "concert_hall",
           "label": {
-            "__default__": "ホール",
+            "__default__": "Concert Hall",
+            "en": "Concert Hall",
             "ja": "ホール"
           },
           "metadata": {
-            "classification": "Custom attraction code 'cultural_center'; facility name contains 'ホール' (concert/general halls)"
+            "classification": "Venue designated for live musical performances"
           }
         },
         {
           "id": "theater",
           "label": {
-            "__default__": "劇場",
+            "__default__": "Theater",
+            "en": "Theater",
             "ja": "劇場"
           },
           "metadata": {
-            "classification": "Custom attraction code 'cultural_center'; facility name contains '劇場'"
+            "classification": "Venue designated for watching films and/or live actor performances"
           }
         }
       ]
@@ -255,21 +236,23 @@
         {
           "id": "historic_building",
           "label": {
-            "__default__": "歴史的建造物",
+            "__default__": "Historic Building",
+            "en": "Historic Building",
             "ja": "歴史的建造物"
           },
           "metadata": {
-            "classification": "Originally MLIT P27 code 03001; facility classified as historic landmark rather than active exhibition space"
+            "classification": "Facility classified as historic landmark rather than active exhibition space"
           }
         },
         {
           "id": "world_heritage",
           "label": {
-            "__default__": "世界遺産",
+            "__default__": "World Heritage Site",
+            "en": "World Heritage Site",
             "ja": "世界遺産"
           },
           "metadata": {
-            "classification": "UNESCO World Heritage designation; sourced from custom_attractions.csv with explicit type_code 'world_heritage_site'"
+            "classification": "UNESCO World Heritage designation"
           }
         }
       ]
@@ -287,10 +270,7 @@
         "ja": "入院・外来需要を持つ医療機関",
         "en": "Medical institutions generating both inpatient and outpatient travel demand"
       },
-      "icon": "hospital",
-      "metadata": {
-        "source": "P04-20 + hospital_statistics.csv"
-      }
+      "icon": "hospital"
     },
     {
       "id": "library",
@@ -340,100 +320,45 @@
         {
           "id": "archive",
           "label": {
-            "__default__": "資料館",
+            "__default__": "Archive",
+            "en": "Archive",
             "ja": "資料館"
           },
           "metadata": {
-            "classification": "MLIT P27 code 03002; facility name contains '資料館' without '歴史'",
-            "mlit_compound_name": "博物館・資料館等"
+            "classification": "Facility that stores, preserves, and protects historical documents, records, and artifacts"
           }
         },
         {
           "id": "art_museum",
           "label": {
-            "__default__": "美術館",
+            "__default__": "Art Museum",
+            "en": "Art Museum",
             "ja": "美術館"
           },
           "metadata": {
-            "classification": "MLIT P27 code 03001; default when facility name contains no more specific keyword",
-            "mlit_compound_name": "美術館・美術展示施設等"
-          }
-        },
-        {
-          "id": "contemporary_art",
-          "label": {
-            "__default__": "現代美術館",
-            "ja": "現代美術館"
-          },
-          "metadata": {
-            "classification": "MLIT P27 code 03001; facility name contains '現代美術'",
-            "mlit_compound_name": "美術館・現代美術館等"
+            "classification": "Museum dedicated to collecting, preserving, and displaying visual arts"
           }
         },
         {
           "id": "gallery",
           "label": {
-            "__default__": "ギャラリー",
+            "__default__": "Gallery",
+            "en": "Gallery",
             "ja": "ギャラリー"
           },
           "metadata": {
-            "classification": "MLIT P27 code 03001; facility name contains 'ギャラリー' or '画廊'",
-            "mlit_compound_name": "美術館・ギャラリー等"
-          }
-        },
-        {
-          "id": "general_museum",
-          "label": {
-            "__default__": "博物館",
-            "ja": "博物館"
-          },
-          "metadata": {
-            "classification": "MLIT P27 code 03002; default when no more specific keyword matches",
-            "mlit_compound_name": "博物館"
-          }
-        },
-        {
-          "id": "history_archive",
-          "label": {
-            "__default__": "歴史資料館",
-            "ja": "歴史資料館"
-          },
-          "metadata": {
-            "classification": "MLIT P27 code 03002; facility name contains '歴史' or '郷土'",
-            "mlit_compound_name": "博物館・歴史資料館等"
-          }
-        },
-        {
-          "id": "literary_museum",
-          "label": {
-            "__default__": "文学館",
-            "ja": "文学館"
-          },
-          "metadata": {
-            "classification": "MLIT P27 code 03002; facility name contains '文学館'",
-            "mlit_compound_name": "博物館・文学館等"
-          }
-        },
-        {
-          "id": "memorial_hall",
-          "label": {
-            "__default__": "記念館",
-            "ja": "記念館"
-          },
-          "metadata": {
-            "classification": "MLIT P27 code 03001 or 03002; facility name contains '記念館'",
-            "mlit_compound_name": "美術館・記念館等 / 博物館・記念館等"
+            "classification": "Facility dedicated to the exhibition and sale of works of art"
           }
         },
         {
           "id": "science_museum",
           "label": {
-            "__default__": "科学館",
+            "__default__": "Science Museum",
+            "en": "Science Museum",
             "ja": "科学館"
           },
           "metadata": {
-            "classification": "MLIT P27 code 03002; facility name contains '科学館'",
-            "mlit_compound_name": "博物館・科学館等"
+            "classification": "A museum dedicated to making science and associated topics more accessible"
           }
         }
       ]
@@ -454,63 +379,79 @@
       "icon": "mountain",
       "sub_types": [
         {
+          "id": "beach",
+          "label": {
+            "__default__": "beach",
+            "en": "beach"
+          },
+          "metadata": {
+            "classification": "Custom attraction code 'natural_feature'; beaches that are not linked to any resort or park"
+          }
+        },
+        {
           "id": "cave",
           "label": {
-            "__default__": "洞窟",
+            "__default__": "Cave",
+            "en": "Cave",
             "ja": "洞窟"
           },
           "metadata": {
-            "classification": "Custom attraction code 'natural_feature'; explicit type_name '洞窟' in custom_attractions.csv"
+            "classification": "Underground hollows/cavities/passages large enough for humans to enter"
           }
         },
         {
           "id": "gorge",
           "label": {
-            "__default__": "渓谷",
+            "__default__": "Gorge",
+            "en": "Gorge",
             "ja": "渓谷"
           },
           "metadata": {
-            "classification": "Custom attraction code 'natural_feature'; explicit type_name '渓谷' in custom_attractions.csv"
+            "classification": "Steep-walled, narrow canyons/ravines"
           }
         },
         {
           "id": "lake",
           "label": {
-            "__default__": "湖沼",
+            "__default__": "Lake",
+            "en": "Lake",
             "ja": "湖沼"
           },
           "metadata": {
-            "classification": "Custom attraction code 'natural_feature'; explicit type_name '湖沼' in custom_attractions.csv"
+            "classification": "A body of water that is surrounded by land"
           }
         },
         {
           "id": "mountain",
           "label": {
-            "__default__": "山岳",
+            "__default__": "Mountain",
+            "en": "Mountain",
             "ja": "山岳"
           },
           "metadata": {
-            "classification": "Custom attraction code 'natural_feature'; explicit type_name '山岳' in custom_attractions.csv"
+            "classification": "Large, steep landforms that rise significantly above its surrounding terrain"
           }
         },
         {
           "id": "scenic_spot",
           "label": {
-            "__default__": "景勝地",
+            "__default__": "Scenic Spot",
+            "en": "Scenic Spot",
             "ja": "景勝地"
           },
           "metadata": {
-            "classification": "Custom attraction code 'natural_feature'; explicit type_name '景勝地' in custom_attractions.csv; catch-all for scenic locations that don't fit a specific landform"
+            "classification": "Catch-all for scenic locations that don't fit a specific landform"
           }
         },
         {
           "id": "waterfall",
           "label": {
-            "__default__": "滝",
+            "__default__": "Waterfall",
+            "en": "Waterfall",
             "ja": "滝"
           },
           "metadata": {
-            "classification": "Custom attraction code 'natural_feature'; explicit type_name '滝' in custom_attractions.csv"
+            "classification": "Geographical features where a river flows over a vertical drop"
           }
         }
       ]
@@ -548,42 +489,45 @@
         {
           "id": "botanical_garden",
           "label": {
-            "__default__": "植物園",
+            "__default__": "Botanical Garden",
+            "en": "Botanical Garden",
             "ja": "植物園"
           },
           "metadata": {
-            "classification": "MLIT P27 code 03005; facility name contains botanical keywords (植物, フラワー, ガーデン, 花, ばら, バラ, ラン, 蘭, ハーブ). Reclassified from zoo to park",
-            "mlit_compound_name": "動物園・植物園等"
+            "classification": "Institutions that maintain curated, labeled collections of plants"
           }
         },
         {
           "id": "garden",
           "label": {
-            "__default__": "庭園",
+            "__default__": "Garden",
+            "en": "Garden",
             "ja": "庭園"
           },
           "metadata": {
-            "classification": "Custom attraction code 'park_general'; formal Japanese-style or western-style gardens (庭園), typically with curated landscapes"
+            "classification": "Cultivated spaces for plants"
           }
         },
         {
           "id": "nature_park",
           "label": {
-            "__default__": "自然公園",
+            "__default__": "Nature Park",
+            "en": "Nature Park",
             "ja": "自然公園"
           },
           "metadata": {
-            "classification": "Custom attraction code 'park_general'; designated nature conservation parks (自然公園), often prefectural or national"
+            "classification": "Protected lands designated to preserve local ecosystems"
           }
         },
         {
           "id": "park",
           "label": {
-            "__default__": "公園",
+            "__default__": "Park",
+            "en": "Park",
             "ja": "公園"
           },
           "metadata": {
-            "classification": "Custom attraction code 'park_general'; general urban or rural parks without a specialized designation"
+            "classification": "General urban or rural parks without a specialized designation"
           }
         }
       ]
@@ -604,7 +548,29 @@
       "icon": "ship",
       "metadata": {
         "source": "mlit_port_csv"
-      }
+      },
+      "sub_types": [
+        {
+          "id": "marina",
+          "label": {
+            "__default__": "Marina",
+            "en": "Marina"
+          },
+          "metadata": {
+            "classification": "Recreational and private boating"
+          }
+        },
+        {
+          "id": "shipyard",
+          "label": {
+            "__default__": "Shipyard",
+            "en": "Shipyard"
+          },
+          "metadata": {
+            "classification": "A place that manufactures watercraft"
+          }
+        }
+      ]
     },
     {
       "id": "religious_institution",
@@ -624,21 +590,23 @@
         {
           "id": "shrine",
           "label": {
-            "__default__": "神社",
+            "__default__": "Shrine",
+            "en": "Shrine",
             "ja": "神社"
           },
           "metadata": {
-            "classification": "Custom attraction code 'shrine'; Shinto shrines manually classified in custom_attractions.csv. Not derived from MLIT data"
+            "classification": "A religious site dedicated to a deity, saint, ancestor, or other revered figure"
           }
         },
         {
           "id": "temple",
           "label": {
-            "__default__": "寺院",
+            "__default__": "Temple",
+            "en": "Temple",
             "ja": "寺院"
           },
           "metadata": {
-            "classification": "Custom attraction code 'temple'; Buddhist temples manually classified in custom_attractions.csv. Not derived from MLIT data"
+            "classification": "Buildings dedicated to religious worship"
           }
         }
       ]
@@ -692,8 +660,7 @@
             "en": "Elementary School"
           },
           "metadata": {
-            "classification": "MLIT P29 institution_type_code 16001; sourced directly from P29_004 field, no heuristic",
-            "institution_type_code": "16001"
+            "classification": "Schools that cover primary education"
           }
         },
         {
@@ -704,8 +671,7 @@
             "en": "High School"
           },
           "metadata": {
-            "classification": "MLIT P29 institution_type_code 16004; sourced directly from P29_004 field, no heuristic",
-            "institution_type_code": "16004"
+            "classification": "Schools that cover secondary education"
           }
         },
         {
@@ -716,8 +682,17 @@
             "en": "Junior High School"
           },
           "metadata": {
-            "classification": "MLIT P29 institution_type_code 16002; sourced directly from P29_004 field, no heuristic",
-            "institution_type_code": "16002"
+            "classification": "Schools that bridge the gap between elementary and high school"
+          }
+        },
+        {
+          "id": "middle_school",
+          "label": {
+            "__default__": "Middle School",
+            "en": "Middle School"
+          },
+          "metadata": {
+            "classification": "Schools that bridge the gap between elementary and high school"
           }
         },
         {
@@ -728,8 +703,7 @@
             "en": "Special Support School"
           },
           "metadata": {
-            "classification": "MLIT P29 institution_type_code 16012; schools for students with disabilities, sourced directly from P29_004 field",
-            "institution_type_code": "16012"
+            "classification": "Schools for students with disabilities"
           }
         }
       ]
@@ -747,7 +721,39 @@
         "ja": "大型ショッピングモール・百貨店・アウトレットなど広域集客型の商業施設",
         "en": "Large-scale retail destinations drawing weekend and evening visitors from a wide catchment area"
       },
-      "icon": "shopping-bag"
+      "icon": "shopping-bag",
+      "sub_types": [
+        {
+          "id": "casino",
+          "label": {
+            "__default__": "Casino",
+            "en": "Casino"
+          },
+          "metadata": {
+            "classification": "A facility for gambling"
+          }
+        },
+        {
+          "id": "marketplace",
+          "label": {
+            "__default__": "Marketplace",
+            "en": "Marketplace"
+          },
+          "metadata": {
+            "classification": "A location where numerous vendors offer their products"
+          }
+        },
+        {
+          "id": "shop",
+          "label": {
+            "__default__": "Shop",
+            "en": "Shop"
+          },
+          "metadata": {
+            "classification": "A business that sells goods or services to customers"
+          }
+        }
+      ]
     },
     {
       "id": "sports_facility",
@@ -767,141 +773,144 @@
         {
           "id": "arena",
           "label": {
-            "__default__": "アリーナ",
+            "__default__": "Arena",
+            "en": "Arena",
             "ja": "アリーナ"
           },
           "metadata": {
-            "classification": "Custom attraction code 'park_sports_complex'; facility name contains 'アリーナ' (enclosed multi-purpose venue)"
+            "classification": "Enclosed multi-purpose venue"
           }
         },
         {
           "id": "athletic_field",
           "label": {
-            "__default__": "運動場",
+            "__default__": "Athletic Field",
+            "en": "Athletic Field",
             "ja": "運動場"
           },
           "metadata": {
-            "classification": "Custom attraction code 'park_sports_complex'; facility name contains '運動場' (open-air general-purpose field)"
+            "classification": "Open-air general-purpose field"
           }
         },
         {
           "id": "athletics_track",
           "label": {
-            "__default__": "陸上競技場",
+            "__default__": "Athletics Track",
+            "en": "Athletics Track",
             "ja": "陸上競技場"
           },
           "metadata": {
-            "classification": "Custom attraction code 'park_sports_complex'; facility name contains '陸上競技場' (dedicated track-and-field facility)"
+            "classification": "Dedicated track-and-field facility"
           }
         },
         {
           "id": "baseball_field",
           "label": {
-            "__default__": "野球場",
+            "__default__": "Baseball Field",
+            "en": "Baseball Field",
             "ja": "野球場"
           },
           "metadata": {
-            "classification": "Custom attraction code 'park_sports_complex'; facility name contains '野球場'"
-          }
-        },
-        {
-          "id": "gateball_court",
-          "label": {
-            "__default__": "ゲートボール場",
-            "ja": "ゲートボール場"
-          },
-          "metadata": {
-            "classification": "Custom attraction code 'park_sports_complex'; facility name contains 'ゲートボール場' (popular among elderly in Japan)"
+            "classification": "Venues to play baseball"
           }
         },
         {
           "id": "gymnasium",
           "label": {
-            "__default__": "体育館",
+            "__default__": "Gymnasium",
+            "en": "Gymnasium",
             "ja": "体育館"
           },
           "metadata": {
-            "classification": "Custom attraction code 'park_sports_complex'; facility name contains '体育館' (indoor gym, often municipally operated)"
+            "classification": "Indoor gym"
           }
         },
         {
           "id": "ice_rink",
           "label": {
-            "__default__": "アイスリンク",
+            "__default__": "Ice Rink",
+            "en": "Ice Rink",
             "ja": "アイスリンク"
           },
           "metadata": {
-            "classification": "Custom attraction code 'park_sports_complex'; facility name contains 'アイスリンク' or 'スケート'"
+            "classification": "Facilities for ice skating"
           }
         },
         {
           "id": "martial_arts_hall",
           "label": {
-            "__default__": "武道館",
+            "__default__": "Martial Arts Hall",
+            "en": "Martial Arts Hall",
             "ja": "武道館"
           },
           "metadata": {
-            "classification": "Custom attraction code 'park_sports_complex'; facility name contains '武道館' (judo, kendo, aikido halls; may also host concerts)"
+            "classification": "Facilities for practicing martial arts"
           }
         },
         {
           "id": "pool",
           "label": {
-            "__default__": "プール",
+            "__default__": "Pool",
+            "en": "Pool",
             "ja": "プール"
           },
           "metadata": {
-            "classification": "Custom attraction code 'park_sports_complex'; facility name contains 'プール' (public swimming facilities)"
+            "classification": "Public swimming facilities"
           }
         },
         {
           "id": "racetrack",
           "label": {
-            "__default__": "競走場",
+            "__default__": "Racetrack",
+            "en": "Racetrack",
             "ja": "競走場"
           },
           "metadata": {
-            "classification": "Custom attraction code 'track'; covers horse racing (競馬場), boat racing (競艇場), and keirin (競輪場)"
+            "classification": "Facilities for racing vehicles or animals"
           }
         },
         {
           "id": "sports_complex",
           "label": {
-            "__default__": "総合運動公園",
+            "__default__": "Sports Complex",
+            "en": "Sports Complex",
             "ja": "総合運動公園"
           },
           "metadata": {
-            "classification": "Custom attraction code 'park_sports_complex'; facility name contains '総合運動公園' (large multi-venue complexes with multiple sports facilities)"
+            "classification": "Large multi-venue complexes with multiple sports facilities"
           }
         },
         {
           "id": "sports_park",
           "label": {
-            "__default__": "運動公園",
+            "__default__": "Sports Park",
+            "en": "Sports Park",
             "ja": "運動公園"
           },
           "metadata": {
-            "classification": "Custom attraction code 'park_sports_complex'; facility name contains '運動公園' (parks primarily intended for sport and recreation)"
+            "classification": "Parks primarily intended for sport and recreation"
           }
         },
         {
           "id": "stadium",
           "label": {
-            "__default__": "スタジアム",
+            "__default__": "Stadium",
+            "en": "Stadium",
             "ja": "スタジアム"
           },
           "metadata": {
-            "classification": "Custom attraction code 'stadium'; professional-grade stadiums and major arenas (explicit manual classification in custom_attractions.csv)"
+            "classification": "Professional-grade stadiums and major arenas"
           }
         },
         {
           "id": "tennis_court",
           "label": {
-            "__default__": "テニスコート",
+            "__default__": "Tennis Court",
+            "en": "Tennis Court",
             "ja": "テニスコート"
           },
           "metadata": {
-            "classification": "Custom attraction code 'park_sports_complex'; facility name contains 'テニスコート'"
+            "classification": "Facilities dedicated to playing tennis"
           }
         }
       ]
@@ -910,9 +919,9 @@
       "id": "university",
       "code": "UNI",
       "label": {
-        "__default__": "University & College",
+        "__default__": "University",
         "ja": "大学・高専",
-        "en": "University & College"
+        "en": "University"
       },
       "description": {
         "__default__": "Higher education institutions drawing students from a wide catchment area",
@@ -922,6 +931,16 @@
       "icon": "graduation-cap",
       "sub_types": [
         {
+          "id": "community_college",
+          "label": {
+            "__default__": "Community College",
+            "en": "Community College"
+          },
+          "metadata": {
+            "classification": "Two-year post-secondary colleges"
+          }
+        },
+        {
           "id": "junior_college",
           "label": {
             "__default__": "Junior College",
@@ -929,8 +948,7 @@
             "en": "Junior College"
           },
           "metadata": {
-            "classification": "MLIT P29 institution_type_code 16006; 2-year post-secondary colleges (短大)",
-            "institution_type_code": "16006"
+            "classification": "Two-year post-secondary colleges"
           }
         },
         {
@@ -941,8 +959,7 @@
             "en": "Technical College"
           },
           "metadata": {
-            "classification": "MLIT P29 institution_type_code 16005; 5-year colleges of technology (高専/kosen), post-junior-high vocational track",
-            "institution_type_code": "16005"
+            "classification": "Trade and vocational schools"
           }
         },
         {
@@ -953,8 +970,7 @@
             "en": "University"
           },
           "metadata": {
-            "classification": "MLIT P29 institution_type_code 16007 (university) or 99999 (other higher education); includes graduate schools",
-            "institution_type_codes": ["16007", "99999"]
+            "classification": "Post-secondary educational institutions that offer undergraduate and graduate degrees"
           }
         }
       ]
@@ -990,23 +1006,23 @@
         {
           "id": "safari_park",
           "label": {
-            "__default__": "サファリパーク",
+            "__default__": "Safari Park",
+            "en": "Safari Park",
             "ja": "サファリパーク"
           },
           "metadata": {
-            "classification": "MLIT P27 code 03005; facility name contains 'サファリ'",
-            "mlit_compound_name": "動物園・サファリパーク等"
+            "classification": "Facilities where animals roam freely in large, open-air enclosures"
           }
         },
         {
           "id": "zoo",
           "label": {
-            "__default__": "動物園",
+            "__default__": "Zoo",
+            "en": "Zoo",
             "ja": "動物園"
           },
           "metadata": {
-            "classification": "MLIT P27 code 03005; default when facility name has no botanical keywords",
-            "mlit_compound_name": "動物園・植物園等"
+            "classification": "Facilities where animals are kept in enclosures for public exhibition"
           }
         }
       ]
