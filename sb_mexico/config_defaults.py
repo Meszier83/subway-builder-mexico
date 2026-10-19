@@ -20,7 +20,13 @@ def apply_demand_defaults(config):
     """
     city = config.setdefault('city', {})
     macro = config.setdefault('macroeconomics', {})
+    demand = config.setdefault('demand', {})
     city.setdefault('residential_placement', 'official_blocks')
     macro.setdefault('residential_employment', 'census_employed')
     macro.setdefault('workplace_employment', 'auto')
+    if 'engine' not in demand:
+        if ('tasa_pea' in macro or 'til_1_state' in macro or 'default_growth_factor' in macro or macro.get('workplace_employment') == 'legacy'):
+            demand['engine'] = 'legacy'
+        else:
+            demand['engine'] = 'v2'
     return config

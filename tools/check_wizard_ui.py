@@ -26,6 +26,7 @@ with tempfile.TemporaryDirectory() as temporary:
     subprocess.run(['node', str(ROOT / 'tests/beta_policy_ui.cjs')], check=True)
     subprocess.run(['node', str(ROOT / 'tests/isolated_drawing_ui.cjs')], check=True)
     subprocess.run(['node', str(ROOT / 'tests/residential_employment_ui.cjs')], check=True)
+    subprocess.run(['node', str(ROOT / 'tests/test_grid_size_ui.cjs')], check=True)
     # Functions in this file use top-level four-space indentation.
     functions = []
     for name in ('initSSE',):

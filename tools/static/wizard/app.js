@@ -61,7 +61,7 @@
     let exclusionZonesGroup = null;
     let exclusionZonesBboxGroup = null;
     let exclusionZonesDemandGroup = null;
-    let exclusionDrawStep = 4;
+    let exclusionDrawStep = 3;
     let selectedExclusionIndex = -1;
     let isDrawingExclusion = false;
     let exclusionDrawMode = 'polygon';
@@ -492,8 +492,16 @@
     // COLAPSO / EXPANSIÓN DE BARRAS LATERALES
     // -------------------------------------------------------------------------
     function toggleSidebar(step) {
-      const sidebar = document.getElementById(`sidebar-${step}`);
-      const btnExpand = document.getElementById(`btnExpand-${step}`);
+      let sidebar = document.getElementById(`sidebar-${step}`);
+      let btnExpand = document.getElementById(`btnExpand-${step}`);
+      if (!sidebar && step === 3) {
+        sidebar = document.getElementById('sidebar-4');
+        btnExpand = document.getElementById('btnExpand-4');
+      }
+      if (!sidebar && step === 4) {
+        sidebar = document.getElementById('sidebar-3');
+        btnExpand = document.getElementById('btnExpand-3');
+      }
       if (!sidebar) return;
 
       const isCollapsed = sidebar.classList.contains('hidden');
@@ -508,7 +516,7 @@
       // Reajustar tamaño de mapas
       setTimeout(() => {
         if (step === 1 && mapBbox) mapBbox.invalidateSize();
-        if (step === 4 && mapPoi) mapPoi.invalidateSize();
+        if ((step === 3 || step === 4) && mapPoi) mapPoi.invalidateSize();
         if (step === 6 && mapDemand) mapDemand.invalidateSize();
       }, 150);
       lucide.createIcons();
@@ -610,9 +618,17 @@
       });
     }
 
-    function toggleSidebarWidth(step = 4) {
-      const sidebar = document.getElementById(`sidebar-${step}`);
-      const icon = document.getElementById(`iconExpandSidebar${step}`);
+    function toggleSidebarWidth(step = 3) {
+      let sidebar = document.getElementById(`sidebar-${step}`);
+      let icon = document.getElementById(`iconExpandSidebar${step}`);
+      if (!sidebar && step === 3) {
+        sidebar = document.getElementById('sidebar-4');
+        icon = document.getElementById('iconExpandSidebar4');
+      }
+      if (!sidebar && step === 4) {
+        sidebar = document.getElementById('sidebar-3');
+        icon = document.getElementById('iconExpandSidebar3');
+      }
       if (!sidebar) return;
 
       const currentW = sidebar.getBoundingClientRect().width;
@@ -632,7 +648,7 @@
       localStorage.setItem('sb_poi_sidebar_width', targetW);
 
       setTimeout(() => {
-        if (step === 4 && mapPoi) mapPoi.invalidateSize();
+        if ((step === 3 || step === 4) && mapPoi) mapPoi.invalidateSize();
         if (window.lucide) lucide.createIcons();
       }, 250);
     }
@@ -673,7 +689,7 @@
       // Recalcular tamaño de mapas al cambiar de pestaña
       setTimeout(() => {
         if (step === 1 && mapBbox) mapBbox.invalidateSize();
-        if (step === 4 && mapPoi) {
+        if (step === 3 && mapPoi) {
           mapPoi.invalidateSize();
           renderPoiList();
           renderPoiMarkersOnMap();
@@ -690,6 +706,10 @@
             }
           }
         }
+        if (step === 4) {
+          updateCohortTelemetry();
+          updateDemandEngineControls();
+        }
         if (step === 6 && mapDemand) {
           mapDemand.invalidateSize();
           loadDemandDataPreview();
@@ -697,7 +717,6 @@
       }, 100);
 
       if (step === 2) refreshDataStatus();
-      if (step === 3 && !window.conapoAvailableYears) loadConapoYears();
     }
 
     // -------------------------------------------------------------------------
@@ -3655,7 +3674,7 @@
       });
     }
 
-    function startDrawingExclusionZone(mode = 'polygon', step = 4) {
+    function startDrawingExclusionZone(mode = 'polygon', step = 3) {
       if (!currentCityFile) {
         showToast("Selecciona o crea un proyecto primero", "warning");
         return;
@@ -3915,7 +3934,7 @@
     function centerExclusionZoneOnMap(index) {
       if (!cityData.exclusion_zones || index < 0 || index >= cityData.exclusion_zones.length) return;
       const z = cityData.exclusion_zones[index];
-      const targetMap = (currentStep === 1 && mapBbox) ? mapBbox : ((currentStep === 5 && mapDemand) ? mapDemand : mapPoi);
+      const targetMap = (currentStep === 1 && mapBbox) ? mapBbox : (((currentStep === 5 || currentStep === 6) && mapDemand) ? mapDemand : mapPoi);
       if (!targetMap) return;
 
       if (z.coordinates && z.coordinates.length >= 3) {
@@ -4661,7 +4680,7 @@
 
     function selectedDemandEngine() {
       const toggle = document.getElementById('cfg_demand_engine');
-      return toggle ? (toggle.checked ? 'v2' : 'legacy') : (cityData.demand?.engine || 'legacy');
+      return toggle ? (toggle.checked ? 'v2' : 'legacy') : 'v2';
     }
 
     function updateDemandEngineControls(sources) {
@@ -4755,7 +4774,8 @@
 
     async function onDemandEngineChange() {
       if (!currentCityFile || !wizardLifecycle.canSave(currentCityFile)) {
-        document.getElementById('cfg_demand_engine').checked = cityData.demand?.engine === 'v2';
+        const toggle = document.getElementById('cfg_demand_engine');
+        if (toggle) toggle.checked = cityData.demand?.engine === 'v2';
         return;
       }
       const active = selectedDemandEngine() === 'v2';
@@ -4802,7 +4822,8 @@
       if (await saveCurrentCity(true)) {
         if (file === currentCityFile && selectedDemandEngine() === (active ? 'v2' : 'legacy')) refreshDataStatus();
       } else if (file === currentCityFile) {
-        document.getElementById('demandEngineStatus').textContent = 'No se pudo guardar el motor. Reintenta el guardado antes de compilar.';
+        const engineStatus = document.getElementById('demandEngineStatus');
+        if (engineStatus) engineStatus.textContent = 'No se pudo guardar el motor. Reintenta el guardado antes de compilar.';
       }
     }
 
@@ -4864,8 +4885,9 @@
         updateWorkplaceSourceStatus();
       }
       updateDemandMethodsSummary();
-      document.getElementById('employmentCoverage').textContent = '';
-      const sourceYear = document.getElementById('cfg_conapo_source_year').value;
+      const empCovEl = document.getElementById('employmentCoverage');
+      if (empCovEl) empCovEl.textContent = '';
+      const sourceYear = document.getElementById('cfg_conapo_source_year')?.value;
       if (sourceYear) cityData.macroeconomics.conapo_source_year = Number(sourceYear);
       else delete cityData.macroeconomics.conapo_source_year;
       densityLoadedCityFile = null;
@@ -5071,12 +5093,50 @@
 
       const workplaceLabel = document.getElementById('workplaceCoverage');
       updateWorkplaceSourceStatus();
-      document.getElementById('employmentCoverage').textContent = '';
-      document.getElementById('cfg_city_code').value = c.code || "";
-      document.getElementById('cfg_city_creator').value = c.creator || "";
-      document.getElementById('cfg_city_desc').value = c.description || "";
-      document.getElementById('cfg_grid_size').value = c.grid_size || 0.0025;
-      document.getElementById('cfg_initial_zoom').value = c.initial_zoom || 11.5;
+      const empCov = document.getElementById('employmentCoverage');
+      if (empCov) empCov.textContent = '';
+      const ccEl = document.getElementById('cfg_city_code');
+      if (ccEl) ccEl.value = c.code || "";
+      const crEl = document.getElementById('cfg_city_creator');
+      if (crEl) crEl.value = c.creator || "";
+      const cdEl = document.getElementById('cfg_city_desc');
+      if (cdEl) cdEl.value = c.description || "";
+
+      const gridSelect = document.getElementById('cfg_grid_size');
+      if (gridSelect) {
+        const valStr = String(c.grid_size || 0.0025);
+        const standard = ['0.0018', '0.0025', '0.0035'];
+        if (typeof gridSelect.querySelector === 'function') {
+          const existingCustom = gridSelect.querySelector('option[data-custom="true"]');
+          if (existingCustom) existingCustom.remove();
+          if (!standard.includes(valStr) && c.grid_size) {
+            const customOpt = document.createElement('option');
+            customOpt.value = valStr;
+            customOpt.textContent = `Personalizada (${valStr})`;
+            customOpt.setAttribute('data-custom', 'true');
+            gridSelect.appendChild(customOpt);
+          }
+        } else if (gridSelect.options) {
+          for (let i = gridSelect.options.length - 1; i >= 0; i--) {
+            const opt = gridSelect.options[i];
+            if (opt && opt.getAttribute && opt.getAttribute('data-custom') === 'true') {
+              if (opt.remove) opt.remove();
+              else if (gridSelect.removeChild) gridSelect.removeChild(opt);
+            }
+          }
+          if (!standard.includes(valStr) && c.grid_size) {
+            const customOpt = document.createElement('option');
+            customOpt.value = valStr;
+            customOpt.textContent = `Personalizada (${valStr})`;
+            if (customOpt.setAttribute) customOpt.setAttribute('data-custom', 'true');
+            gridSelect.appendChild(customOpt);
+          }
+        }
+        gridSelect.value = valStr;
+      }
+
+      const izEl = document.getElementById('cfg_initial_zoom');
+      if (izEl) izEl.value = c.initial_zoom || 11.5;
       const lonEl = document.getElementById('cfg_initial_lon');
       const latEl = document.getElementById('cfg_initial_lat');
       if (lonEl && latEl) {
@@ -5088,7 +5148,8 @@
           latEl.value = "";
         }
       }
-      document.getElementById('cfg_include_ocean').checked = Boolean(c.include_ocean);
+      const oceanEl = document.getElementById('cfg_include_ocean');
+      if (oceanEl) oceanEl.checked = Boolean(c.include_ocean);
 
       const parksEl = document.getElementById('cfg_urban_parks_only');
       if (parksEl) parksEl.checked = Boolean(c.urban_parks_only);
@@ -5131,10 +5192,10 @@
         parseFloat(Math.max(rawBbox[1], rawBbox[3]).toFixed(4))
       ];
       cityData.city.bbox = normBbox;
-      document.getElementById('cfg_bbox_0').value = normBbox[0];
-      document.getElementById('cfg_bbox_1').value = normBbox[1];
-      document.getElementById('cfg_bbox_2').value = normBbox[2];
-      document.getElementById('cfg_bbox_3').value = normBbox[3];
+      const b0 = document.getElementById('cfg_bbox_0'); if (b0) b0.value = normBbox[0];
+      const b1 = document.getElementById('cfg_bbox_1'); if (b1) b1.value = normBbox[1];
+      const b2 = document.getElementById('cfg_bbox_2'); if (b2) b2.value = normBbox[2];
+      const b3 = document.getElementById('cfg_bbox_3'); if (b3) b3.value = normBbox[3];
       updateBboxLayer(normBbox);
       updateBboxDimensionsDisplay(normBbox);
 
@@ -5143,24 +5204,30 @@
       const presetSel = document.getElementById('cfg_bbox_preset');
       if (presetSel) presetSel.value = 'custom';
 
-      // Paso 3
+      // Paso 3/4
 
       const pea = m.tasa_pea || 0.62;
-      document.getElementById('cfg_tasa_pea').value = pea;
-      document.getElementById('val_tasa_pea').innerText = (pea * 100).toFixed(2) + "%";
+      const peaEl = document.getElementById('cfg_tasa_pea');
+      if (peaEl) peaEl.value = pea;
+      const valPeaEl = document.getElementById('val_tasa_pea');
+      if (valPeaEl) valPeaEl.innerText = (pea * 100).toFixed(2) + "%";
 
       const til1 = m.til_1_state || 0.45;
-      document.getElementById('cfg_til_1').value = til1;
-      document.getElementById('val_til_1').innerText = (til1 * 100).toFixed(2) + "%";
+      const til1El = document.getElementById('cfg_til_1');
+      if (til1El) til1El.value = til1;
+      const valTil1El = document.getElementById('val_til_1');
+      if (valTil1El) valTil1El.innerText = (til1 * 100).toFixed(2) + "%";
 
       const beta = m.gravity_beta || 0.12;
-      document.getElementById('cfg_gravity_beta').value = beta;
-      document.getElementById('val_gravity_beta').innerText = beta.toFixed(3);
+      const betaEl = document.getElementById('cfg_gravity_beta');
+      if (betaEl) betaEl.value = beta;
+      const valBetaEl = document.getElementById('val_gravity_beta');
+      if (valBetaEl) valBetaEl.innerText = beta.toFixed(3);
 
-      document.getElementById('cfg_max_distance_km').value = m.max_distance_km || 50.0;
-      document.getElementById('cfg_min_pop_size').value = m.min_pop_size || 25;
-      document.getElementById('cfg_target_pop_size').value = m.target_pop_size || 150;
-      document.getElementById('cfg_max_pop_size').value = m.max_pop_size || 200;
+      const mdEl = document.getElementById('cfg_max_distance_km'); if (mdEl) mdEl.value = m.max_distance_km || 50.0;
+      const minpEl = document.getElementById('cfg_min_pop_size'); if (minpEl) minpEl.value = m.min_pop_size || 25;
+      const tpEl = document.getElementById('cfg_target_pop_size'); if (tpEl) tpEl.value = m.target_pop_size || 150;
+      const maxpEl = document.getElementById('cfg_max_pop_size'); if (maxpEl) maxpEl.value = m.max_pop_size || 200;
       if (document.getElementById('cfg_cohort_count')) document.getElementById('cfg_cohort_count').value = cityData.demand?.cohort_count ?? '';
       updateCohortUIFromData();
 
@@ -5207,7 +5274,8 @@
       updateModalSimulatorPreview();
       renderUrbanCorePolygon();
 
-      document.getElementById('cfg_conapo_source_year').value = m.conapo_source_year || '';
+      const csyEl = document.getElementById('cfg_conapo_source_year');
+      if (csyEl) csyEl.value = m.conapo_source_year || '';
       const projYr = m.projection_year || m.target_year;
       const selYr = document.getElementById('conapoYearSelect');
       if (projYr && selYr) {
@@ -5441,10 +5509,12 @@
         }
         updateSourceDownloadEnoeOptions();
         const state = document.getElementById('sourceDownloadEnoeState');
-        state.replaceChildren(new Option('Elige una entidad', ''));
-        for (const s of plan.geography.states) state.add(new Option(`${s.code} ${s.name}`, s.code));
-        if (plan.geography.states.length === 1) state.value = plan.geography.states[0].code;
-        document.getElementById('sourceDownloadPlan').classList.remove('hidden');
+        if (state) {
+          state.replaceChildren(new Option('Elige una entidad', ''));
+          for (const s of plan.geography.states) state.add(new Option(`${s.code} ${s.name}`, s.code));
+          if (plan.geography.states.length === 1) state.value = plan.geography.states[0].code;
+        }
+        document.getElementById('sourceDownloadPlan')?.classList.remove('hidden');
         message.textContent = 'Revisa las fuentes y el periodo. OSM descarga el extracto nacional (~600 MB); se comparte entre proyectos.';
       } catch (error) {
         if (file === currentCityFile) message.textContent = error.message + ' · La guía manual sigue disponible en «¿Dónde descargar?».';
@@ -5460,7 +5530,7 @@
       const eicBboxAtStart = JSON.stringify(cityData.city?.bbox);
       const demandAtStart = JSON.stringify({engine: cityData.demand?.engine || 'legacy', year: cityData.demand?.target_year ?? 2025});
       const kinds = [...document.querySelectorAll('#sourceDownloadChoices input:checked')].map(i => i.value);
-      const state = document.getElementById('sourceDownloadEnoeState').value;
+      const state = document.getElementById('sourceDownloadEnoeState')?.value || '';
       const message = document.getElementById('sourceDownloadProgress');
       if (!kinds.length || (kinds.includes('enoe') && !state)) {
         message.textContent = 'Selecciona fuentes y, para ENOE, una entidad de referencia.';
@@ -5471,9 +5541,9 @@
       document.getElementById('sourceDownloadPrepare').disabled = true;
       try {
         let job = await sourceDownloadRequest('/api/sources/start', {plan_id: sourceDownloadPlan.id, kinds,
-          enoe_state: state, enoe_year: Number(document.getElementById('sourceDownloadEnoeYear').value),
-          enoe_quarter: Number(document.getElementById('sourceDownloadEnoeQuarter').value),
-          refresh: document.getElementById('sourceDownloadRefresh').checked}, 30000);
+          enoe_state: state, enoe_year: Number(document.getElementById('sourceDownloadEnoeYear')?.value || 2024),
+          enoe_quarter: Number(document.getElementById('sourceDownloadEnoeQuarter')?.value || 1),
+          refresh: Boolean(document.getElementById('sourceDownloadRefresh')?.checked)}, 30000);
         while (true) {
           if (file === currentCityFile) message.textContent = job.message + '\n' + job.results.map(r =>
             `${r.kind}: ${r.status === 'ok' ? `${r.files.length} archivos preparados` : r.message}` +
@@ -5767,17 +5837,17 @@
           cityData.macroeconomics.max_distance_km = p.max_distance_km;
           cityData.macroeconomics.max_pop_size = p.max_pop_size;
 
-          document.getElementById('cfg_tasa_pea').value = p.tasa_pea;
-          document.getElementById('val_tasa_pea').innerText = (p.tasa_pea * 100).toFixed(2) + "%";
+          const peaEl = document.getElementById('cfg_tasa_pea'); if (peaEl) peaEl.value = p.tasa_pea;
+          const valPea = document.getElementById('val_tasa_pea'); if (valPea) valPea.innerText = (p.tasa_pea * 100).toFixed(2) + "%";
 
-          document.getElementById('cfg_til_1').value = p.til_1_state;
-          document.getElementById('val_til_1').innerText = (p.til_1_state * 100).toFixed(2) + "%";
+          const tilEl = document.getElementById('cfg_til_1'); if (tilEl) tilEl.value = p.til_1_state;
+          const valTil = document.getElementById('val_til_1'); if (valTil) valTil.innerText = (p.til_1_state * 100).toFixed(2) + "%";
 
-          document.getElementById('cfg_gravity_beta').value = p.gravity_beta;
-          document.getElementById('val_gravity_beta').innerText = p.gravity_beta.toFixed(3);
+          const betaEl = document.getElementById('cfg_gravity_beta'); if (betaEl) betaEl.value = p.gravity_beta;
+          const valBeta = document.getElementById('val_gravity_beta'); if (valBeta) valBeta.innerText = p.gravity_beta.toFixed(3);
 
-          document.getElementById('cfg_max_distance_km').value = p.max_distance_km;
-          document.getElementById('cfg_max_pop_size').value = p.max_pop_size;
+          const maxDistEl = document.getElementById('cfg_max_distance_km'); if (maxDistEl) maxDistEl.value = p.max_distance_km;
+          const maxPopEl = document.getElementById('cfg_max_pop_size'); if (maxPopEl) maxPopEl.value = p.max_pop_size;
 
           if (p.seed !== undefined) {
             if (!cityData.city) cityData.city = {};
@@ -5864,6 +5934,12 @@
       if (presetName === 'canonical_200') {
         setCohortMode('rigid', false);
         setCohortFixedValue(200, false);
+        if (cityData.demand?.engine === 'v2') {
+          if (!cityData.demand) cityData.demand = {};
+          cityData.demand.fixed_cohort_size = 200;
+          cityData.demand.exact_cohort_size = true;
+          syncExactCohortUI();
+        }
       } else if (presetName === 'metropoli_150') {
         setCohortMode('adaptive', false);
         setCohortValues(25, 150, 200, false);
@@ -5899,10 +5975,66 @@
       setCohortMode(mode, true);
     }
 
+    function toggleExactCohortSize() {
+      const isCurrentlyExact = Boolean(cityData.demand?.exact_cohort_size);
+      setExactCohortSize(!isCurrentlyExact, true);
+    }
+
+    function onExactCohortCheckboxChanged(checked) {
+      setExactCohortSize(Boolean(checked), true);
+    }
+
+    function setExactCohortSize(exact, triggerSave = true) {
+      if (!cityData.demand) cityData.demand = {};
+      if (exact) {
+        cityData.demand.exact_cohort_size = true;
+        const curFixed = parseInt(document.getElementById('cfg_fixed_pop_size')?.value || cityData.macroeconomics?.target_pop_size, 10) || 200;
+        cityData.demand.fixed_cohort_size = curFixed;
+      } else {
+        cityData.demand.exact_cohort_size = false;
+      }
+      syncExactCohortUI();
+      updateCohortTelemetry();
+      if (triggerSave) triggerAutoSave();
+    }
+
+    function syncExactCohortUI() {
+      const isExact = Boolean(cityData.demand?.exact_cohort_size);
+      const chk = document.getElementById('cfg_exact_cohort_size');
+      const badge = document.getElementById('badge_exact_cohort_size');
+      const btn = document.getElementById('btn_exact_cohort_size');
+      const help = document.getElementById('cohort_rigid_help_text');
+      if (chk) chk.checked = isExact;
+      if (badge && btn) {
+        if (isExact) {
+          badge.innerText = 'ACTIVO';
+          badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-blue-600 text-white';
+          btn.className = 'w-full flex items-center justify-between px-3 py-2 rounded-lg border border-blue-400 bg-blue-50 text-blue-900 text-[11px] font-bold transition-all shadow-xs';
+          if (help) help.innerText = 'Modo exacto oficial: el 100% de los pops del mapa tendrá exactamente este tamaño. Se agrupan restos y se redondea el último bloque a este valor sin subdividir cohortes.';
+        } else {
+          badge.innerText = 'INACTIVO';
+          badge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-stone-300 text-stone-700';
+          btn.className = 'w-full flex items-center justify-between px-3 py-2 rounded-lg border border-stone-200 bg-white text-stone-700 text-[11px] font-medium transition-all shadow-xs';
+          if (help) help.innerText = 'Modo con restos locales: agrupa residentes a un máximo de 500 m. Conserva restos locales adicionales, reparto municipal y cuotas de POIs.';
+        }
+      }
+    }
+
     function setCohortMode(mode, triggerSave = true) {
       if (!cityData.macroeconomics) cityData.macroeconomics = {};
       cityData.macroeconomics.cohort_mode = mode;
-      if (mode === 'adaptive' && cityData.demand?.fixed_cohort_size) delete cityData.demand.fixed_cohort_size;
+      if (mode === 'adaptive' && cityData.demand) {
+        delete cityData.demand.fixed_cohort_size;
+        delete cityData.demand.exact_cohort_size;
+      }
+      if (mode === 'rigid' && triggerSave) {
+        if (!cityData.demand) cityData.demand = {};
+        const curFixed = parseInt(document.getElementById('cfg_fixed_pop_size')?.value || cityData.macroeconomics?.target_pop_size, 10) || 200;
+        cityData.demand.fixed_cohort_size = curFixed;
+        if (cityData.demand.exact_cohort_size === undefined) {
+          cityData.demand.exact_cohort_size = true;
+        }
+      }
 
       const isRigid = (mode === 'rigid');
       const rigidBox = document.getElementById('cohort_rigid_controls');
@@ -5942,6 +6074,7 @@
         const curFixed = parseInt(document.getElementById('cfg_fixed_pop_size')?.value, 10) || 200;
         setCohortFixedValue(curFixed, false);
       }
+      if (typeof syncExactCohortUI === 'function') syncExactCohortUI();
 
       updateCohortTelemetry();
       if (triggerSave) triggerAutoSave();
@@ -5956,7 +6089,13 @@
       if (inputEl) inputEl.value = val;
       if (valEl) valEl.innerText = `${val} pax`;
 
+      if (cityData.demand?.exact_cohort_size || cityData.demand?.fixed_cohort_size || cityData.macroeconomics?.cohort_mode === 'rigid') {
+        if (!cityData.demand) cityData.demand = {};
+        cityData.demand.fixed_cohort_size = val;
+      }
+
       setCohortValues(val, val, val, triggerSave);
+      if (typeof syncExactCohortUI === 'function') syncExactCohortUI();
     }
 
     function onFixedPopRangeChanged(val) {
@@ -5995,11 +6134,15 @@
       cityData.macroeconomics.target_pop_size = targetVal;
       cityData.macroeconomics.max_pop_size = maxVal;
 
-      if (cityData.demand?.fixed_cohort_size) {
+      if (cityData.demand?.fixed_cohort_size || cityData.demand?.exact_cohort_size) {
         if (minVal === targetVal && targetVal === maxVal) cityData.demand.fixed_cohort_size = targetVal;
-        else delete cityData.demand.fixed_cohort_size;
+        else {
+          delete cityData.demand.fixed_cohort_size;
+          delete cityData.demand.exact_cohort_size;
+        }
       }
       syncCohortCount();
+      if (typeof syncExactCohortUI === 'function') syncExactCohortUI();
       updateCohortTelemetry();
       if (triggerSave) triggerAutoSave();
     }
@@ -6048,15 +6191,24 @@
       const countInput = document.getElementById('cfg_cohort_count');
       if (countInput) countInput.disabled = engine !== 'v2' || isRigid;
       if (engine === 'v2') {
+        const isExact = Boolean(cityData.demand?.exact_cohort_size) && isRigid;
         const requested = countInput?.value ? Number(countInput.value) : null;
         const metadata = window.demandV2CohortMetadata?.file === currentCityFile ? window.demandV2CohortMetadata : null;
         const options = metadata?.report?.options;
-        const matching = options && metadata.state === JSON.stringify(cityData) && options.target_pop_size === targetVal && options.max_pop_size === maxVal && options.min_pop_size === minVal && options.cohort_count === requested;
+        const matching = options && metadata.state === JSON.stringify(cityData) && options.target_pop_size === targetVal && options.max_pop_size === maxVal && options.min_pop_size === minVal && options.cohort_count === requested && Boolean(options.exact_size) === isExact;
+        if (isExact) {
+          const count = matching ? metadata.report.actual_count : (metadata ? Math.max(1, Math.round(metadata.commuters / targetVal)) : null);
+          const estimated = document.getElementById('cohort_estimated_pops');
+          if (estimated) estimated.innerText = count === null ? 'Evalúa el candidato' : `${matching ? '' : '~'}${count.toLocaleString()} cohortes exactas (${targetVal} pax)`;
+          const recommendation = document.getElementById('cohort_recommendation_text');
+          if (recommendation) recommendation.innerText = `Modo Exacto Oficial: 100% de las cohortes tendrán exactamente ${targetVal} pasajeros. Consolida restos por municipio y redondea el último bloque sin fragmentar grupos.`;
+          const dynamics = document.getElementById('cohort_dynamics_text');
+          if (dynamics) dynamics.innerText = `Exactamente ${targetVal} personas por cohorte (100% redondeado, cero restos)`;
+          return;
+        }
         const count = matching ? metadata.report.actual_count : requested ?? (metadata ? (isRigid ? Math.ceil(metadata.commuters / targetVal) : Math.round(metadata.commuters / targetVal)) : null);
         const estimated = document.getElementById('cohort_estimated_pops');
         if (estimated) estimated.innerText = count === null ? 'Evalúa el candidato' : isRigid && !matching ? `Al menos ${count.toLocaleString()} cohortes; evalúa para incluir los restos locales` : `${matching ? '' : requested ? '' : '~'}${count.toLocaleString()} cohortes ${matching ? 'calculadas' : requested ? 'solicitadas' : 'estimadas'}`;
-        const badge = document.getElementById('cohort_fps_badge');
-        if (badge) { badge.innerText = 'Rendimiento pendiente de medir'; badge.className = 'text-[10px] text-stone-500'; }
         const recommendation = document.getElementById('cohort_recommendation_text');
         if (recommendation) recommendation.innerText = isRigid ? `Tamaño objetivo: ${targetVal} personas. Agrupamiento máximo de 500 m dentro del mismo municipio, zona aislada y componente vial. Conserva restos locales adicionales, el reparto municipal y las cuotas de POIs. Evalúa para obtener el conteo real.` : matching ? `Total calculado: ${metadata.report.actual_count.toLocaleString()}. Mínimo factible: ${metadata.report.minimum_feasible.toLocaleString()} con este máximo. Todos los viajeros se conservan.` : 'Evalúa el candidato para comprobar el total y los límites por origen. No se modifican destinos durante el empaquetado.';
         const dynamics = document.getElementById('cohort_dynamics_text');
@@ -6064,47 +6216,16 @@
         return;
       }
 
-      // Calcular PEA de referencia
-      let estPEA = 600000;
-      if (window.conapoMetadata && Object.keys(window.conapoMetadata).length > 0) {
-        const totalPobConapo = Object.values(window.conapoMetadata).reduce((acc, cur) => acc + (cur.pob_mit_mun || 0), 0);
-        if (totalPobConapo > 0) {
-          const tasaPEA = parseFloat(document.getElementById('cfg_tasa_pea')?.value || m.tasa_pea || 0.62);
-          estPEA = Math.round(totalPobConapo * tasaPEA);
-        }
-      }
-
-      const estPops = Math.max(1, Math.round(estPEA / targetVal));
       const estPopsEl = document.getElementById('cohort_estimated_pops');
-      if (estPopsEl) estPopsEl.innerText = `~${estPops.toLocaleString()} pops`;
-
-      const fpsBadge = document.getElementById('cohort_fps_badge');
+      if (estPopsEl) estPopsEl.innerText = 'Motor legado';
       const recText = document.getElementById('cohort_recommendation_text');
+      if (recText) recText.innerText = 'Configuración de demanda legacy';
       const dynText = document.getElementById('cohort_dynamics_text');
-
-      if (fpsBadge && recText) {
-        if (estPops < 20000) {
-          fpsBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-green-100 text-green-800 border border-green-200';
-          fpsBadge.innerText = '🟢 60 FPS Sólido';
-          recText.innerText = `Carga ligera (~${estPops.toLocaleString()} pops). Simulación ultra-fluida a 60 FPS en cualquier navegador o laptop.`;
-        } else if (estPops <= 32000) {
-          fpsBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-800 border border-amber-200';
-          fpsBadge.innerText = '🟡 Fluido (60-50 FPS)';
-          recText.innerText = `Carga moderada (~${estPops.toLocaleString()} pops). Fluido en PCs de escritorio. Mantén drivingPath desactivado.`;
-        } else {
-          fpsBadge.className = 'px-2 py-0.5 text-[10px] font-bold rounded-full bg-red-100 text-red-800 border border-red-200';
-          fpsBadge.innerText = '🔴 Alta Carga (>32k pops)';
-          recText.innerText = `Alerta: ~${estPops.toLocaleString()} pops puede provocar caídas de frames en WebGL. Considera elevar target_pop_size a 150–200.`;
-        }
-      }
-
       if (dynText) {
         if (isRigid) {
           dynText.innerText = `Pulsos canónicos (${targetVal} pax/vagón)`;
-          dynText.title = 'Abordaje en bloques exactos idéntico a mapas oficiales de Colin Miller.';
         } else {
           dynText.innerText = `Flujo continuo (${minVal}–${maxVal} pax)`;
-          dynText.title = 'Abordaje gradual orgánico; evita andenes desiertos en periferias.';
         }
       }
     }
@@ -6158,6 +6279,7 @@
         else preset = 'custom';
       }
       highlightActiveCohortPreset(preset);
+      syncExactCohortUI();
       updateCohortTelemetry();
     }
 
@@ -6218,22 +6340,28 @@
     function onModalPresetChange(presetKey) {
       const p = MODAL_PRESETS_JS[presetKey];
       if (p) {
-        document.getElementById('cfg_modal_traffic_speed').value = p.speed;
-        document.getElementById('val_modal_traffic_speed').innerText = `${p.speed} km/h`;
+        const speedInput = document.getElementById('cfg_modal_traffic_speed');
+        if (speedInput) speedInput.value = p.speed;
+        const speedValEl = document.getElementById('val_modal_traffic_speed');
+        if (speedValEl) speedValEl.innerText = `${p.speed} km/h`;
 
-        document.getElementById('cfg_modal_motorization_rate').value = p.motor;
-        document.getElementById('val_modal_motorization_rate').innerText = `${Math.round(p.motor * 100)}%`;
+        const motorInput = document.getElementById('cfg_modal_motorization_rate');
+        if (motorInput) motorInput.value = p.motor;
+        const motorValEl = document.getElementById('val_modal_motorization_rate');
+        if (motorValEl) motorValEl.innerText = `${Math.round(p.motor * 100)}%`;
       }
       updateModalSimulatorPreview();
       triggerAutoSave();
     }
 
     function onModalSliderInput() {
-      const speedVal = parseFloat(document.getElementById('cfg_modal_traffic_speed').value) || 22;
-      const motorVal = parseFloat(document.getElementById('cfg_modal_motorization_rate').value) || 0.4;
+      const speedVal = parseFloat(document.getElementById('cfg_modal_traffic_speed')?.value) || 22;
+      const motorVal = parseFloat(document.getElementById('cfg_modal_motorization_rate')?.value) || 0.4;
 
-      document.getElementById('val_modal_traffic_speed').innerText = `${Math.round(speedVal)} km/h`;
-      document.getElementById('val_modal_motorization_rate').innerText = `${Math.round(motorVal * 100)}%`;
+      const speedValEl = document.getElementById('val_modal_traffic_speed');
+      if (speedValEl) speedValEl.innerText = `${Math.round(speedVal)} km/h`;
+      const motorValEl = document.getElementById('val_modal_motorization_rate');
+      if (motorValEl) motorValEl.innerText = `${Math.round(motorVal * 100)}%`;
 
       const presetSelect = document.getElementById('cfg_modal_experiment_preset');
       if (presetSelect) presetSelect.value = "custom";
@@ -6501,6 +6629,7 @@
 
     function renderGrowthFactorsTable() {
       const tbody = document.getElementById('growthFactorsTableBody');
+      if (!tbody) return;
       tbody.innerHTML = '';
       const factors = (cityData.macroeconomics && cityData.macroeconomics.growth_factors) || {};
       const entries = Object.entries(factors);

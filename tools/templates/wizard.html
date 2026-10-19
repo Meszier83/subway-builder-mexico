@@ -128,14 +128,14 @@
       <!-- Paso 3 -->
       <button onclick="goToStep(3)" id="stepTab-3" class="step-tab flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition text-stone-700 hover:text-stone-950 bg-stone-100 hover:bg-stone-200 border border-stone-300/80">
         <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono font-bold bg-stone-300 text-stone-700">3</span>
-        <span>Macroeconomía</span>
+        <span>POI Studio</span>
       </button>
       <div class="h-0.5 w-6 bg-metro-border"></div>
 
       <!-- Paso 4 -->
       <button onclick="goToStep(4)" id="stepTab-4" class="step-tab flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition text-stone-700 hover:text-stone-950 bg-stone-100 hover:bg-stone-200 border border-stone-300/80">
         <span class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono font-bold bg-stone-300 text-stone-700">4</span>
-        <span>POI Studio</span>
+        <span>Demanda & Cohortes</span>
       </button>
       <div class="h-0.5 w-6 bg-metro-border"></div>
 
@@ -223,77 +223,69 @@
               <p id="employmentCoverage" class="text-xs text-stone-600"></p>
               <p id="workplaceCoverage" class="text-xs text-stone-600"></p>
             </div>
-            <div class="border rounded-lg p-3 space-y-2">
-              <label for="cfg_demand_engine" class="flex items-center justify-between cursor-pointer text-sm font-semibold">
-                <span>Usar nuevo motor de demanda</span>
-                <span class="demand-engine-switch">
-                  <input id="cfg_demand_engine" type="checkbox" role="switch" aria-describedby="demandEngineStatus" onchange="onDemandEngineChange()">
-                  <span class="demand-engine-track" aria-hidden="true"></span>
-                </span>
-              </label>
-              <p id="demandEngineStatus" role="status" class="text-xs text-stone-600">Desactivado: motor legado.</p>
-            </div>
+
             <details id="demandCompatibility" class="text-xs mt-2">
               <summary>Compatibilidad y métodos manuales anteriores</summary>
               <p>Se conservan para proyectos anteriores y configuraciones manuales. El flujo normal inspecciona las fuentes automáticamente; no requiere seleccionar grupos CE ni ingresar evidencia manual.</p>
-            <div>
-              <label for="cfg_residential_placement" class="block text-xs font-semibold">Ubicación residencial</label>
-              <select id="cfg_residential_placement" class="w-full border rounded px-2 py-1">
-                <option value="legacy">Compatible (ubicación anterior)</option>
-                <option value="official_blocks" selected>Manzanas oficiales INEGI (predeterminado)</option>
-              </select>
-            </div>
-            <div>
-              <button type="button" onclick="previewDemandV2()" class="text-xs underline">Comprobar sensibilidad sin cambiar el motor</button>
-              <pre id="demandV2Summary" class="text-xs whitespace-pre-wrap"></pre>
-              <label for="cfg_residential_employment" class="block text-xs font-semibold">Residentes ocupados</label>
-              <select id="cfg_residential_employment" class="w-full border rounded px-2 py-1">
-                <option value="legacy">Compatible (tasa de participación)</option>
-                <option value="census_employed" selected>Censo INEGI: población ocupada (predeterminado)</option>
-              </select>
-              <p class="text-xs text-stone-600">Usa ocupados de 12 años y más del Censo 2020 como distribución espacial. La referencia EIC separa población, ocupados y viajeros.</p>
-              <label for="cfg_demographic_reference" class="block text-xs font-semibold mt-2">Referencia demográfica</label>
-              <select id="cfg_demographic_reference" class="w-full border rounded px-2 py-1">
-                <option value="projected">Proyección configurada</option>
-                <option value="eic2025">Encuesta Intercensal 2025</option>
-              </select>
-              <label for="cfg_eic_indicators" class="block text-xs mt-2">CSV oficial de indicadores EIC 2025</label>
-              <input id="cfg_eic_indicators" class="w-full border rounded px-2 py-1" placeholder="Ruta del archivo nacional">
-              <label for="cfg_eic_persons" class="block text-xs mt-2">CSV de personas EIC 2025, una ruta por línea</label>
-              <textarea id="cfg_eic_persons" class="w-full border rounded px-2 py-1" rows="2" placeholder="Incluye todos los estados del mapa"></textarea>
-              <p class="text-xs text-stone-600">EIC fija el año en 2025 y sustituye los factores manuales para estas magnitudes. Conserva manzanas de 2020; no observa empleos por establecimiento. Para descargar automáticamente, activa EIC y usa «Preparar descargas» en Fuentes; las rutas se guardan al terminar.</p>
-            </div>
-            <div>
-              <label for="cfg_workplace_employment" class="block text-xs font-semibold">Empleo en establecimientos</label>
-              <select id="cfg_workplace_employment" class="w-full border rounded px-2 py-1">
-                <option value="legacy">Compatible (ajuste TIL1)</option>
-                <option value="auto" selected>Automático: CE histórico cuando hay detalle; DENUE si falta (predeterminado)</option>
-                <option value="ce_bounded">Estimación acotada por estrato DENUE</option>
-                <option value="historical_transfer">Transferencia histórica CE manual (compatibilidad)</option>
-              </select>
-              <p class="text-xs text-stone-600">Los métodos anteriores conservan sus parámetros guardados. Automático usa CE histórico cuando hay detalle utilizable y DENUE acotado si falta; son pesos de atracción, no empleos observados del año proyectado.</p>
-              <details class="text-xs mt-2">
-                <summary>Referencia CE manual (compatibilidad)</summary>
-                <p>Inspección de fuentes y cobertura. Conserva el método de empleo seleccionado y no modifica sus pesos.</p>
-                <label for="cfg_ce_reference_year">Año de actividad del censo</label>
-                <input id="cfg_ce_reference_year" type="number" min="1900" max="2100" value="2023" class="w-full border rounded px-2 py-1">
-                <label for="cfg_ce_sources">Archivos CE dentro del proyecto (una ruta por línea)</label>
-                <textarea id="cfg_ce_sources" rows="3" class="w-full border rounded px-2 py-1" placeholder="data/PROYECTO/SAIC_ENTIDAD_2023_totales.csv&#10;data/PROYECTO/SAIC_ENTIDAD_2023_sectores_tamanos.csv"></textarea>
-                <button type="button" onclick="inspectWorkplaceBenchmark()" class="border rounded px-2 py-1">Inspeccionar referencia</button>
-                <p id="historicalBenchmarkStatus" role="status"></p>
-                <pre id="historicalBenchmarkGroups" class="text-xs whitespace-pre-wrap"></pre>
-                <div id="historicalTransferGroups"></div>
-                <button type="button" onclick="document.querySelectorAll('input[name=historicalTransferGroup]').forEach(el => { if (!el.disabled) el.checked = true; })" class="border rounded px-2 py-1">Seleccionar grupos transferibles</button>
-                <label for="cfg_ce_transfer_strength">Intensidad de la transferencia</label>
-                <select id="cfg_ce_transfer_strength" class="w-full border rounded px-2 py-1"><option value="1">Completa</option><option value="0.5">Mitad (sensibilidad)</option><option value="0">Sin transferencia (control)</option></select>
-                <label for="cfg_ce_unit_evidence">Evidencia de unidad de observación: establecimiento</label>
-                <textarea id="cfg_ce_unit_evidence" rows="2" class="w-full border rounded px-2 py-1" placeholder="Metodología CE, tabla/página que respalda los sectores seleccionados"></textarea>
-                <p>Transfiere promedios históricos por tamaño a ubicaciones DENUE. Los controles faltantes o inviables conservan estimaciones DENUE; no reproduce los totales censales.</p>
-                <button type="button" onclick="activateHistoricalTransfer()" class="border rounded px-2 py-1">Aplicar a grupos seleccionados</button>
-                <button type="button" onclick="reinspectHistoricalSources()" class="border rounded px-2 py-1">Revisar y vincular fuentes de nuevo</button>
-              </details>
-            </div>
+              <div>
+                <label for="cfg_residential_placement" class="block text-xs font-semibold">Ubicación residencial</label>
+                <select id="cfg_residential_placement" class="w-full border rounded px-2 py-1">
+                  <option value="legacy">Compatible (ubicación anterior)</option>
+                  <option value="official_blocks" selected>Manzanas oficiales INEGI (predeterminado)</option>
+                </select>
+              </div>
+              <div>
+                <button type="button" onclick="previewDemandV2()" class="text-xs underline">Comprobar sensibilidad sin cambiar el motor</button>
+                <pre id="demandV2Summary" class="text-xs whitespace-pre-wrap"></pre>
+                <label for="cfg_residential_employment" class="block text-xs font-semibold">Residentes ocupados</label>
+                <select id="cfg_residential_employment" class="w-full border rounded px-2 py-1">
+                  <option value="legacy">Compatible (tasa de participación)</option>
+                  <option value="census_employed" selected>Censo INEGI: población ocupada (predeterminado)</option>
+                </select>
+                <p class="text-xs text-stone-600">Usa ocupados de 12 años y más del Censo 2020 como distribución espacial. La referencia EIC separa población, ocupados y viajeros.</p>
+                <label for="cfg_demographic_reference" class="block text-xs font-semibold mt-2">Referencia demográfica</label>
+                <select id="cfg_demographic_reference" class="w-full border rounded px-2 py-1">
+                  <option value="projected">Proyección configurada</option>
+                  <option value="eic2025">Encuesta Intercensal 2025</option>
+                </select>
+                <label for="cfg_eic_indicators" class="block text-xs mt-2">CSV oficial de indicadores EIC 2025</label>
+                <input id="cfg_eic_indicators" class="w-full border rounded px-2 py-1" placeholder="Ruta del archivo nacional">
+                <label for="cfg_eic_persons" class="block text-xs mt-2">CSV de personas EIC 2025, una ruta por línea</label>
+                <textarea id="cfg_eic_persons" class="w-full border rounded px-2 py-1" rows="2" placeholder="Incluye todos los estados del mapa"></textarea>
+                <p class="text-xs text-stone-600">EIC fija el año en 2025 y sustituye los factores manuales para estas magnitudes. Conserva manzanas de 2020; no observa empleos por establecimiento. Para descargar automáticamente, activa EIC y usa «Preparar descargas» en Fuentes; las rutas se guardan al terminar.</p>
+              </div>
+              <div>
+                <label for="cfg_workplace_employment" class="block text-xs font-semibold">Empleo en establecimientos</label>
+                <select id="cfg_workplace_employment" class="w-full border rounded px-2 py-1">
+                  <option value="legacy">Compatible (ajuste TIL1)</option>
+                  <option value="auto" selected>Automático: CE histórico cuando hay detalle; DENUE si falta (predeterminado)</option>
+                  <option value="ce_bounded">Estimación acotada por estrato DENUE</option>
+                  <option value="historical_transfer">Transferencia histórica CE manual (compatibilidad)</option>
+                </select>
+                <p class="text-xs text-stone-600">Los métodos anteriores conservan sus parámetros guardados. Automático usa CE histórico cuando hay detalle utilizable y DENUE acotado si falta; son pesos de atracción, no empleos observados del año proyectado.</p>
+                <details class="text-xs mt-2">
+                  <summary>Referencia CE manual (compatibilidad)</summary>
+                  <p>Inspección de fuentes y cobertura. Conserva el método de empleo seleccionado y no modifica sus pesos.</p>
+                  <label for="cfg_ce_reference_year">Año de actividad del censo</label>
+                  <input id="cfg_ce_reference_year" type="number" min="1900" max="2100" value="2023" class="w-full border rounded px-2 py-1">
+                  <label for="cfg_ce_sources">Archivos CE dentro del proyecto (una ruta por línea)</label>
+                  <textarea id="cfg_ce_sources" rows="3" class="w-full border rounded px-2 py-1" placeholder="data/PROYECTO/SAIC_ENTIDAD_2023_totales.csv&#10;data/PROYECTO/SAIC_ENTIDAD_2023_sectores_tamanos.csv"></textarea>
+                  <button type="button" onclick="inspectWorkplaceBenchmark()" class="border rounded px-2 py-1">Inspeccionar referencia</button>
+                  <p id="historicalBenchmarkStatus" role="status"></p>
+                  <pre id="historicalBenchmarkGroups" class="text-xs whitespace-pre-wrap"></pre>
+                  <div id="historicalTransferGroups"></div>
+                  <button type="button" onclick="document.querySelectorAll('input[name=historicalTransferGroup]').forEach(el => { if (!el.disabled) el.checked = true; })" class="border rounded px-2 py-1">Seleccionar grupos transferibles</button>
+                  <label for="cfg_ce_transfer_strength">Intensidad de la transferencia</label>
+                  <select id="cfg_ce_transfer_strength" class="w-full border rounded px-2 py-1"><option value="1">Completa</option><option value="0.5">Mitad (sensibilidad)</option><option value="0">Sin transferencia (control)</option></select>
+                  <label for="cfg_ce_unit_evidence">Evidencia de unidad de observación: establecimiento</label>
+                  <textarea id="cfg_ce_unit_evidence" rows="2" class="w-full border rounded px-2 py-1" placeholder="Metodología CE, tabla/página que respalda los sectores seleccionados"></textarea>
+                  <p>Transfiere promedios históricos por tamaño a ubicaciones DENUE. Los controles faltantes o inviables conservan estimaciones DENUE; no reproduce los totales censales.</p>
+                  <button type="button" onclick="activateHistoricalTransfer()" class="border rounded px-2 py-1">Aplicar a grupos seleccionados</button>
+                  <button type="button" onclick="reinspectHistoricalSources()" class="border rounded px-2 py-1">Revisar y vincular fuentes de nuevo</button>
+                </details>
+              </div>
             </details>
+
             <!-- Selector de Presets Oficiales (Canon Subway Builder) -->
             <div>
               <div class="flex items-center justify-between mb-1">
@@ -351,26 +343,16 @@
           </div>
 
 
-          <!-- Parámetros de Malla y Filtros -->
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block text-stone-700 font-semibold mb-1">Malla Espacial</label>
-              <select id="cfg_grid_size" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-2 text-stone-900 font-medium">
-                <option value="0.0018">Fina (~180m)</option>
-                <option value="0.0025" selected>Estándar (~250m)</option>
-                <option value="0.0035">Amplia (~380m)</option>
-              </select>
+          <!-- Zoom Inicial -->
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-stone-700 font-semibold text-xs">Zoom Inicial</label>
+              <button type="button" onclick="captureCurrentZoom()" class="text-[10px] text-metro-orange hover:text-orange-700 font-bold flex items-center space-x-0.5" title="Capturar y adoptar el nivel de zoom actual del mapa">
+                <i data-lucide="crosshair" class="w-3 h-3"></i>
+                <span>Capturar</span>
+              </button>
             </div>
-            <div>
-              <div class="flex items-center justify-between mb-1">
-                <label class="block text-stone-700 font-semibold text-xs">Zoom Inicial</label>
-                <button type="button" onclick="captureCurrentZoom()" class="text-[10px] text-metro-orange hover:text-orange-700 font-bold flex items-center space-x-0.5" title="Capturar y adoptar el nivel de zoom actual del mapa">
-                  <i data-lucide="crosshair" class="w-3 h-3"></i>
-                  <span>Capturar</span>
-                </button>
-              </div>
-              <input type="number" step="0.5" id="cfg_initial_zoom" value="11.5" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-medium text-xs">
-            </div>
+            <input type="number" step="0.5" id="cfg_initial_zoom" value="11.5" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-medium text-xs">
           </div>
 
           <!-- Preview de Zoom y Encuadre de Cámara (16:9 / Día 1) -->
@@ -714,12 +696,6 @@
             <div id="sourceDownloadPlan" class="hidden space-y-2 text-xs">
               <p id="sourceDownloadGeography"></p>
               <div id="sourceDownloadChoices" class="space-y-1"></div>
-              <div id="sourceDownloadEnoeOptions">
-              <label>Referencia ENOE <select id="sourceDownloadEnoeState" class="border rounded p-1"></select></label>
-              <label>Año ENOE <input id="sourceDownloadEnoeYear" type="number" min="2005" max="2100" value="2026" class="border rounded p-1 w-20"></label>
-              <label>Trimestre <select id="sourceDownloadEnoeQuarter" class="border rounded p-1"><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option><option value="4">4</option></select></label>
-              <p class="text-stone-600">La referencia ENOE se aplica a todo el mapa en el legado. El periodo inicial es 2026 T2; puedes elegir otro periodo publicado.</p>
-              </div>
               <p class="text-stone-600">SAIC usa referencia 2023; CPV y Marco usan 2020. El nuevo motor usa EIC 2025 y no requiere ENOE ni CONAPO.</p>
               <label class="block"><input id="sourceDownloadRefresh" type="checkbox"> Volver a descargar desde el proveedor (sin reutilizar la caché)</label>
               <p class="text-stone-600">La caché conserva la descarga anterior; no busca automáticamente una edición nueva de DENUE u OSM. La fecha y procedencia quedan registradas con los archivos.</p>
@@ -751,7 +727,7 @@
             &larr; Volver
           </button>
           <button onclick="goToStep(3)" class="px-6 py-2.5 bg-metro-green hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition shadow-md flex items-center space-x-2">
-            <span>Continuar a Macroeconomía</span>
+            <span>Continuar a POI Studio</span>
             <i data-lucide="arrow-right" class="w-4 h-4"></i>
           </button>
         </div>
@@ -797,486 +773,9 @@
     </section>
 
     <!-- --------------------------------------------------------------------- -->
-    <!-- PASO 3: CALIBRACIÓN MACROECONÓMICA Y CONAPO -->
+    <!-- PASO 3: POI STUDIO INTEGRADO (CALIBRADOR DE RADIOS, ABSORCIÓN Y COLONIAS) -->
     <!-- --------------------------------------------------------------------- -->
-    <section id="stepView-3" class="step-view hidden absolute inset-0 p-6 flex flex-col md:flex-row gap-6 overflow-y-auto w-full h-full">
-      <div class="w-full md:w-1/2 bg-metro-card border border-metro-border rounded-xl p-5 shadow-xl flex flex-col space-y-4">
-        <div id="legacyMacroHeader" class="border-b border-metro-border pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div>
-            <h2 class="text-base font-bold text-stone-900 flex items-center space-x-2">
-              <i data-lucide="sliders" class="w-5 h-5 text-metro-orange"></i>
-              <span>Parámetros Macroeconómicos (ENOE / Gravitatorio)</span>
-            </h2>
-            <div class="flex items-center space-x-2 mt-1">
-              <p class="text-xs text-stone-600">Calibra las tasas de empleo, informalidad y alcance de los viajes metropolitanos.</p>
-            </div>
-            <div id="macroSourceIndicator" class="hidden mt-1.5 inline-flex items-center space-x-1.5 text-[11px] font-mono font-medium px-2 py-0.5 rounded-md bg-stone-100 border border-stone-200 text-stone-700">
-              <i data-lucide="info" class="w-3 h-3 text-stone-500"></i>
-              <span id="macroSourceText"></span>
-            </div>
-          </div>
-          <div class="flex items-center space-x-2 shrink-0">
-            <a href="https://www.inegi.org.mx/programas/enoe/15ymas/#tabulados" target="_blank" class="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 border border-stone-300 text-stone-700 hover:text-stone-900 text-xs font-bold rounded-lg flex items-center space-x-1 transition shadow-xs" title="Descargar tabulados oficiales de la ENOE en INEGI">
-              <span>Descargar ENOE</span>
-              <i data-lucide="external-link" class="w-3 h-3"></i>
-            </a>
-            <button onclick="resetMacroeconomicParameters()" id="btnResetMacro" class="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold rounded-lg flex items-center space-x-1.5 transition shadow-xs" title="Restablecer o auto-detectar según la ENOE de INEGI o Censo CPV">
-              <i data-lucide="rotate-ccw" class="w-3.5 h-3.5 text-amber-700"></i>
-              <span>Restablecer Oficiales</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="space-y-4 text-xs">
-          <div id="legacyMacroRates" class="space-y-4">
-          <!-- Tasa PEA -->
-          <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border">
-            <div class="flex justify-between items-center mb-1">
-              <div class="flex items-center space-x-2">
-                <span class="text-stone-900 font-bold text-xs">Tasa de Participación Laboral (PEA)</span>
-                <span class="text-[10px] px-1.5 py-0.5 bg-orange-100 border border-orange-200 text-orange-800 rounded font-semibold">ENOE · INEGI</span>
-              </div>
-              <span id="val_tasa_pea" class="text-metro-orange font-mono font-bold text-sm">62.00%</span>
-            </div>
-            <input type="range" min="0.40" max="0.80" step="0.005" id="cfg_tasa_pea" oninput="document.getElementById('val_tasa_pea').innerText = (this.value * 100).toFixed(2) + '%'" class="w-full accent-metro-orange cursor-pointer">
-            <p class="text-[11px] text-stone-600 mt-1 leading-relaxed">
-              <strong>Efecto en el juego:</strong> Porcentaje de la población de 15+ años que trabaja o busca empleo. Multiplica la población censal para calcular cuántos <em>pasajeros diarios</em> saldrán de cada colonia hacia el metro.
-            </p>
-          </div>
-
-          <!-- Informalidad TIL1 -->
-          <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border">
-            <div class="flex justify-between items-center mb-1">
-              <div class="flex items-center space-x-2">
-                <span class="text-stone-900 font-bold text-xs">Tasa de Informalidad Laboral (TIL1)</span>
-                <span class="text-[10px] px-1.5 py-0.5 bg-emerald-100 border border-emerald-200 text-emerald-800 rounded font-semibold">ENOE / CE · INEGI</span>
-              </div>
-              <span id="val_til_1" class="text-metro-green font-mono font-bold text-sm">45.00%</span>
-            </div>
-            <input type="range" min="0.20" max="0.75" step="0.005" id="cfg_til_1" oninput="document.getElementById('val_til_1').innerText = (this.value * 100).toFixed(2) + '%'" class="w-full accent-metro-green cursor-pointer">
-            <p class="text-[11px] text-stone-600 mt-1 leading-relaxed">
-              <strong>Efecto en el juego:</strong> Proporción de empleo informal. Escala y expande los empleos en micro y pequeños negocios del DENUE para reflejar la actividad económica real no registrada formalmente.
-            </p>
-          </div>
-
-          <!-- Beta Gravitatorio -->
-          <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border">
-            <div class="flex justify-between items-center mb-1">
-              <div class="flex items-center space-x-2">
-                <span class="text-stone-900 font-bold text-xs">Fricción Espacial Gravitatoria (&beta;)</span>
-                <span class="text-[10px] px-1.5 py-0.5 bg-purple-100 border border-purple-200 text-purple-800 rounded font-semibold">Modelo Furness</span>
-              </div>
-              <span id="val_gravity_beta" class="text-metro-pink font-mono font-bold text-sm">0.120</span>
-            </div>
-            <input type="range" min="0.05" max="0.25" step="0.005" id="cfg_gravity_beta" oninput="onGravityBetaChanged(parseFloat(this.value))" class="w-full accent-metro-pink cursor-pointer">
-
-            <!-- Botones de Calibración por Arquetipo Urbano (Colin Miller Standard) -->
-            <div class="flex items-center gap-1.5 mt-2 pt-2 border-t border-metro-border/60">
-              <span class="text-[10px] font-semibold text-stone-600 uppercase tracking-wider shrink-0">Arquetipos:</span>
-              <div class="grid grid-cols-3 gap-1.5 w-full">
-                <button type="button" onclick="setBetaArchetype('compacta', 0.150)" class="px-2 py-1 bg-white hover:bg-stone-100 border border-stone-200 text-stone-800 text-[10px] font-semibold rounded text-center transition-colors">
-                  🏙️ Compacta <span class="text-metro-pink block font-mono font-normal">0.150 (~7 km)</span>
-                </button>
-                <button type="button" onclick="setBetaArchetype('intermedia', 0.120)" class="px-2 py-1 bg-white hover:bg-stone-100 border border-stone-200 text-stone-800 text-[10px] font-semibold rounded text-center transition-colors">
-                  🌆 Intermedia <span class="text-metro-pink block font-mono font-normal">0.120 (~12 km)</span>
-                </button>
-                <button type="button" onclick="setBetaArchetype('megaciudad', 0.085)" class="px-2 py-1 bg-white hover:bg-stone-100 border border-stone-200 text-stone-800 text-[10px] font-semibold rounded text-center transition-colors">
-                  🌐 Megaciudad <span class="text-metro-pink block font-mono font-normal">0.085 (~22 km)</span>
-                </button>
-              </div>
-            </div>
-
-            <div id="beta_recommendation_box" class="mt-2 text-[11px] text-stone-600 bg-white/70 p-2 rounded border border-metro-border/50">
-              <span id="beta_expected_median" class="font-bold text-stone-800">Mediana esperada: ~10 – 15 km.</span>
-              <span id="beta_rationale_text" class="block text-[10px] text-stone-500 mt-0.5">Calibrado para coincidir con la distribución real de distancias de viaje (Trip Length Distribution) de Subway Builder.</span>
-            </div>
-          </div>
-
-          </div>
-
-          <!-- Distancia Máx. de Viaje -->
-          <div class="bg-metro-panel p-3 rounded-lg border border-metro-border">
-            <div class="flex justify-between items-center mb-1">
-              <label class="block text-stone-900 font-bold text-xs">Distancia Máx. de Viaje Metropolitano (km)</label>
-              <span class="text-[10px] px-1.5 py-0.5 bg-stone-200 text-stone-700 rounded font-mono font-semibold">Radio de Corte</span>
-            </div>
-            <input type="number" id="cfg_max_distance_km" value="50.0" min="10" max="150" step="1" class="w-full bg-white border border-metro-border rounded-lg px-3 py-1.5 text-stone-900 font-mono text-xs">
-            <p class="text-[10px] text-stone-600 mt-1">Límite de corte: se descartan viajes cotidianos más allá de este radio (40 a 70 km recomendado).</p>
-          </div>
-
-          <!-- Control de Cohortes Demográficas (Pops) -->
-          <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border space-y-2.5">
-            <div class="flex justify-between items-center">
-              <div class="flex items-center space-x-2">
-                <span class="text-stone-900 font-bold text-xs">Calibración de Cohortes de Pasajeros (Pops)</span>
-                <span class="text-[10px] px-1.5 py-0.5 bg-blue-100 border border-blue-200 text-blue-800 rounded font-semibold font-mono">Conserva PEA</span>
-              </div>
-              <span id="cohort_badge_mode" class="text-[10px] text-stone-600 font-mono bg-white px-2 py-0.5 rounded border border-stone-200">Adaptativo</span>
-            </div>
-
-            <p class="text-[11px] text-stone-600 leading-relaxed">
-              Define el tamaño máximo o rango preferido de las cohortes. El candidato conserva los viajeros, las restricciones territoriales y las cuotas de POIs; puede necesitar restos para mantener el reparto municipal. El rendimiento se comprueba en el juego.
-            </p>
-
-            <!-- Arquetipos / Presets Rápidos (1-Clic) -->
-            <div class="pt-1">
-              <div class="flex items-center justify-between mb-1.5">
-                <span class="text-[10px] font-semibold text-stone-600 uppercase tracking-wider">Arquetipos Recomendados:</span>
-                <span class="text-[10px] text-stone-400 font-mono">1-clic</span>
-              </div>
-              <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                <button type="button" id="btn_preset_canonical_200" onclick="setCohortPreset('canonical_200')" class="px-2 py-1.5 bg-white hover:bg-stone-50 border border-stone-200 hover:border-blue-500 text-stone-800 text-[10px] font-semibold rounded-lg text-center transition-all shadow-sm">
-                  🎯 Oficial Rígido
-                  <span class="text-blue-700 block font-mono font-bold text-[9px] mt-0.5">200 pax (Colin M.)</span>
-                </button>
-                <button type="button" id="btn_preset_metropoli_150" onclick="setCohortPreset('metropoli_150')" class="px-2 py-1.5 bg-white hover:bg-stone-50 border border-stone-200 hover:border-blue-500 text-stone-800 text-[10px] font-semibold rounded-lg text-center transition-all shadow-sm">
-                  🏙️ Metrópoli Grande
-                  <span class="text-stone-600 block font-mono font-bold text-[9px] mt-0.5">150 pax (CDMX/GDL)</span>
-                </button>
-                <button type="button" id="btn_preset_mediana_75" onclick="setCohortPreset('mediana_75')" class="px-2 py-1.5 bg-white hover:bg-stone-50 border border-stone-200 hover:border-blue-500 text-stone-800 text-[10px] font-semibold rounded-lg text-center transition-all shadow-sm">
-                  🌆 Intermedia
-                  <span class="text-stone-600 block font-mono font-bold text-[9px] mt-0.5">75 pax (QRO/MID)</span>
-                </button>
-                <button type="button" id="btn_preset_alta_fidelidad_35" onclick="setCohortPreset('alta_fidelidad_35')" class="px-2 py-1.5 bg-white hover:bg-stone-50 border border-stone-200 hover:border-blue-500 text-stone-800 text-[10px] font-semibold rounded-lg text-center transition-all shadow-sm">
-                  🔬 Alta Fidelidad
-                  <span class="text-stone-600 block font-mono font-bold text-[9px] mt-0.5">35 pax (CUN/PAC)</span>
-                </button>
-              </div>
-            </div>
-
-            <!-- Selector de Modo: Adaptativo vs Rígido Canónico -->
-            <div class="bg-white/80 p-2.5 rounded-lg border border-stone-200 space-y-2">
-              <div class="flex items-center justify-between">
-                <span class="text-[11px] font-bold text-stone-800">Modo de Empaquetado:</span>
-                <div class="inline-flex rounded-lg border border-stone-300 p-0.5 bg-stone-100 text-[11px]">
-                  <button type="button" id="btn_mode_adaptive" onclick="onCohortModeRadioChanged('adaptive')" class="px-2 py-0.5 rounded-md font-medium text-stone-800 bg-white shadow-xs transition-colors select-none">
-                    ⚖️ Adaptativo (Rango)
-                  </button>
-                  <button type="button" id="btn_mode_rigid" onclick="onCohortModeRadioChanged('rigid')" class="px-2 py-0.5 rounded-md font-medium text-stone-500 hover:text-stone-800 transition-colors select-none">
-                    🎯 Rígido Fijo
-                  </button>
-                </div>
-              </div>
-
-              <!-- Controles Modo Rígido Fijo -->
-              <div id="cohort_rigid_controls" class="hidden pt-1">
-                <div class="flex items-center justify-between mb-1">
-                  <label class="block text-stone-700 font-semibold text-[11px]">Tamaño Fijo de Cohorte (pax exactos)</label>
-                  <span id="val_fixed_pop_size" class="text-blue-700 font-mono font-bold text-xs bg-blue-50 px-2 py-0.5 rounded border border-blue-200">200 pax</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <input type="range" id="cfg_fixed_pop_range" min="10" max="500" step="5" value="200" oninput="onFixedPopRangeChanged(this.value)" class="w-full accent-blue-600 cursor-pointer">
-                  <input type="number" id="cfg_fixed_pop_size" value="200" min="10" max="500" step="5" oninput="onFixedPopInputChanged(this.value)" class="w-20 bg-white border border-stone-300 rounded-lg px-2 py-1 text-stone-900 font-mono text-xs font-bold text-center">
-                </div>
-                <span class="text-[10px] text-stone-500 block mt-1">Motor candidato: tamaño objetivo por cohorte. Agrupa residentes a un máximo de 500 m de su punto original, dentro del mismo municipio, zona aislada y componente vial. Conserva restos adicionales por proximidad, reparto municipal y cuotas de POIs.</span>
-              </div>
-
-              <!-- Controles Modo Adaptativo (Rango min/target/max) -->
-              <div id="cohort_adaptive_controls" class="grid grid-cols-3 gap-2 pt-1">
-                <div>
-                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Mínimo (min_pop)</label>
-                  <input type="number" id="cfg_min_pop_size" value="25" min="1" max="500" step="5" oninput="onCohortParamChanged()" class="w-full bg-white border border-metro-border rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs font-bold text-center">
-                  <span class="text-[9px] text-stone-500 block text-center mt-0.5">Piso (Estándar: 25)</span>
-                </div>
-                <div>
-                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Objetivo (target_pop)</label>
-                  <input type="number" id="cfg_target_pop_size" value="150" min="10" max="500" step="5" oninput="onCohortParamChanged()" class="w-full bg-white border border-metro-border rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs font-bold text-center">
-                  <span class="text-[9px] text-stone-500 block text-center mt-0.5">Mediana (~150)</span>
-                </div>
-                <div>
-                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Máximo (max_pop)</label>
-                  <input type="number" id="cfg_max_pop_size" value="200" min="20" max="500" step="5" oninput="onCohortParamChanged()" class="w-full bg-white border border-metro-border rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs font-bold text-center">
-                  <span class="text-[9px] text-stone-500 block text-center mt-0.5">Tope chunk (200)</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- Panel de Telemetría Dinámica de Cohortes y Medidor WebGL -->
-            <div class="bg-white p-2.5 rounded-lg border border-stone-200">
-              <label for="cfg_cohort_count" class="block text-stone-700 font-semibold text-[11px] mb-1">Número total de cohortes · motor candidato</label>
-              <input type="number" id="cfg_cohort_count" min="1" step="1" placeholder="Automático según tamaño objetivo" oninput="onCohortParamChanged()" class="w-full bg-white border border-metro-border rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
-              <span class="text-[10px] text-stone-500 block mt-1">Vacío: usa mínimo, objetivo y máximo. Con un número: exige ese total exacto, conserva viajeros y respeta el máximo. El mínimo pasa a ser una preferencia.</span>
-            </div>
-            <div id="cohort_telemetry_box" class="bg-stone-50 p-2.5 rounded-lg border border-stone-200 text-xs space-y-1.5">
-              <div class="flex justify-between items-center">
-                <span class="font-bold text-stone-800 flex items-center gap-1.5">
-                  <i data-lucide="gauge" class="w-3.5 h-3.5 text-stone-500"></i>
-                  <span>Estimación de Cohortes y Carga WebGL:</span>
-                </span>
-                <span id="cohort_fps_badge" class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-green-100 text-green-800 border border-green-200">🟢 60 FPS Sólido</span>
-              </div>
-              <div class="grid grid-cols-2 gap-2 text-[11px]">
-                <div class="bg-white p-1.5 rounded border border-stone-200/70">
-                  <span class="text-[10px] text-stone-500 block">Pops Estimados:</span>
-                  <span id="cohort_estimated_pops" class="font-mono font-bold text-stone-800">~15,000 pops</span>
-                </div>
-                <div class="bg-white p-1.5 rounded border border-stone-200/70">
-                  <span class="text-[10px] text-stone-500 block">Dinámica en Andenes:</span>
-                  <span id="cohort_dynamics_text" class="font-medium text-stone-700 truncate">Flujo escalonado continuo</span>
-                </div>
-              </div>
-              <span id="cohort_recommendation_text" class="text-[10px] text-stone-500 block">
-                Valores dentro del rango óptimo (< 20,000 pops). Máxima fluidez y estabilidad sin riesgo de sobrecarga.
-              </span>
-            </div>
-          </div>
-
-          <!-- Ajustes Avanzados de Filtros Censales y Algoritmo Furness (Collapsible) -->
-          <details class="bg-stone-50 rounded-xl border border-stone-200 p-3 text-xs space-y-2 group">
-            <summary class="font-bold text-stone-800 cursor-pointer flex items-center justify-between select-none">
-              <div class="flex items-center space-x-2">
-                <i data-lucide="sliders-horizontal" class="w-4 h-4 text-stone-500"></i>
-                <span>Ajustes Avanzados: Filtros de Malla y Modelo Gravitatorio</span>
-              </div>
-              <span class="text-[10px] text-stone-500 group-open:rotate-180 transition-transform">▼</span>
-            </summary>
-            <div class="pt-2 space-y-3">
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Mín. Residentes por Manzana</label>
-                  <input type="number" id="cfg_min_residents" value="10" min="0" step="1" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
-                  <span class="text-[9px] text-stone-500">Descarta manzanas censales con menos de N habitantes.</span>
-                </div>
-                <div>
-                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Mín. Empleos por Manzana</label>
-                  <input type="number" id="cfg_min_jobs" value="3" min="0" step="1" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
-                  <span class="text-[9px] text-stone-500">Descarta celdas con menos de N empleos DENUE.</span>
-                </div>
-              </div>
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Filtro Área Edificios (m²)</label>
-                  <input type="number" id="cfg_building_filter_size" value="15.0" min="0" step="1" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
-                  <span class="text-[9px] text-stone-500">Omite cobertizos y casetas menores a este metraje en MapGen.</span>
-                </div>
-                <div>
-                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Simplificación Edificios</label>
-                  <input type="number" id="cfg_building_simplification" value="0.2" min="0" max="1" step="0.05" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
-                  <span class="text-[9px] text-stone-500">Tolerancia Ramer-Douglas-Peucker en vector tiles.</span>
-                </div>
-              </div>
-              <div class="grid grid-cols-3 gap-2">
-                <div>
-                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Umbral Muestreo</label>
-                  <input type="number" id="cfg_sample_threshold" value="500" min="50" step="50" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
-                  <span class="text-[9px] text-stone-500">sample_threshold</span>
-                </div>
-                <div>
-                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Iteraciones Furness</label>
-                  <input type="number" id="cfg_furness_iterations" value="15" min="5" max="100" step="5" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
-                  <span class="text-[9px] text-stone-500">furness_iterations</span>
-                </div>
-                <div>
-                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Tolerancia Furness</label>
-                  <input type="number" id="cfg_furness_tol" value="0.02" min="0.001" max="0.1" step="0.005" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
-                  <span class="text-[9px] text-stone-500">furness_tol</span>
-                </div>
-              </div>
-            </div>
-          </details>
-
-          <!-- Semilla Aleatoria (Seed) -->
-          <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border">
-            <div class="flex justify-between items-center mb-1">
-              <div class="flex items-center space-x-2">
-                <span class="text-stone-900 font-bold text-xs">Semilla Pseudo-Aleatoria (Seed)</span>
-                <span class="text-[10px] px-1.5 py-0.5 bg-blue-100 border border-blue-200 text-blue-800 rounded font-semibold font-mono">Reproducibilidad</span>
-              </div>
-              <div class="flex items-center space-x-1.5">
-                <button type="button" onclick="randomizeSeed()" class="px-2 py-0.5 bg-white hover:bg-stone-100 border border-stone-300 text-stone-800 text-[11px] font-bold rounded flex items-center space-x-1 transition shadow-xs" title="Generar nueva semilla aleatoria">
-                  <span>🎲 Aleatorizar</span>
-                </button>
-                <button type="button" onclick="resetSeedDefault()" class="px-2 py-0.5 bg-white hover:bg-stone-100 border border-stone-300 text-stone-600 hover:text-stone-900 text-[11px] font-mono font-bold rounded transition shadow-xs" title="Restablecer semilla estándar (42)">
-                  <span>42</span>
-                </button>
-              </div>
-            </div>
-            <input type="number" id="cfg_seed" value="42" min="0" step="1" class="w-full bg-white border border-metro-border rounded-lg px-3 py-1.5 text-stone-900 font-mono text-xs font-bold">
-            <p class="text-[11px] text-stone-600 mt-1 leading-relaxed">
-              <strong>Efecto en el juego:</strong> Controla el sorteo multinomial de cohortes de viaje. Mantener el mismo número asegura resultados 100% idénticos entre compilaciones.
-            </p>
-          </div>
-
-          <!-- LABORATORIO EXPERIMENTAL: COMPETITIVIDAD MODAL (AUTO VS. METRO) -->
-          <div id="legacyModalPanel" class="bg-gradient-to-br from-purple-50/80 to-stone-50 p-4 rounded-xl border border-purple-200 shadow-xs space-y-3">
-            <div class="flex justify-between items-center">
-              <div class="flex items-center space-x-2">
-                <i data-lucide="flask-conical" class="w-4 h-4 text-purple-700"></i>
-                <div>
-                  <div class="flex items-center space-x-2">
-                    <span class="text-stone-900 font-black text-xs tracking-wide">Laboratorio: Competitividad Modal</span>
-                    <span class="text-[9px] px-1.5 py-0.5 bg-purple-100 border border-purple-300 text-purple-900 rounded font-bold uppercase">Experimento</span>
-                  </div>
-                  <p class="text-[10px] text-stone-500">Simula congestión vial urbana y usuarios cautivos de transporte masivo</p>
-                </div>
-              </div>
-              <!-- Toggle Switch -->
-              <label class="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" id="cfg_modal_experiment_enabled" onchange="onModalExperimentToggle(this.checked)" class="sr-only peer">
-                <div class="w-9 h-5 bg-stone-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
-              </label>
-            </div>
-
-            <!-- Contenedor Desplegable cuando está Activo -->
-            <div id="modalExperimentControls" class="space-y-3 pt-2 border-t border-purple-200/70 hidden">
-              <!-- Selector de Presets -->
-              <div>
-                <label class="block text-stone-900 font-bold text-[11px] mb-1">Arquetipo Urbano / Presets de Tráfico</label>
-                <select id="cfg_modal_experiment_preset" onchange="onModalPresetChange(this.value)" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-stone-800">
-                  <option value="canonical">Flujo Libre (Oficial Colin 40 km/h · 100% auto)</option>
-                  <option value="moderate_traffic">Tráfico Moderado (28 km/h · 55% auto)</option>
-                  <option value="cdmx_peak">Megaciudad Saturada (18 km/h · 35% auto)</option>
-                  <option value="captive_transit">Transporte Cautivo (24 km/h · 20% auto)</option>
-                  <option value="custom">Personalizado (Sliders manuales)</option>
-                </select>
-              </div>
-
-              <!-- Sliders Manuales -->
-              <div class="grid grid-cols-2 gap-3">
-                <!-- Slider Velocidad de Tráfico -->
-                <div class="bg-white p-2.5 rounded-lg border border-purple-100 shadow-2xs">
-                  <div class="flex justify-between items-center mb-1">
-                    <span class="text-[10px] font-bold text-stone-700">Velocidad Tráfico</span>
-                    <span id="val_modal_traffic_speed" class="text-purple-700 font-mono font-bold text-xs">22 km/h</span>
-                  </div>
-                  <input type="range" id="cfg_modal_traffic_speed" min="15" max="45" step="1" value="22" oninput="onModalSliderInput()" class="w-full accent-purple-600 cursor-pointer">
-                  <span class="text-[9px] text-stone-500 block text-right mt-0.5">15 (lento) a 45 km/h</span>
-                </div>
-
-                <!-- Slider Tasa de Motorización -->
-                <div class="bg-white p-2.5 rounded-lg border border-purple-100 shadow-2xs">
-                  <div class="flex justify-between items-center mb-1">
-                    <span class="text-[10px] font-bold text-stone-700">Hogares con Auto</span>
-                    <span id="val_modal_motorization_rate" class="text-purple-700 font-mono font-bold text-xs">40%</span>
-                  </div>
-                  <input type="range" id="cfg_modal_motorization_rate" min="0.15" max="0.85" step="0.05" value="0.40" oninput="onModalSliderInput()" class="w-full accent-purple-600 cursor-pointer">
-                  <span class="text-[9px] text-stone-500 block text-right mt-0.5">15% a 85% motorizados</span>
-                </div>
-              </div>
-
-              <!-- Micro-Simulador de Impacto en Tiempo Real (Viaje de 10 km) -->
-              <div class="bg-stone-900 text-stone-100 p-3 rounded-lg shadow-sm text-xs">
-                <div class="flex items-center justify-between font-bold mb-1.5 text-[11px] text-stone-200">
-                  <span class="flex items-center space-x-1.5">
-                    <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-                    <span>Simulación en Vivo (Viaje Urbano de 10 km):</span>
-                  </span>
-                  <span id="sim_metro_advantage_badge" class="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 rounded text-[10px] font-mono font-bold">+120% atractivo</span>
-                </div>
-                <div class="grid grid-cols-3 gap-2 text-center text-[10px] pt-1.5 border-t border-stone-800">
-                  <div>
-                    <span class="text-stone-400 block">Metro Estimado</span>
-                    <span class="font-mono font-bold text-emerald-400 text-xs">~18 min</span>
-                  </div>
-                  <div>
-                    <span class="text-stone-400 block">Auto Canónico</span>
-                    <span class="font-mono font-bold text-stone-300 text-xs">15 min</span>
-                  </div>
-                  <div>
-                    <span class="text-stone-400 block">Calle Experimento</span>
-                    <span id="sim_effective_time_label" class="font-mono font-bold text-amber-400 text-xs">41 min</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="pt-4 mt-auto flex justify-between">
-          <button onclick="goToStep(2)" class="px-4 py-2 bg-metro-panel hover:bg-metro-border text-gray-300 text-xs font-bold rounded-lg transition">
-            &larr; Volver
-          </button>
-          <button onclick="goToStep(4)" class="px-6 py-2.5 bg-metro-orange hover:bg-orange-600 text-white text-xs font-bold rounded-lg transition shadow-lg flex items-center space-x-2">
-            <span>Continuar a POI Studio</span>
-            <i data-lucide="arrow-right" class="w-4 h-4"></i>
-          </button>
-        </div>
-      </div>
-
-      <!-- Proyecciones Demográficas CONAPO -->
-      <div id="legacyConapoPanel" class="w-full md:w-1/2 bg-metro-card border border-metro-border rounded-xl p-5 shadow-xl flex flex-col space-y-4">
-        <div class="border-b border-metro-border pb-3 flex flex-wrap gap-3 justify-between items-start">
-          <div>
-            <h3 class="text-base font-bold text-white flex items-center space-x-2">
-              <i data-lucide="trending-up" class="w-5 h-5 text-metro-green"></i>
-              <span>Proyecciones CONAPO por Municipio</span>
-            </h3>
-            <p class="text-xs text-gray-400 mt-1" id="conapoSubtitleLabel" role="status" aria-live="polite">Consulta los años disponibles y sincroniza la población proyectada respecto de la base 2020.</p>
-          </div>
-          <div class="flex flex-wrap items-center gap-2">
-            <div id="conapoYearWrapper" class="flex items-center space-x-1.5 bg-stone-100 border border-stone-300 rounded-lg px-2.5 py-1 text-xs shadow-2xs">
-              <span class="font-mono text-stone-600 font-bold text-[11px]">Año:</span>
-              <select id="conapoYearSelect" onchange="onConapoYearSelectChange(this.value)" class="bg-transparent text-stone-900 font-mono font-bold text-xs focus:outline-hidden cursor-pointer" title="Seleccionar año de proyección demográfica CONAPO">
-                <option value="">Consultar años…</option>
-              </select>
-            </div>
-            <button onclick="autoCalculateConapo()" id="btnAutoConapo" class="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-bold rounded-lg flex items-center space-x-1.5 transition shadow-2xs">
-              <i data-lucide="zap" class="w-3.5 h-3.5 text-emerald-700"></i>
-              <span>Sincronizar</span>
-            </button>
-            <button onclick="loadConapoYears()" id="btnConapoYears" class="px-2 py-1.5 border border-stone-300 rounded-lg text-xs" title="Volver a consultar los años del archivo">Consultar años</button>
-            <button onclick="addGrowthFactorRow()" class="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 border border-stone-300 text-stone-800 text-xs font-bold rounded-lg flex items-center space-x-1 transition">
-              <i data-lucide="plus" class="w-3.5 h-3.5 text-metro-green"></i>
-              <span>Añadir</span>
-            </button>
-          </div>
-        </div>
-
-        <details class="text-xs text-stone-600 border rounded-lg p-2">
-          <summary class="cursor-pointer">Archivo CONAPO sin columna de año</summary>
-          <label for="cfg_conapo_source_year" class="block text-xs font-semibold mt-2">Año confirmado de la fuente</label>
-          <input id="cfg_conapo_source_year" type="number" min="1900" max="2100" class="border rounded p-1 w-32" placeholder="Sin confirmar">
-          <p class="text-xs text-stone-500 mt-1">Confírmalo solo si el archivo no incluye años. Es distinto del año solicitado de proyección.</p>
-        </details>
-        <div class="text-xs text-stone-600 flex items-center justify-between gap-2">
-          <span>Los factores manuales o guardados sin procedencia se conservan al sincronizar.</span>
-          <button id="btnReplaceConapo" onclick="autoCalculateConapo(null, true)" class="underline text-emerald-700 font-bold">Reemplazar guardados con CONAPO</button>
-        </div>
-        <div class="flex-1 overflow-y-auto">
-          <table class="w-full text-xs text-left">
-            <thead class="text-stone-700 bg-stone-100 uppercase font-mono text-[10px] border-b border-stone-200">
-              <tr>
-                <th class="p-2.5">Clave</th>
-                <th class="p-2.5">Municipio</th>
-                <th class="p-2.5 text-center">Año Proy.</th>
-                <th class="p-2.5">Pob. 2020</th>
-                <th class="p-2.5">Pob. Proy.</th>
-                <th class="p-2.5">Factor</th>
-                <th class="p-2.5 text-right">Acciones</th>
-              </tr>
-            </thead>
-            <tbody id="growthFactorsTableBody" class="divide-y divide-metro-border font-mono">
-              <!-- Renderizado dinámico -->
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <div id="v2DemandPanel" class="hidden w-full md:w-1/2 bg-metro-card border border-metro-border rounded-xl p-5 shadow-xl space-y-4">
-        <h3 class="text-base font-bold text-stone-900">Distribución automática de viajes · v2</h3>
-        <p class="text-xs text-stone-600">La referencia EIC determina los viajeros. DENUE y SAIC aportan la atracción laboral estimada. No se aplican tasas ENOE ni proyecciones CONAPO.</p>
-        <p class="text-xs text-stone-600">La compilación utiliza la referencia 0,120 salvo un valor manual o calibración automática avanzada. Los proyectos existentes sin ajuste explícito también usan esta referencia.</p>
-        <p class="text-xs text-stone-600">Comprueba preferencias aproximadas con 0,060; 0,120 y 0,240 sin compilar ni crear viajes finales. El cálculo comparativo tiene un límite de 15 s; preparar las fuentes puede tardar más. Esta comprobación nunca cambia la fricción.</p>
-        <button type="button" onclick="previewDemandV2()" class="px-3 py-2 bg-metro-green text-white rounded-lg text-xs font-bold">Comprobar sensibilidad</button>
-        <p id="v2BetaSummary" role="status" aria-live="polite" class="text-xs text-stone-800 whitespace-pre-line">Pendiente de evaluación.</p>
-        <details class="text-xs text-stone-600">
-          <summary>Ajuste avanzado de fricción</summary>
-          <label class="block mt-2" for="cfg_demand_beta_selection">Fricción al compilar</label>
-          <select id="cfg_demand_beta_selection" onchange="onDemandBetaSelectionChanged(this)" class="mt-1 border border-stone-300 rounded px-2 py-1 text-stone-900">
-            <option value="reference">Referencia 0,120 (una asignación)</option>
-            <option value="automatic">Calibración automática EIC (hasta cinco asignaciones)</option>
-          </select>
-          <p class="mt-1">La calibración completa comprueba proporciones municipales y puede tardar mucho. Se ejecuta al compilar si la seleccionas.</p>
-          <label class="block mt-2" for="cfg_demand_beta">β manual (tiene prioridad; vacío = opción anterior)</label>
-          <input id="cfg_demand_beta" type="number" min="0.001" step="any" placeholder="Automático" onchange="onDemandBetaChanged(this)" class="mt-1 border border-stone-300 rounded px-2 py-1 text-stone-900">
-        </details>
-        <p class="text-[11px] text-stone-500">La sensibilidad estima preferencias sin balancear totales de empleo ni reservar cuotas finales de POIs. Las distancias son geométricas, no viales ni tiempos observados. No certifica demanda final ni jugabilidad; el ajuste municipal no observa viajes entre colonias.</p>
-      </div>
-    </section>
-
-    <!-- --------------------------------------------------------------------- -->
-    <!-- PASO 4: POI STUDIO INTEGRADO (CALIBRADOR DE RADIOS, ABSORCIÓN Y COLONIAS) -->
-    <!-- --------------------------------------------------------------------- -->
-    <section id="stepView-4" class="step-view hidden absolute inset-0 p-4 flex gap-4 overflow-hidden w-full h-full">
+    <section id="stepView-3" class="step-view hidden absolute inset-0 p-4 flex gap-4 overflow-hidden w-full h-full">
       <!-- Panel Lateral de POI Studio (430px) -->
       <div id="sidebar-4" class="w-[430px] bg-metro-card border border-metro-border rounded-xl flex flex-col shrink-0 shadow-xl overflow-hidden transition-all duration-300 relative z-20">
         
@@ -1824,11 +1323,11 @@
 
         <!-- Footer del Sidebar con Navegación -->
         <div class="p-3 bg-metro-panel/60 border-t border-metro-border flex justify-between items-center shrink-0">
-          <button onclick="goToStep(3)" class="px-3.5 py-1.5 bg-metro-panel hover:bg-metro-border text-metro-text text-xs font-bold rounded-lg transition">
-            &larr; Paso 3
+          <button onclick="goToStep(2)" class="px-3.5 py-1.5 bg-metro-panel hover:bg-metro-border text-metro-text text-xs font-bold rounded-lg transition">
+            &larr; Paso 2
           </button>
-          <button onclick="goToStep(5)" class="px-4 py-1.5 bg-metro-orange hover:bg-orange-600 text-white text-xs font-bold rounded-lg transition shadow flex items-center space-x-1.5">
-            <span>Paso 5 (Compilar)</span>
+          <button onclick="goToStep(4)" class="px-4 py-1.5 bg-metro-orange hover:bg-orange-600 text-white text-xs font-bold rounded-lg transition shadow flex items-center space-x-1.5">
+            <span>Continuar a Demanda & Cohortes</span>
             <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
           </button>
         </div>
@@ -1994,6 +1493,276 @@
           <span class="flex items-center space-x-1"><span class="w-2.5 h-2.5 rounded-full bg-rose-500/40 border border-rose-500 inline-block"></span> <span>Radio Absorción</span></span>
           <span class="flex items-center space-x-1"><span class="w-2.5 h-2.5 rounded-full bg-sky-500 inline-block"></span> <span>Toponimia</span></span>
         </div>
+      </div>
+    </section>
+
+    <!-- --------------------------------------------------------------------- -->
+    <!-- PASO 4: CALIBRACIÓN DE DEMANDA Y COHORTES (V2) -->
+    <!-- --------------------------------------------------------------------- -->
+    <section id="stepView-4" class="step-view hidden absolute inset-0 p-6 flex flex-col md:flex-row gap-6 overflow-y-auto w-full h-full">
+      <div class="w-full md:w-1/2 bg-metro-card border border-metro-border rounded-xl p-5 shadow-xl flex flex-col space-y-4">
+        <div class="border-b border-metro-border pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h2 class="text-base font-bold text-stone-900 flex items-center space-x-2">
+              <i data-lucide="users" class="w-5 h-5 text-metro-orange"></i>
+              <span>Demanda & Cohortes de Pasajeros (Pops)</span>
+            </h2>
+            <p class="text-xs text-stone-600 mt-1">Configura el tamaño de cohorte, límites territoriales y malla espacial para motor v2.</p>
+          </div>
+        </div>
+
+        <div class="space-y-4 text-xs">
+          <!-- Distancia Máx. de Viaje -->
+          <div class="bg-metro-panel p-3 rounded-lg border border-metro-border">
+            <div class="flex justify-between items-center mb-1">
+              <label class="block text-stone-900 font-bold text-xs">Distancia Máx. de Viaje Metropolitano (km)</label>
+              <span class="text-[10px] px-1.5 py-0.5 bg-stone-200 text-stone-700 rounded font-mono font-semibold">Radio de Corte</span>
+            </div>
+            <input type="number" id="cfg_max_distance_km" value="50.0" min="10" max="150" step="1" class="w-full bg-white border border-metro-border rounded-lg px-3 py-1.5 text-stone-900 font-mono text-xs">
+            <p class="text-[10px] text-stone-600 mt-1">Límite de corte: se descartan viajes cotidianos más allá de este radio (40 a 70 km recomendado).</p>
+          </div>
+
+          <!-- Control de Cohortes Demográficas (Pops) -->
+          <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border space-y-2.5">
+            <div class="flex justify-between items-center">
+              <div class="flex items-center space-x-2">
+                <span class="text-stone-900 font-bold text-xs">Calibración de Cohortes de Pasajeros (Pops)</span>
+                <span class="text-[10px] px-1.5 py-0.5 bg-blue-100 border border-blue-200 text-blue-800 rounded font-semibold font-mono">Conserva PEA</span>
+              </div>
+              <span id="cohort_badge_mode" class="text-[10px] text-stone-600 font-mono bg-white px-2 py-0.5 rounded border border-stone-200">Adaptativo</span>
+            </div>
+
+            <p class="text-[11px] text-stone-600 leading-relaxed">
+              Define el tamaño máximo o rango preferido de las cohortes. El candidato conserva los viajeros, las restricciones territoriales y las cuotas de POIs; puede necesitar restos para mantener el reparto municipal. El rendimiento se comprueba en el juego.
+            </p>
+
+            <!-- Arquetipos / Presets Rápidos (1-Clic) -->
+            <div class="pt-1">
+              <div class="flex items-center justify-between mb-1.5">
+                <span class="text-[10px] font-semibold text-stone-600 uppercase tracking-wider">Arquetipos Recomendados:</span>
+                <span class="text-[10px] text-stone-400 font-mono">1-clic</span>
+              </div>
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                <button type="button" id="btn_preset_canonical_200" onclick="setCohortPreset('canonical_200')" class="px-2 py-1.5 bg-white hover:bg-stone-50 border border-stone-200 hover:border-blue-500 text-stone-800 text-[10px] font-semibold rounded-lg text-center transition-all shadow-sm">
+                  🎯 Oficial Rígido
+                  <span class="text-blue-700 block font-mono font-bold text-[9px] mt-0.5">200 pax (Colin M.)</span>
+                </button>
+                <button type="button" id="btn_preset_metropoli_150" onclick="setCohortPreset('metropoli_150')" class="px-2 py-1.5 bg-white hover:bg-stone-50 border border-stone-200 hover:border-blue-500 text-stone-800 text-[10px] font-semibold rounded-lg text-center transition-all shadow-sm">
+                  🏙️ Metrópoli Grande
+                  <span class="text-stone-600 block font-mono font-bold text-[9px] mt-0.5">150 pax (CDMX/GDL)</span>
+                </button>
+                <button type="button" id="btn_preset_mediana_75" onclick="setCohortPreset('mediana_75')" class="px-2 py-1.5 bg-white hover:bg-stone-50 border border-stone-200 hover:border-blue-500 text-stone-800 text-[10px] font-semibold rounded-lg text-center transition-all shadow-sm">
+                  🌆 Intermedia
+                  <span class="text-stone-600 block font-mono font-bold text-[9px] mt-0.5">75 pax (QRO/MID)</span>
+                </button>
+                <button type="button" id="btn_preset_alta_fidelidad_35" onclick="setCohortPreset('alta_fidelidad_35')" class="px-2 py-1.5 bg-white hover:bg-stone-50 border border-stone-200 hover:border-blue-500 text-stone-800 text-[10px] font-semibold rounded-lg text-center transition-all shadow-sm">
+                  🔬 Alta Fidelidad
+                  <span class="text-stone-600 block font-mono font-bold text-[9px] mt-0.5">35 pax (CUN/PAC)</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Selector de Modo: Adaptativo vs Rígido Canónico -->
+            <div class="bg-white/80 p-2.5 rounded-lg border border-stone-200 space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-[11px] font-bold text-stone-800">Modo de Empaquetado:</span>
+                <div class="inline-flex rounded-lg border border-stone-300 p-0.5 bg-stone-100 text-[11px]">
+                  <button type="button" id="btn_mode_adaptive" onclick="onCohortModeRadioChanged('adaptive')" class="px-2 py-0.5 rounded-md font-medium text-stone-800 bg-white shadow-xs transition-colors select-none">
+                    ⚖️ Adaptativo (Rango)
+                  </button>
+                  <button type="button" id="btn_mode_rigid" onclick="onCohortModeRadioChanged('rigid')" class="px-2 py-0.5 rounded-md font-medium text-stone-500 hover:text-stone-800 transition-colors select-none">
+                    🎯 Rígido Fijo
+                  </button>
+                </div>
+              </div>
+
+              <!-- Controles Modo Rígido Fijo -->
+              <div id="cohort_rigid_controls" class="hidden pt-1 space-y-2">
+                <div class="flex items-center justify-between mb-1">
+                  <label class="block text-stone-700 font-semibold text-[11px]">Tamaño Fijo de Cohorte (pax exactos)</label>
+                  <span id="val_fixed_pop_size" class="text-blue-700 font-mono font-bold text-xs bg-blue-50 px-2 py-0.5 rounded border border-blue-200">200 pax</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <input type="range" id="cfg_fixed_pop_range" min="10" max="500" step="5" value="200" oninput="onFixedPopRangeChanged(this.value)" class="w-full accent-blue-600 cursor-pointer">
+                  <input type="number" id="cfg_fixed_pop_size" value="200" min="10" max="500" step="5" oninput="onFixedPopInputChanged(this.value)" class="w-20 bg-white border border-stone-300 rounded-lg px-2 py-1 text-stone-900 font-mono text-xs font-bold text-center">
+                </div>
+                <div class="pt-1">
+                  <button type="button" id="btn_exact_cohort_size" onclick="toggleExactCohortSize()" class="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-blue-300 bg-blue-50/80 text-blue-900 text-[11px] font-bold transition-all shadow-xs">
+                    <span class="flex items-center gap-1.5">
+                      <span>🔒 Cohortes 100% Exactas (Redondeo siempre · Cero restos)</span>
+                    </span>
+                    <span id="badge_exact_cohort_size" class="px-2 py-0.5 rounded text-[10px] font-mono bg-blue-600 text-white">ACTIVO</span>
+                  </button>
+                  <input type="checkbox" id="cfg_exact_cohort_size" class="hidden" onchange="onExactCohortCheckboxChanged(this.checked)">
+                </div>
+                <span id="cohort_rigid_help_text" class="text-[10px] text-stone-500 block mt-1">Motor candidato: tamaño objetivo por cohorte. Agrupa residentes a un máximo de 500 m de su punto original, dentro del mismo municipio, zona aislada y componente vial. Conserva restos adicionales por proximidad, reparto municipal y cuotas de POIs.</span>
+              </div>
+
+              <!-- Controles Modo Adaptativo (Rango min/target/max) -->
+              <div id="cohort_adaptive_controls" class="grid grid-cols-3 gap-2 pt-1">
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Mínimo (min_pop)</label>
+                  <input type="number" id="cfg_min_pop_size" value="25" min="1" max="500" step="5" oninput="onCohortParamChanged()" class="w-full bg-white border border-metro-border rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs font-bold text-center">
+                  <span class="text-[9px] text-stone-500 block text-center mt-0.5">Piso (Estándar: 25)</span>
+                </div>
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Objetivo (target_pop)</label>
+                  <input type="number" id="cfg_target_pop_size" value="150" min="10" max="500" step="5" oninput="onCohortParamChanged()" class="w-full bg-white border border-metro-border rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs font-bold text-center">
+                  <span class="text-[9px] text-stone-500 block text-center mt-0.5">Mediana (~150)</span>
+                </div>
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Máximo (max_pop)</label>
+                  <input type="number" id="cfg_max_pop_size" value="200" min="20" max="500" step="5" oninput="onCohortParamChanged()" class="w-full bg-white border border-metro-border rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs font-bold text-center">
+                  <span class="text-[9px] text-stone-500 block text-center mt-0.5">Tope chunk (200)</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Panel de Telemetría Dinámica de Cohortes y Medidor WebGL -->
+            <div class="bg-white p-2.5 rounded-lg border border-stone-200">
+              <label for="cfg_cohort_count" class="block text-stone-700 font-semibold text-[11px] mb-1">Número total de cohortes · motor candidato</label>
+              <input type="number" id="cfg_cohort_count" min="1" step="1" placeholder="Automático según tamaño objetivo" oninput="onCohortParamChanged()" class="w-full bg-white border border-metro-border rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
+              <span class="text-[10px] text-stone-500 block mt-1">Vacío: usa mínimo, objetivo y máximo. Con un número: exige ese total exacto, conserva viajeros y respeta el máximo. El mínimo pasa a ser una preferencia.</span>
+            </div>
+            <div id="cohort_telemetry_box" class="bg-stone-50 p-2.5 rounded-lg border border-stone-200 text-xs space-y-1.5">
+              <div class="flex justify-between items-center">
+                <span class="font-bold text-stone-800 flex items-center gap-1.5">
+                  <i data-lucide="gauge" class="w-3.5 h-3.5 text-stone-500"></i>
+                  <span>Estimación de Cohortes y Carga de Pasajeros:</span>
+                </span>
+
+              </div>
+              <div class="grid grid-cols-2 gap-2 text-[11px]">
+                <div class="bg-white p-1.5 rounded border border-stone-200/70">
+                  <span class="text-[10px] text-stone-500 block">Pops Estimados:</span>
+                  <span id="cohort_estimated_pops" class="font-mono font-bold text-stone-800">~15,000 pops</span>
+                </div>
+                <div class="bg-white p-1.5 rounded border border-stone-200/70">
+                  <span class="text-[10px] text-stone-500 block">Dinámica en Andenes:</span>
+                  <span id="cohort_dynamics_text" class="font-medium text-stone-700 truncate">Flujo escalonado continuo</span>
+                </div>
+              </div>
+              <span id="cohort_recommendation_text" class="text-[10px] text-stone-500 block">
+                Valores dentro del rango óptimo (< 20,000 pops). Máxima fluidez y estabilidad sin riesgo de sobrecarga.
+              </span>
+            </div>
+          </div>
+
+          <!-- Ajustes Avanzados de Filtros Censales y Algoritmo Furness (Collapsible) -->
+          <details class="bg-stone-50 rounded-xl border border-stone-200 p-3 text-xs space-y-2 group">
+            <summary class="font-bold text-stone-800 cursor-pointer flex items-center justify-between select-none">
+              <div class="flex items-center space-x-2">
+                <i data-lucide="sliders-horizontal" class="w-4 h-4 text-stone-500"></i>
+                <span>Ajustes Avanzados: Filtros de Malla y Modelo Gravitatorio</span>
+              </div>
+              <span class="text-[10px] text-stone-500 group-open:rotate-180 transition-transform">▼</span>
+            </summary>
+            <div class="pt-2 space-y-3">
+              <div>
+                <label class="block text-stone-700 font-semibold mb-1">Malla Espacial</label>
+                <select id="cfg_grid_size" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-2 text-stone-900 font-medium">
+                  <option value="0.0025" selected>Estándar (~250m)</option>
+                  <option value="0.0035">Amplia (~380m)</option>
+                  <option value="0.0018">Fina (~180m)</option>
+                </select>
+                <span class="text-[9px] text-stone-500 block mt-0.5">Resolución espacial para agregación de manzanas censales y celdas de empleo.</span>
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Mín. Residentes por Manzana</label>
+                  <input type="number" id="cfg_min_residents" value="10" min="0" step="1" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
+                  <span class="text-[9px] text-stone-500">Descarta manzanas censales con menos de N habitantes.</span>
+                </div>
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Mín. Empleos por Manzana</label>
+                  <input type="number" id="cfg_min_jobs" value="3" min="0" step="1" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
+                  <span class="text-[9px] text-stone-500">Descarta celdas con menos de N empleos DENUE.</span>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Filtro Área Edificios (m²)</label>
+                  <input type="number" id="cfg_building_filter_size" value="15.0" min="0" step="1" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
+                  <span class="text-[9px] text-stone-500">Omite cobertizos y casetas menores a este metraje en MapGen.</span>
+                </div>
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Simplificación Edificios</label>
+                  <input type="number" id="cfg_building_simplification" value="0.2" min="0" max="1" step="0.05" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
+                  <span class="text-[9px] text-stone-500">Tolerancia Ramer-Douglas-Peucker en vector tiles.</span>
+                </div>
+              </div>
+              <div class="grid grid-cols-3 gap-2">
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Umbral Muestreo</label>
+                  <input type="number" id="cfg_sample_threshold" value="500" min="50" step="50" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
+                  <span class="text-[9px] text-stone-500">sample_threshold</span>
+                </div>
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Iteraciones Furness</label>
+                  <input type="number" id="cfg_furness_iterations" value="15" min="5" max="100" step="5" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
+                  <span class="text-[9px] text-stone-500">furness_iterations</span>
+                </div>
+                <div>
+                  <label class="block text-stone-700 font-semibold text-[11px] mb-1">Tolerancia Furness</label>
+                  <input type="number" id="cfg_furness_tol" value="0.02" min="0.001" max="0.1" step="0.005" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-mono text-xs">
+                  <span class="text-[9px] text-stone-500">furness_tol</span>
+                </div>
+              </div>
+            </div>
+          </details>
+          <!-- Semilla Aleatoria (Seed) -->
+          <div class="bg-metro-panel p-3.5 rounded-lg border border-metro-border">
+            <div class="flex justify-between items-center mb-1">
+              <div class="flex items-center space-x-2">
+                <span class="text-stone-900 font-bold text-xs">Semilla Pseudo-Aleatoria (Seed)</span>
+                <span class="text-[10px] px-1.5 py-0.5 bg-blue-100 border border-blue-200 text-blue-800 rounded font-semibold font-mono">Reproducibilidad</span>
+              </div>
+              <div class="flex items-center space-x-1.5">
+                <button type="button" onclick="randomizeSeed()" class="px-2 py-0.5 bg-white hover:bg-stone-100 border border-stone-300 text-stone-800 text-[11px] font-bold rounded flex items-center space-x-1 transition shadow-xs" title="Generar nueva semilla aleatoria">
+                  <span>🎲 Aleatorizar</span>
+                </button>
+                <button type="button" onclick="resetSeedDefault()" class="px-2 py-0.5 bg-white hover:bg-stone-100 border border-stone-300 text-stone-600 hover:text-stone-900 text-[11px] font-mono font-bold rounded transition shadow-xs" title="Restablecer semilla estándar (42)">
+                  <span>42</span>
+                </button>
+              </div>
+            </div>
+            <input type="number" id="cfg_seed" value="42" min="0" step="1" class="w-full bg-white border border-metro-border rounded-lg px-3 py-1.5 text-stone-900 font-mono text-xs font-bold">
+            <p class="text-[11px] text-stone-600 mt-1 leading-relaxed">
+              <strong>Efecto en el juego:</strong> Controla el sorteo multinomial de cohortes de viaje. Mantener el mismo número asegura resultados 100% idénticos entre compilaciones.
+            </p>
+          </div>
+        </div>
+
+        <div class="pt-4 mt-auto flex justify-between">
+          <button onclick="goToStep(3)" class="px-4 py-2 bg-metro-panel hover:bg-metro-border text-stone-800 text-xs font-bold rounded-lg transition">
+            &larr; Volver a POI Studio
+          </button>
+          <button onclick="goToStep(5)" class="px-6 py-2.5 bg-metro-orange hover:bg-orange-600 text-white text-xs font-bold rounded-lg transition shadow-lg flex items-center space-x-2">
+            <span>Continuar a Compilación</span>
+            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <div id="v2DemandPanel" class="w-full md:w-1/2 bg-metro-card border border-metro-border rounded-xl p-5 shadow-xl space-y-4">
+        <h3 class="text-base font-bold text-stone-900">Distribución automática de viajes · v2</h3>
+        <p class="text-xs text-stone-600">La referencia EIC determina los viajeros. DENUE y SAIC aportan la atracción laboral estimada. No se aplican tasas ENOE ni proyecciones CONAPO.</p>
+        <p class="text-xs text-stone-600">La compilación utiliza la referencia 0,120 salvo un valor manual o calibración automática avanzada. Los proyectos existentes sin ajuste explícito también usan esta referencia.</p>
+        <p class="text-xs text-stone-600">Comprueba preferencias aproximadas con 0,060; 0,120 y 0,240 sin compilar ni crear viajes finales. El cálculo comparativo tiene un límite de 15 s; preparar las fuentes puede tardar más. Esta comprobación nunca cambia la fricción.</p>
+        <button type="button" onclick="previewDemandV2()" class="px-3 py-2 bg-metro-green text-white rounded-lg text-xs font-bold">Comprobar sensibilidad</button>
+        <p id="v2BetaSummary" role="status" aria-live="polite" class="text-xs text-stone-800 whitespace-pre-line">Pendiente de evaluación.</p>
+        <details class="text-xs text-stone-600">
+          <summary>Ajuste avanzado de fricción</summary>
+          <label class="block mt-2" for="cfg_demand_beta_selection">Fricción al compilar</label>
+          <select id="cfg_demand_beta_selection" onchange="onDemandBetaSelectionChanged(this)" class="mt-1 border border-stone-300 rounded px-2 py-1 text-stone-900">
+            <option value="reference">Referencia 0,120 (una asignación)</option>
+            <option value="automatic">Calibración automática EIC (hasta cinco asignaciones)</option>
+          </select>
+          <p class="mt-1">La calibración completa comprueba proporciones municipales y puede tardar mucho. Se ejecuta al compilar si la seleccionas.</p>
+          <label class="block mt-2" for="cfg_demand_beta">β manual (tiene prioridad; vacío = opción anterior)</label>
+          <input id="cfg_demand_beta" type="number" min="0.001" step="any" placeholder="Automático" onchange="onDemandBetaChanged(this)" class="mt-1 border border-stone-300 rounded px-2 py-1 text-stone-900">
+        </details>
+        <p class="text-[11px] text-stone-500">La sensibilidad estima preferencias sin balancear totales de empleo ni reservar cuotas finales de POIs. Las distancias son geométricas, no viales ni tiempos observados. No certifica demanda final ni jugabilidad; el ajuste municipal no observa viajes entre colonias.</p>
       </div>
     </section>
 

@@ -48,3 +48,4 @@ cities/*.yaml
 /plans/
 /test_labels.py
 /.cache/
+/.agents/teamwork/

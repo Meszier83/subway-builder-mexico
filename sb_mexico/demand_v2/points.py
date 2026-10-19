@@ -37,7 +37,7 @@ def build_points(request, evidence, census):
     zones = cfg.get('isolated_zones', city.get('isolated_zones', []))
     merge = {}
     points, poi_audit = build_demand_grid(denue, grid_frame, cfg.get('pois') or [], roads,
-        grid_size=city.get('grid_size', .002), min_residents=city.get('min_residents', 10),
+        grid_size=city.get('grid_size', .0025), min_residents=city.get('min_residents', 10),
         min_jobs=city.get('min_jobs', 3), seed=city.get('seed', 42),
         affluence_zones=cfg.get('affluence_zones', []), exclusion_zones=exclusions,
         urban_core_polygon=city.get('urban_core_polygon'),
@@ -124,6 +124,8 @@ def consolidate_points(request, points):
             for p in members:
                 mapping[p['id']] = combined['id']
             final.append(combined)
+    from .connectivity import reconcile
+    reconcile(request, final)
     return sorted(final, key=lambda p:p['id']), mapping
 
 

@@ -81,7 +81,6 @@ assert.match(employment,/Antes del recorte urbano y POIs/);
 for (const name of ['selectedDemandEngine','syncCohortCount','updateCohortTelemetry','setCohortValues']) vm.runInContext(source.match(new RegExp('    function '+name+'\\(.*?\\n    }','s'))[0],context);
 context.syncCohortCount(); assert.equal(context.cityData.demand.cohort_count,4000);
 context.updateCohortTelemetry(); assert.match(element('cohort_estimated_pops').innerText,/4,000 cohortes solicitadas/);
-assert.match(element('cohort_fps_badge').innerText,/pendiente/);
 context.window.demandV2CohortMetadata={file:'a.yaml',state:JSON.stringify(context.cityData),commuters:600000,report:{actual_count:4000,minimum_feasible:3000,options:{cohort_count:4000,min_pop_size:25,target_pop_size:150,max_pop_size:200}}};
 context.updateCohortTelemetry(); assert.match(element('cohort_estimated_pops').innerText,/calculadas/);
 context.cityData.city={bbox:[0,0,1,1]}; context.updateCohortTelemetry(); assert.doesNotMatch(element('cohort_estimated_pops').innerText,/calculadas/);
@@ -97,5 +96,10 @@ assert.match(element('cohort_recommendation_text').innerText,/restos locales adi
 context.cityData.demand.fixed_cohort_size=200;
 context.setCohortValues(50,50,50,false); assert.equal(context.cityData.demand.fixed_cohort_size,50);
 assert.match(element('cohort_dynamics_text').innerText,/Hasta 50 personas/);
+element('cfg_demand_engine').checked=true;
+context.cityData.demand.exact_cohort_size=true;
+context.updateCohortTelemetry();
+assert.match(element('cohort_dynamics_text').innerText,/Exactamente 50 personas por cohorte/);
+assert.match(element('cohort_recommendation_text').innerText,/Modo Exacto Oficial/);
 element('cfg_demand_engine').checked=false; context.updateCohortTelemetry(); assert.equal(element('cfg_cohort_count').disabled,true);
 console.log('Cohort count UI: persisted total, automatic reset, verified count, engine scope: PASS');

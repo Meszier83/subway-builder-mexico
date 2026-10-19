@@ -5,8 +5,8 @@
     "tailwindcss": "3.4.19"
   },
   "files": {
-    "app.js": "5d0c693a1a842ee0cf9e0500c081d120ff333dede5afc7995c112a969cf2cff7",
-    "app.css": "5ffcbbbb2b273c284affcb55d429340acd5872c73028aa3d8fda6516a902f0cf",
+    "app.js": "fbfd0d6d4e8d762303f56bdaa0898e2ee4fe27769bf3ab93f45038c930dc7cb5",
+    "app.css": "b2a15c38c8ff630f5c0df3158e49f0cfcb0e01f21209d937784612a5119b86eb",
     "bootstrap.js": "9b2b13c90715ae18884759505829b27ad11b7011f0eb1dfc3ed9015cfacb6b60",
     "tailwind.css": "3b8e358473e21ee878cdcf6dbadd22f604dd382bf30508a9e6f01adea0735096",
     "vendor/leaflet.js": "db49d009c841f5ca34a888c96511ae936fd9f5533e90d8b2c4d57596f4e5641a",

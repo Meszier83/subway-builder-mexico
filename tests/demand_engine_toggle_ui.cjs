@@ -4,9 +4,11 @@ const vm = require('node:vm');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../tools/static/wizard/app.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, '../tools/templates/wizard.html'), 'utf8');
-assert.equal((html.match(/id="cfg_demand_engine"/g) || []).length, 1);
-assert.match(html, /id="cfg_demand_engine" type="checkbox" role="switch"/);
-assert.ok(html.indexOf('id="cfg_demand_engine"') < html.indexOf('id="demandCompatibility"'));
+assert.equal((html.match(/id="cfg_demand_engine"/g) || []).length, 0);
+assert.equal((html.match(/id="legacyMacroHeader"/g) || []).length, 0);
+assert.equal((html.match(/id="legacyConapoPanel"/g) || []).length, 0);
+assert.equal((html.match(/id="cohort_fps_badge"/g) || []).length, 0);
+
 
 function harness() {
   const controls = new Map();
