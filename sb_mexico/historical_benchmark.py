@@ -97,13 +97,12 @@ def classify_scope(frame, denue_paths):
                 except UnicodeDecodeError:
                     continue
         _CLASSIFY_SCOPE_LABELS_CACHE[cache_key] = labels
-    dispositions = []
-    for code in frame.workplace_industry:
-        names = labels.get(code, set())
+    code_dispositions = {}
+    for code, names in labels.items():
         decisions = {scope_disposition(code, name)[0] for name in names}
-        dispositions.append(next(iter(decisions)) if len(decisions) == 1 else 'review')
+        code_dispositions[code] = next(iter(decisions)) if len(decisions) == 1 else 'review'
     frame = frame.copy()
-    frame['_scope'] = dispositions
+    frame['_scope'] = [code_dispositions.get(code, 'review') for code in frame.workplace_industry]
     return frame
 
 

@@ -146,8 +146,10 @@ class WorkplaceTests(unittest.TestCase):
             config['macroeconomics']['workplace_employment'] = 'invalid'
             with self.assertRaises(ValueError): wizard.save_full_city_data(str(path),config)
 
-    def test_preview_cache_build_export_and_legacy_sidecar_replacement(self):
-        from test_residential_employment import CensusEmploymentTests
+        try:
+            from test_residential_employment import CensusEmploymentTests
+        except ImportError:
+            from tests.test_residential_employment import CensusEmploymentTests
         from tools import poi_studio
         from sb_mexico.pipeline import execute_pipeline
         fixture = CensusEmploymentTests()

@@ -35,7 +35,7 @@ def load_fine_workplaces(paths, bbox, macro, ce_paths=(), source_root=None, reta
         tuple(hashes['ce']),
         tuple(sorted((k, float(v)) for k, v in bbox.items())),
         bool(retain_full_scope),
-        resolve_projection_year(macro)
+        resolve_projection_year(macro, allow_pending=True)
     )
     if cache_key in _FINE_WORKPLACE_CACHE:
         cached_clipped, cached_empty, cached_report = _FINE_WORKPLACE_CACHE[cache_key]
@@ -71,76 +71,95 @@ def load_fine_workplaces(paths, bbox, macro, ce_paths=(), source_root=None, reta
             for other,children in nodes.items() if other!=code for child in children for parent in prefixes)]
         ordered[mun]=sorted(leaves,key=lambda item:(-max(map(len,item[1])),item[0]))
     groups, reasons = {}, Counter()
-    for i, r in enumerate(frame.itertuples()):
-        # itertuples renames private columns; use the actual scope column here.
-        if frame.at[i,'_scope']!='candidate':
-            reasons['SCOPE_'+frame.at[i,'_scope'].upper()] += 1
+    scope_arr = frame['_scope'].to_numpy()
+    mun_arr = frame['cve_mun_clean'].to_numpy()
+    ind_arr = frame['workplace_industry'].astype(str).to_numpy()
+    for i in range(len(frame)):
+        scope = scope_arr[i]
+        if scope != 'candidate':
+            reasons['SCOPE_' + scope.upper()] += 1
             continue
         if bounds[i] is None:
             reasons['UNKNOWN_BAND'] += 1
             continue
-        industry = str(r.workplace_industry)
-        if not (len(industry)==6 and industry.isdigit()):
+        industry = ind_arr[i]
+        if not (len(industry) == 6 and industry.isdigit()):
             reasons['UNKNOWN_INDUSTRY'] += 1
             continue
-        match = next((code for code,prefixes in ordered.get(r.cve_mun_clean, []) if industry.startswith(prefixes)), None)
+        mun = mun_arr[i]
+        match = next((code for code, prefixes in ordered.get(mun, []) if industry.startswith(prefixes)), None)
         if match is None:
             reasons['NO_SUPPORTED_CE_ACTIVITY'] += 1
             continue
-        groups.setdefault((r.cve_mun_clean,match,strata[i]), []).append(i)
+        groups.setdefault((mun, match, strata[i]), []).append(i)
+    priors_np = priors.to_numpy(dtype=float)
+    calibrated_jobs_np = frame['calibrated_jobs'].to_numpy(dtype=float).copy()
     outcomes, transferred = [], set()
-    for (mun,code,stratum), indices in sorted(groups.items()):
-        control = controls.get((year,'municipality',mun,code,stratum))
-        base = float(priors.iloc[indices].sum())
-        outcome = dict(municipality=mun,activity_code=code,activity_level=level(code),stratum=stratum,
-            establishments=len(indices),prior_attraction=base,status='MISSING_SIZE_CONTROL',
-            open_upper_bound=stratum=='251 Y MAS')
+    for (mun, code, stratum), indices in sorted(groups.items()):
+        control = controls.get((year, 'municipality', mun, code, stratum))
+        base = float(priors_np[indices].sum())
+        outcome = dict(municipality=mun, activity_code=code, activity_level=level(code), stratum=stratum,
+            establishments=len(indices), prior_attraction=base, status='MISSING_SIZE_CONTROL',
+            open_upper_bound=stratum == '251 Y MAS')
         if control is not None:
             jobs, units = control['employment'], control['establishments']
-            outcome.update(ce_personnel=jobs,ce_units=units)
+            outcome.update(ce_personnel=jobs, ce_units=units)
             if jobs is None or units is None:
-                outcome['status']='SUPPRESSED_CE_CONTROL'
-            elif units<=0:
-                outcome['status']='NO_CE_ESTABLISHMENTS'
+                outcome['status'] = 'SUPPRESSED_CE_CONTROL'
+            elif units <= 0:
+                outcome['status'] = 'NO_CE_ESTABLISHMENTS'
             else:
-                mean = jobs/units
-                target = len(indices)*mean
-                lower,upper = {'0 A 10':(0,10),'11 A 50':(11,50),'51 A 250':(51,250),'251 Y MAS':(251,math.inf)}[stratum]
+                mean = jobs / units
+                target = len(indices) * mean
+                lower, upper = {'0 A 10': (0, 10), '11 A 50': (11, 50), '51 A 250': (51, 250), '251 Y MAS': (251, math.inf)}[stratum]
                 selected = [bounds[i] for i in indices]
-                outcome.update(historical_mean=mean,historical_target=target,
+                outcome.update(historical_mean=mean, historical_target=target,
                     lower_capacity=sum(b[0] for b in selected), upper_capacity=(None if math.isinf(sum(b[1] for b in selected)) else sum(b[1] for b in selected)))
-                if not lower<=mean<=upper:
-                    outcome['status']='INVALID_CE_SIZE_MEAN'
-                elif not sum(b[0] for b in selected)<=target<=sum(b[1] for b in selected):
-                    outcome['status']='INFEASIBLE_HISTORICAL_TARGET'
+                if not lower <= mean <= upper:
+                    outcome['status'] = 'INVALID_CE_SIZE_MEAN'
+                elif not sum(b[0] for b in selected) <= target <= sum(b[1] for b in selected):
+                    outcome['status'] = 'INFEASIBLE_HISTORICAL_TARGET'
                 else:
-                    fitted,multiplier = bounded_fit([b[2] for b in selected],[b[0] for b in selected],[b[1] for b in selected],target)
-                    frame.loc[indices,'calibrated_jobs']=fitted
+                    fitted, multiplier = bounded_fit([b[2] for b in selected], [b[0] for b in selected], [b[1] for b in selected], target)
+                    calibrated_jobs_np[indices] = fitted
                     transferred.update(indices)
-                    outcome.update(status='TRANSFERRED_HISTORICAL_INTENSITY',multiplier=multiplier,residual=float(fitted.sum()-target))
-        outcome['full_scope_attraction']=float(frame.loc[indices,'calibrated_jobs'].sum())
+                    outcome.update(status='TRANSFERRED_HISTORICAL_INTENSITY', multiplier=multiplier, residual=float(fitted.sum() - target))
+        outcome['full_scope_attraction'] = float(calibrated_jobs_np[indices].sum())
         outcomes.append(outcome)
-        if outcome['status']!='TRANSFERRED_HISTORICAL_INTENSITY':
-            reasons[outcome['status']]+=len(indices)
+        if outcome['status'] != 'TRANSFERRED_HISTORICAL_INTENSITY':
+            reasons[outcome['status']] += len(indices)
+    frame['calibrated_jobs'] = calibrated_jobs_np
     located = np.isfinite(frame.lon.astype(float)) & np.isfinite(frame.lat.astype(float))
-    inside = located & frame.lon.between(bbox['min_lon'],bbox['max_lon']) & frame.lat.between(bbox['min_lat'],bbox['max_lat'])
+    inside = located & frame.lon.between(bbox['min_lon'], bbox['max_lon']) & frame.lat.between(bbox['min_lat'], bbox['max_lat'])
     changed = np.asarray([i in transferred for i in range(len(frame))])
+    level_map = {key: level(key[1]) for key in groups}
+    level_transferred = {nl: [] for nl in ('sector', 'subsector', 'rama', 'subrama', 'class')}
+    for key, entries in groups.items():
+        nl = level_map[key]
+        for i in entries:
+            if i in transferred:
+                level_transferred[nl].append(i)
+    for nl in level_transferred:
+        level_transferred[nl] = np.asarray(level_transferred[nl], dtype=int)
     coverage = {}
-    for name,mask in [('full_scope',np.ones(len(frame),dtype=bool)),('bbox',inside.to_numpy())]:
-        total = float(frame.loc[mask,'calibrated_jobs'].sum())
-        mass = float(frame.loc[mask & changed,'calibrated_jobs'].sum())
-        level_map = {key: level(key[1]) for key in groups}
+    for name, mask in [('full_scope', np.ones(len(frame), dtype=bool)), ('bbox', inside.to_numpy())]:
+        total = float(calibrated_jobs_np[mask].sum())
+        mass = float(calibrated_jobs_np[mask & changed].sum())
         by_level = {}
-        for node_level in ('sector','subsector','rama','subrama','class'):
-            idx = [i for key, entries in groups.items() if level_map[key] == node_level for i in entries if i in transferred and mask[i]]
-            by_level[node_level] = dict(establishments=len(idx), attraction=float(frame.loc[idx, 'calibrated_jobs'].sum()) if idx else 0.0)
-        coverage[name]=dict(establishments=int(mask.sum()),transferred_establishments=int((mask & changed).sum()),
-            attraction=total,transferred_attraction=mass,attraction_share=mass/total if total else 0.,by_level=by_level)
+        for node_level in ('sector', 'subsector', 'rama', 'subrama', 'class'):
+            t_arr = level_transferred[node_level]
+            if len(t_arr):
+                valid = t_arr[mask[t_arr]]
+                by_level[node_level] = dict(establishments=len(valid), attraction=float(calibrated_jobs_np[valid].sum()) if len(valid) else 0.0)
+            else:
+                by_level[node_level] = dict(establishments=0, attraction=0.0)
+        coverage[name] = dict(establishments=int(mask.sum()), transferred_establishments=int((mask & changed).sum()),
+            attraction=total, transferred_attraction=mass, attraction_share=mass / total if total else 0., by_level=by_level)
     if hashes!=dict(denue=source_hashes(paths),ce=source_hashes(ce_paths)):
         raise ValueError('Sources changed during fine CE transfer')
     effective_mode = 'historical_fine_transfer' if transferred else 'ce_bounded'
     report = dict(schema_version=1,mode=effective_mode,formula_version=FORMULA_VERSION,
-        reference_year=year,model_year=resolve_projection_year(macro),source_sha256=hashes,
+        reference_year=year,model_year=resolve_projection_year(macro, allow_pending=True),source_sha256=hashes,
         implementation_sha256={n:file_sha256(Path(__file__).with_name(n)) for n in
             ('fine_workplace.py','ce_controls.py','historical_benchmark.py','workplace_employment.py','inegi.py')},
         comparability='CONDITIONAL_HISTORICAL_MODEL',controls=outcomes,coverage=coverage,

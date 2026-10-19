@@ -42,4 +42,16 @@ class ConnectivityTests(unittest.TestCase):
         self.assertEqual(reconcile(self.request(None),points)['status'],'not_probed')
         self.assertEqual(points,before)
 
+    def test_single_point_component_with_commuters_probes_and_merges(self):
+        points = [
+            dict(id='merged', location=[0., 0.], zone=0, road_component=2, commuters=38, attraction=100),
+            dict(id='other_work', location=[.01, 0.], zone=0, road_component=7, commuters=0, attraction=500)
+        ]
+        def provider(pops, all_points, include):
+            return {(p['residenceId'], p['jobId']): ('osrm', 'accepted') for p in pops}
+        report = reconcile(self.request(provider), points)
+        self.assertEqual(len(report['unions']), 1)
+        self.assertEqual(points[0]['road_component'], points[1]['road_component'])
+        self.assertGreater(len(support(points, {})[2]), 0)
+
 if __name__=='__main__':unittest.main()

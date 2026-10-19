@@ -382,5 +382,30 @@ class EndToEndTests(unittest.TestCase):
         mobility=read_mobility([self.root/'persons.csv',self.root/'other.csv'],{'23005','05017'})
         self.assertEqual(sum(r['weight'] for r in mobility['flows']),160)
 
+    def test_evidence_persistent_and_ram_caching(self):
+        from sb_mexico.demand_v2.sources import _EVIDENCE_RAM_CACHE
+        cache_file = self.root / '.test-evidence-cache.pkl'
+        req = self.request()
+        req.evidence_cache = cache_file
+        _EVIDENCE_RAM_CACHE.clear()
+
+        # 1. Cold run writes cache to disk and populates RAM cache
+        evidence1 = build_demand(req, 'sources')['evidence']
+        self.assertTrue(cache_file.is_file())
+        self.assertGreater(len(_EVIDENCE_RAM_CACHE), 0)
+
+        # 2. Defensive copy check: mutating returned evidence doesn't affect cache
+        evidence1['census']['MUTATED'] = 999
+
+        # 3. Warm run from RAM cache returns clean unmutated copy
+        evidence2 = build_demand(req, 'sources')['evidence']
+        self.assertNotIn('MUTATED', evidence2['census'].columns)
+
+        # 4. Warm run from disk cache when RAM cache is cleared
+        _EVIDENCE_RAM_CACHE.clear()
+        evidence3 = build_demand(req, 'sources')['evidence']
+        self.assertNotIn('MUTATED', evidence3['census'].columns)
+        self.assertEqual(len(evidence3['census']), len(evidence1['census']))
+
 
 if __name__=='__main__': unittest.main()

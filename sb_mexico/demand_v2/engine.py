@@ -44,7 +44,7 @@ def build_demand(request, stage='export'):
     result['statistical_points'] = copy.deepcopy(points)
     if cohort_options['fixed_size'] and stage != 'sensitivity':
         from .fixed_groups import resolve
-        points,point_report['fixed_cohort_resolution'] = resolve(points,cohort_options['fixed_size'])
+        points,point_report['fixed_cohort_resolution'] = resolve(points,cohort_options['fixed_size'],exact=cohort_options.get('exact_size',False))
     point_report['final_consolidation'] = consolidation
     point_report['point_mapping'] = {old:consolidation[new] for old,new in point_report['point_mapping'].items()}
     result['points'] = points
@@ -56,7 +56,7 @@ def build_demand(request, stage='export'):
     cfg = request.config
     parameters = dict(validate_config(cfg))
     macro = cfg.get('macroeconomics', {})
-    if 'max_distance_km' not in parameters and macro.get('max_distance_km') is not None:
+    if 'max_distance_km' not in parameters and cfg.get('demand', {}).get('engine') != 'v2' and macro.get('max_distance_km') is not None:
         parameters['max_distance_km'] = macro['max_distance_km']
     validate_config({'demand':parameters})
     if stage == 'sensitivity':
@@ -135,6 +135,9 @@ def build_demand(request, stage='export'):
         minimum=point_report['fixed_cohort_resolution']['expected_cohorts']
         if len(pops)<minimum:
             raise ValueError('Export reduced the spatially required cohort resolution')
+        if cohort_options.get('exact_size'):
+            if len(pops) != minimum or any(p['size'] != cohort_options['fixed_size'] for p in pops):
+                raise ValueError('Exact cohort mode violated: exported pops do not all match fixed_size')
         allocation['od_additional_cohorts']=len(pops)-minimum
     # Detect mid-run source/config drift before exposing any export.
     if identity(request)[0] != fingerprint:

@@ -1,9 +1,30 @@
 """Explicit source ingestion and weighted municipal commuting evidence."""
 from pathlib import Path
+import copy
 import hashlib
+import os
+import pickle
 import sqlite3
 import tempfile
 import pandas as pd
+
+_EVIDENCE_RAM_CACHE = {}
+
+
+def _clone_evidence(evidence):
+    cloned = dict(evidence)
+    cloned['report'] = copy.deepcopy(evidence['report'])
+    for k in ('bases', 'controls', 'people', 'mobility', 'layers'):
+        if k in evidence and isinstance(evidence[k], dict):
+            cloned[k] = copy.deepcopy(evidence[k])
+    for k in ('census', 'denue', 'blocks_geo', 'areas_geo'):
+        v = evidence.get(k)
+        if v is not None and hasattr(v, 'copy'):
+            df_copy = v.copy()
+            if hasattr(v, 'attrs') and v.attrs:
+                df_copy.attrs = copy.deepcopy(v.attrs)
+            cloned[k] = df_copy
+    return cloned
 
 
 def read_mobility(paths, municipalities):
@@ -13,6 +34,8 @@ def read_mobility(paths, municipalities):
     with tempfile.TemporaryDirectory(prefix='demand-v2-mobility-') as folder:
         db = sqlite3.connect(str(Path(folder)/'identities.db'))
         try:
+            db.execute('PRAGMA synchronous = OFF')
+            db.execute('PRAGMA journal_mode = MEMORY')
             db.execute('CREATE TABLE persons (state TEXT, person TEXT, digest TEXT, PRIMARY KEY(state,person))')
             for path in sorted(set(paths)):
                 with pd.read_csv(path, dtype=str, keep_default_na=False, encoding='utf-8-sig',
@@ -75,6 +98,24 @@ def read_mobility(paths, municipalities):
 
 
 def ingest(request, files):
+    from .request import evidence_identity
+    cache_id = evidence_identity(request, files)
+    if cache_id in _EVIDENCE_RAM_CACHE:
+        return _clone_evidence(_EVIDENCE_RAM_CACHE[cache_id])
+
+    cache_path = getattr(request, 'evidence_cache', None)
+    if cache_path:
+        cache_file = Path(cache_path)
+        if cache_file.is_file():
+            try:
+                with open(cache_file, 'rb') as f:
+                    stored_id, stored_evidence = pickle.load(f)
+                if stored_id == cache_id:
+                    _EVIDENCE_RAM_CACHE[cache_id] = stored_evidence
+                    return _clone_evidence(stored_evidence)
+            except Exception:
+                pass
+
     from sb_mexico.residential_employment import load_employed_census
     from sb_mexico.residential import load_official_layers
     from sb_mexico.workplace_employment import load_workplaces
@@ -159,11 +200,25 @@ def ingest(request, files):
         catalog.append(dict(role=role, path=path, sha256=sha, reference_year=declared.get('reference_year', year_ref),
                             edition=declared.get('edition', 'unspecified'), universe=universe, function=function,
                             coverage=sorted(municipalities)))
-    return dict(census=census, denue=denue, blocks_geo=blocks_geo, areas_geo=areas_geo, layers=layers,
-                bases=bases, controls=controls, people=people, mobility=mobility,
-                report=dict(sources=catalog, census=census_report, workplaces=workplace_report,
-                            municipality_crosswalk=crosswalk,
-                            municipalities=sorted(municipalities), target_year=year,
-                            ignored_parameters={k:v for k,v in cfg.get('macroeconomics', {}).items()
-                              if k in ('tasa_pea', 'til_1_state', 'growth_factors', 'default_growth_factor',
-                                       'projection_year', 'gravity_beta', 'furness_iterations', 'furness_tol', 'od_allocation', 'modal_experiment')}))
+    evidence = dict(census=census, denue=denue, blocks_geo=blocks_geo, areas_geo=areas_geo, layers=layers,
+                    bases=bases, controls=controls, people=people, mobility=mobility,
+                    report=dict(sources=catalog, census=census_report, workplaces=workplace_report,
+                                municipality_crosswalk=crosswalk,
+                                municipalities=sorted(municipalities), target_year=year,
+                                ignored_parameters={k:v for k,v in cfg.get('macroeconomics', {}).items()
+                                  if k in ('tasa_pea', 'til_1_state', 'growth_factors', 'default_growth_factor',
+                                           'projection_year', 'gravity_beta', 'furness_iterations', 'furness_tol', 'od_allocation', 'modal_experiment')}))
+
+    _EVIDENCE_RAM_CACHE[cache_id] = evidence
+    if cache_path:
+        try:
+            cache_file = Path(cache_path)
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp_file = cache_file.with_name(f'{cache_file.name}.tmp.{os.getpid()}')
+            with open(tmp_file, 'wb') as f:
+                pickle.dump((cache_id, evidence), f, protocol=5)
+            os.replace(tmp_file, cache_file)
+        except Exception:
+            pass
+
+    return _clone_evidence(evidence)

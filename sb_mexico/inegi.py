@@ -405,11 +405,18 @@ def parse_ce2024_municipal(ce_path: str, reference_year: Optional[int] = None) -
     return benchmarks
 
 
-def resolve_projection_year(macro):
+def resolve_projection_year(macro, allow_pending=False):
     """Shared Wizard/build precedence, with the existing 2026 default."""
-    if macro.get('demographic_reference') is not None:
+    ref = macro.get('demographic_reference')
+    if ref is not None:
+        if ref.get('pending_download') and allow_pending:
+            value = macro.get('projection_year') or macro.get('target_year', 2026)
+            try:
+                return int(value)
+            except (ValueError, TypeError):
+                return 2026
         from sb_mexico.demographic_reference import validate_reference
-        validate_reference(macro)
+        validate_reference(macro, allow_pending=allow_pending)
         return 2025
     value = macro.get('projection_year')
     if value is None:

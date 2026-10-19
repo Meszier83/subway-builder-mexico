@@ -14,11 +14,15 @@ def reconcile(request, points):
         while parents[c]!=c:
             parents[c]=parents[parents[c]];c=parents[c]
         return c
-    max_distance=request.config.get('demand',{}).get('max_distance_km',
-        request.config.get('macroeconomics',{}).get('max_distance_km'))
+    demand_cfg = request.config.get('demand', {})
+    max_distance = demand_cfg.get('max_distance_km')
+    if max_distance is None and demand_cfg.get('engine') != 'v2':
+        max_distance = request.config.get('macroeconomics', {}).get('max_distance_km')
     scale=np.array([111.32*np.cos(np.deg2rad(np.mean([p['location'][1] for p in points]))),110.574])
     coordinates=np.asarray([p['location'] for p in jobs])
     evidence=[];queried=0
+    from collections import Counter
+    comp_counts = Counter(find(q.get('road_component')) for q in jobs)
     for origin in points:
         component=find(origin.get('road_component'))
         if not origin['commuters'] or component is None:continue
@@ -27,7 +31,7 @@ def reconcile(request, points):
             q['id']!=origin['id'] and q['location']!=origin['location'] and
             (max_distance is None or distances[j]<=max_distance)]
         if any(find(jobs[j].get('road_component'))==component for j in candidates):continue
-        candidates=sorted(candidates,key=lambda j:(distances[j],jobs[j]['id']))[:5]
+        candidates=sorted(candidates,key=lambda j:(-comp_counts.get(find(jobs[j].get('road_component')),0),distances[j],jobs[j]['id']))[:15]
         probes=[]
         for j in candidates:
             target=jobs[j]
@@ -42,6 +46,7 @@ def reconcile(request, points):
             reverse=records.get((target['id'],origin['id']))
             if tuple(forward or ())!=('osrm','accepted') or tuple(reverse or ())!=('osrm','accepted'):continue
             canonical=min(component,other);parents[max(component,other)]=canonical
+            comp_counts[canonical]=comp_counts.get(component,0)+comp_counts.get(other,0)
             evidence.append(dict(origin=origin['id'],destination=target['id'],components=[component,other],
                 merged_component=canonical,forward=list(forward),reverse=list(reverse)))
             break

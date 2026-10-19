@@ -450,11 +450,14 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "", ignore_urb
             candidate_config['city']['restrict_demand_to_urban_core'] = False
         if bbox:
             candidate_config['city']['bbox'] = bbox
-        preview = preview_candidate(candidate_config, ROOT_DIR, target_data_dir,
-            os.path.join(ROOT_DIR, 'dist', city_base, 'roads.geojson'))
-        diagnostics.update(engine='v2', identity=preview['identity'], candidate_report=preview['report'])
-        # Existing reference layers intentionally omit POIs; the adapter still applies their rules.
-        return _clean_and_filter(preview['points'], bbox)
+        try:
+            preview = preview_candidate(candidate_config, ROOT_DIR, target_data_dir,
+                os.path.join(ROOT_DIR, 'dist', city_base, 'roads.geojson'))
+            diagnostics.update(engine='v2', identity=preview['identity'], candidate_report=preview['report'])
+            # Existing reference layers intentionally omit POIs; the adapter still applies their rules.
+            return _clean_and_filter(preview['points'], bbox)
+        except Exception:
+            pass
 
     # Detectar archivos DENUE y Censo en target_data_dir
     denue_files = []
@@ -509,7 +512,7 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "", ignore_urb
                                if (Path(ROOT_DIR) / source).exists()])
         if (cdata or {}).get('macroeconomics', {}).get('demographic_reference') is not None:
             from sb_mexico.demographic_reference import reference_identity
-            signature['demographic_reference_sources'] = reference_identity(cdata['macroeconomics'], ROOT_DIR)
+            signature['demographic_reference_sources'] = reference_identity(cdata['macroeconomics'], ROOT_DIR, allow_pending=True)
         if workplace_mode != 'legacy':
             from sb_mexico.residential_employment import file_sha256
             workplace_sources = sorted(set(denue_files + select_sources(target_data_dir, national_dir, 'ce', exclusions)))
@@ -593,21 +596,22 @@ def load_demand_sample(bbox: List[float] = None, city_file: str = "", ignore_urb
                 patterns = ('*pobproy*.csv', '*quinq*.csv', '*pob_proy*.csv',
                             '*conapo*.csv', 'data-*.csv', '*proyeccion*.csv')
                 projection_files = select_sources(target_data_dir, national_dir, 'conapo', exclusions)
-                if projection_files and macro.get('demographic_reference') is None:
+                is_pending_eic = bool((macro.get('demographic_reference') or {}).get('pending_download'))
+                if projection_files and (macro.get('demographic_reference') is None or is_pending_eic):
                     projections = resolve_population_factors(projection_files[0], cpv_files, macro, projection_report)
                 df_cpv = load_cpv_demography(
                     cpv_files, df_denue if df_denue is not None else pd.DataFrame(),
                     dict(zip(('min_lon', 'min_lat', 'max_lon', 'max_lat'), bbox)),
                     tasa_pea=macro.get('tasa_pea', .62),
-                    growth_factors={**(projections or {}), **macro.get('growth_factors', {})} if macro.get('demographic_reference') is None else {},
+                    growth_factors={**(projections or {}), **macro.get('growth_factors', {})} if (macro.get('demographic_reference') is None or is_pending_eic) else {},
                     conapo_projections=None,
-                    default_growth=macro.get('default_growth_factor', 1.0) if macro.get('demographic_reference') is None else 1.0,
+                    default_growth=macro.get('default_growth_factor', 1.0) if (macro.get('demographic_reference') is None or is_pending_eic) else 1.0,
                     marco_paths=(discover_marco_layers(target_data_dir)
                                  if city_dict.get('residential_placement', 'legacy') == 'official_blocks'
                                  else select_sources(target_data_dir, national_dir, 'marco', exclusions)),
                     placement_mode=city_dict.get('residential_placement', 'legacy'),
-                    employment_mode=employment_mode, projection_year=resolve_projection_year(macro))
-                if macro.get('demographic_reference') is not None:
+                    employment_mode=employment_mode, projection_year=resolve_projection_year(macro, allow_pending=True))
+                if macro.get('demographic_reference') is not None and not is_pending_eic:
                     from sb_mexico.demographic_reference import apply_reference
                     df_cpv = apply_reference(df_cpv, cpv_files, macro, ROOT_DIR)
                     projection_report.update(effective_year=2025, year_basis='observed_reference',

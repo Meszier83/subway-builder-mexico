@@ -112,8 +112,10 @@ class SensitivityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'beta_selection'):
             validate_config({'demand':{'beta_selection':'typo'}})
 
-    def test_engine_stops_before_allocation_cohorts_routes_or_export_and_checks_drift(self):
-        from test_demand_v2 import EndToEndTests
+        try:
+            from test_demand_v2 import EndToEndTests
+        except ImportError:
+            from tests.test_demand_v2 import EndToEndTests
         from sb_mexico.demand_v2.engine import build_demand
         fixture=EndToEndTests();fixture.setUp();self.addCleanup(fixture.doCleanups)
         fixture.config['demand']['fixed_cohort_size']=50

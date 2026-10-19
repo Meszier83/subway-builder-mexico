@@ -21,6 +21,7 @@ class DemandRequest:
     progress: object = None
     source_metadata: dict = field(default_factory=dict)
     sensitivity_cache: Path = None
+    evidence_cache: Path = None
 
 
 def validate_config(config):
@@ -41,6 +42,9 @@ def validate_config(config):
     fixed = demand.get('fixed_cohort_size')
     if fixed is not None and (type(fixed) is not int or fixed <= 0):
         raise ValueError('demand.fixed_cohort_size must be a positive integer')
+    exact = demand.get('exact_cohort_size')
+    if exact is not None and type(exact) is not bool:
+        raise ValueError('demand.exact_cohort_size must be a boolean')
     for key in ('beta', 'max_distance_km'):
         value = demand.get(key)
         if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or
@@ -81,6 +85,7 @@ def prepare_request(config, root, project_dir=None, roads=None, **kwargs):
             raise ValueError('demand.sources.'+role+' must be a list')
     kwargs.setdefault('beta_cache', project / '.demand-v2-beta-cache.json')
     kwargs.setdefault('sensitivity_cache', project / '.demand-v2-sensitivity-cache.json')
+    kwargs.setdefault('evidence_cache', project / '.demand-v2-evidence-cache.pkl')
     return DemandRequest(cfg, sources, root, roads=roads,
                          source_metadata=demand.get('source_metadata', {}), **kwargs)
 
@@ -89,7 +94,8 @@ def _code_stamp():
     from sb_mexico.residential_employment import file_sha256
     code = [(p.name, file_sha256(p)) for p in sorted(Path(__file__).parent.glob('*.py'))]
     for name in ('gravity.py', 'residential.py', 'residential_employment.py', 'workplace_employment.py',
-                 'historical_transfer.py', 'automatic_workplace.py', 'fine_workplace.py', 'ce_controls.py', 'demographic_reference.py', 'osrm.py'):
+                 'historical_transfer.py', 'automatic_workplace.py', 'fine_workplace.py', 'ce_controls.py',
+                 'demographic_reference.py', 'historical_benchmark.py', 'source_identity.py', 'osrm.py'):
         p = Path(__file__).parents[1]/name
         code.append((name, file_sha256(p)))
     return code
@@ -100,6 +106,19 @@ def _roads_stamp(request):
         return hashlib.sha256(b''.join(bytes(g.wkb) for g in request.roads.geometry
                                       if g is not None)).hexdigest()
     return None
+
+
+def evidence_identity(request, files):
+    raw = json.dumps(dict(
+        sources=files,
+        bbox=request.config.get('city', {}).get('bbox'),
+        target_year=request.config.get('demand', {}).get('target_year', 2025),
+        crosswalk=request.config.get('demand', {}).get('municipality_crosswalk', {}),
+        workplace_employment=request.config.get('macroeconomics', {}).get('workplace_employment', 'auto'),
+        metadata=request.source_metadata,
+        code=_code_stamp(),
+    ), sort_keys=True, ensure_ascii=False, default=str).encode()
+    return hashlib.sha256(raw).hexdigest()
 
 
 def beta_identity(request, files):

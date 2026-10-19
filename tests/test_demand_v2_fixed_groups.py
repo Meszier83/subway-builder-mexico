@@ -79,5 +79,39 @@ class FixedGroupsTests(unittest.TestCase):
         self.assertLessEqual(r['max_displacement_km'],.5)
         self.assertEqual(sum(g['commuters'] for g in r['groups']),30)
 
+    def test_exact_mode_rounds_all_groups_to_exact_size_with_zero_remainders(self):
+        original = [point(str(i), b, i * 0.001) for i, b in enumerate([101, 302, 530, 200, 700])]
+        for size in [50, 100, 200]:
+            resolved, report = resolve(original, size, exact=True)
+            self.assertEqual(report['remainder_groups'], 0)
+            self.assertTrue(all(p['commuters'] % size == 0 for p in resolved if p['commuters'] > 0))
+            self.assertTrue(report['rounded_up_commuters'] >= 0)
+            options = settings({'demand': {'fixed_cohort_size': size, 'exact_cohort_size': True}})
+            cells, allocation = allocate(resolved, {'cohort_settings': options}, {})
+            pieces = [s for c in cells for s in c['cohort_sizes']]
+            self.assertEqual(set(pieces), {size})
+            self.assertEqual(len(pieces), report['expected_cohorts'])
+            self.assertEqual(allocation['cohorts']['actual_count'], len(pieces))
+
+    def test_exact_mode_multi_municipality_and_pois_never_split_cohorts(self):
+        dest_muns = ['M1', 'M2', 'M3', 'M4', 'M5']
+        destinations = [dict(id=f'd_{m}', location=[0.1 * i, 20.0], municipality=m, zone=0,
+                             commuters=0, attraction=500, is_special=False) for i, m in enumerate(dest_muns)]
+        poi = dict(id='UNI_exact', location=[0.2, 20.0], municipality='M1', zone=0,
+                   commuters=0, attraction=137, is_special=True)
+        origins = [dict(id=f'o_{i}', location=[0.01 * i, 20.0], municipality='M0', zone=0,
+                        commuters=200, pea_15ymas=200, population=400, residents=400,
+                        attraction=0, is_special=False) for i in range(4)]
+        points = origins + destinations + [poi]
+        options = settings({'demand': {'fixed_cohort_size': 200, 'exact_cohort_size': True}})
+        cells, report = allocate(points, {'cohort_settings': options}, {})
+        pieces = [s for c in cells for s in c['cohort_sizes']]
+        self.assertEqual(set(pieces), {200})
+        self.assertEqual(len(pieces), 4)
+
+    def test_exact_mode_requires_fixed_cohort_size(self):
+        with self.assertRaisesRegex(ValueError, 'exact_cohort_size requires a fixed cohort size'):
+            settings({'demand': {'exact_cohort_size': True, 'min_pop_size': 25, 'max_pop_size': 200}})
+
 
 if __name__=='__main__': unittest.main()

@@ -37,9 +37,9 @@ def validate_reference(macro, allow_pending=False):
     return ref
 
 
-def reference_sources(macro, root):
-    ref = validate_reference(macro)
-    if ref is None:
+def reference_sources(macro, root, allow_pending=False):
+    ref = validate_reference(macro, allow_pending=allow_pending)
+    if ref is None or ref.get('pending_download'):
         return []
     paths = []
     for name in [ref['indicators']] + ref['persons']:
@@ -51,8 +51,8 @@ def reference_sources(macro, root):
     return paths
 
 
-def reference_identity(macro, root):
-    return [dict(path=str(p), sha256=file_sha256(p)) for p in reference_sources(macro, root)]
+def reference_identity(macro, root, allow_pending=False):
+    return [dict(path=str(p), sha256=file_sha256(p)) for p in reference_sources(macro, root, allow_pending=allow_pending)]
 
 
 def _csv(path, usecols=None):
@@ -86,9 +86,13 @@ def _bases(paths, municipalities):
         df.columns = [str(c).strip().upper().lstrip('\ufeff') for c in df]
         if not required <= set(df):
             raise ValueError('EIC allocation requires full municipal CPV POBTOT/POCUPADA controls')
-        for r in df.to_dict('records'):
+        loc_empty = df['LOC'].astype(str).str.strip().str.lstrip('0').eq('')
+        ageb_empty = df['AGEB'].astype(str).str.strip().str.lstrip('0').eq('')
+        mza_empty = df['MZA'].astype(str).str.strip().str.lstrip('0').eq('')
+        mun_df = df[loc_empty & ageb_empty & mza_empty]
+        for r in mun_df.to_dict('records'):
             code = str(r['ENTIDAD']).zfill(2) + str(r['MUN']).zfill(3)
-            if code not in municipalities or any(str(r[k]).strip().strip('0') for k in ('LOC','AGEB','MZA')):
+            if code not in municipalities:
                 continue
             values = tuple(_number(r[k], 'CPV '+k) for k in ('POBTOT','POCUPADA'))
             if code in bases and bases[code] != values:
@@ -137,6 +141,8 @@ def _people(paths, municipalities):
     with tempfile.TemporaryDirectory(prefix='eic-identities-') as temporary:
         connection = sqlite3.connect(str(Path(temporary)/'people.sqlite'))
         try:
+            connection.execute('PRAGMA synchronous = OFF')
+            connection.execute('PRAGMA journal_mode = MEMORY')
             connection.execute('CREATE TABLE people (state TEXT, id TEXT, digest BLOB, PRIMARY KEY(state,id))')
             for path in dict.fromkeys(paths):
                 with pd.read_csv(path, dtype=str, encoding='utf-8-sig', usecols=cols, chunksize=100000) as reader:

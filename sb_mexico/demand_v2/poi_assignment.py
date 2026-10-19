@@ -20,6 +20,7 @@ def allocate_with_pois(points,config,mobility,continuous):
     specials=sorted([j for j,d in enumerate(destinations) if d.get('is_special')],
                     key=lambda j:(not destinations[j]['id'].startswith('AIR_'),destinations[j]['id']))
     reserved=[]; quotas=[]
+    exact_size = bool(options.get('exact_size', False))
     for j in specials:
         poi=destinations[j]
         edges=np.flatnonzero(cols==j)
@@ -27,7 +28,12 @@ def allocate_with_pois(points,config,mobility,continuous):
         requested=int(round(poi['attraction']))
         target=min(requested,int(remaining[eligible].sum()))
         capacities=remaining[eligible]//maximum
-        full=min(target//maximum,int(capacities.sum()))
+        if exact_size:
+            requested_cohorts = max(1, int(round(requested / maximum))) if requested > 0 else 0
+            full = min(requested_cohorts, int(capacities.sum()))
+            target = full * maximum
+        else:
+            full=min(target//maximum,int(capacities.sum()))
         weights=np.maximum(remaining[eligible]*np.exp(-.04*distance[edges]),1e-12)
         taken=np.zeros(len(eligible),dtype=np.int64)
         if full:
@@ -40,11 +46,12 @@ def allocate_with_pois(points,config,mobility,continuous):
             if counts.sum()!=full: raise ValueError('POI whole-cohort reservation changed quota')
             taken=counts*maximum
         residual=target-int(taken.sum())
-        for i in sorted(range(len(eligible)),key=lambda i:(-weights[i],origins[eligible[i]]['id'])):
-            take=min(residual,int(remaining[eligible[i]]-taken[i]))
-            taken[i]+=take; residual-=take
-            if not residual: break
-        if residual: raise ValueError('POI reservation could not realize its reachable quota')
+        if not exact_size:
+            for i in sorted(range(len(eligible)),key=lambda i:(-weights[i],origins[eligible[i]]['id'])):
+                take=min(residual,int(remaining[eligible[i]]-taken[i]))
+                taken[i]+=take; residual-=take
+                if not residual: break
+            if residual: raise ValueError('POI reservation could not realize its reachable quota')
         for edge,count in zip(edges,taken):
             if count:
                 remaining[rows[edge]]-=count

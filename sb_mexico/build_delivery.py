@@ -117,7 +117,8 @@ def execute_wizard_build(config_path, output_dir, data_dir, skip_map=False):
         if skip_map:
             # Reuse only this project's cartography. Record provenance separately
             # from demand/package identity; asset presence alone does not prove age.
-            asset_root = Path(previous['output_dir']) if previous and previous.get('status') == 'success' else root
+            prev_out = Path(previous['output_dir']) if previous and previous.get('output_dir') else None
+            asset_root = prev_out if prev_out and (prev_out / f'{code}.pmtiles').is_file() else root
             if previous and (previous.get('cartography_config') != result['cartography_config']
                              or previous.get('config_path') != str(config_path)):
                 asset_root = stage  # Changed BBOX/map settings require fresh cartography.

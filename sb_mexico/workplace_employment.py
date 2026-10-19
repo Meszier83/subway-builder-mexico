@@ -192,7 +192,7 @@ def load_workplaces(paths, bbox, macro, ce_benchmarks=None, ce_paths=(), source_
     report = dict(schema_version=1, mode=mode, source_sha256=hashes,
                   effective_macro_sha256=hashlib.sha256(json.dumps(macro,sort_keys=True,ensure_ascii=False).encode()).hexdigest(),
                   implementation_sha256={name:file_sha256(Path(__file__).with_name(name)) for name in ('workplace_employment.py','inegi.py','source_identity.py','ce_controls.py','historical_benchmark.py')},
-                  reference_year=year if eligible else None, model_year=resolve_projection_year(macro),
+                  reference_year=year if eligible else None, model_year=resolve_projection_year(macro, allow_pending=True),
                   comparability='analyst_declared_source_bound' if eligible else 'UNVERIFIED_SOURCE_COMPARABILITY',
                   coverage_evidence=contract.get('coverage_evidence') if eligible else None,
                   historical_benchmark=historical,

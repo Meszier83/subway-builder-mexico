@@ -140,7 +140,7 @@ def load_historical_workplaces(paths, bbox, macro, source_root=None):
         raise ValueError('Sources changed during historical transfer; inspect again')
     report = dict(schema_version=1, mode='historical_transfer', formula_version=FORMULA_VERSION,
                   strength=contract['strength'], reference_year=contract['reference_year'],
-                  model_year=resolve_projection_year(macro), denue_edition=contract['denue_edition'],
+                  model_year=resolve_projection_year(macro, allow_pending=True), denue_edition=contract['denue_edition'],
                   source_sha256=hashes, comparability='CONDITIONAL_HISTORICAL_MODEL',
                   effective_macro_sha256=hashlib.sha256(json.dumps(macro, sort_keys=True, ensure_ascii=False).encode()).hexdigest(),
                   implementation_sha256={n: file_sha256(Path(__file__).with_name(n)) for n in

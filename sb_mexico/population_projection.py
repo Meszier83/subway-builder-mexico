@@ -34,7 +34,7 @@ def municipal_census_totals(paths):
 
 def resolve_population_factors(conapo_path, cpv_paths, macro, diagnostics=None):
     report = diagnostics if diagnostics is not None else {}
-    target = resolve_projection_year(macro)
+    target = resolve_projection_year(macro, allow_pending=True)
     confirmed = (resolve_projection_year({'projection_year': macro['conapo_source_year']})
                  if macro.get('conapo_source_year') is not None else None)
     populations = parse_conapo_projections(str(conapo_path), target_year=target,

@@ -238,7 +238,10 @@ class BetaPolicyTests(unittest.TestCase):
         self.assertNotEqual(beta_identity(a,[]),beta_identity(a,[('eic','people.csv','changed-source')]))
 
     def test_real_ingestion_preview_cache_reused_in_export_with_routing_flags(self):
-        from test_demand_v2 import EndToEndTests
+        try:
+            from test_demand_v2 import EndToEndTests
+        except ImportError:
+            from tests.test_demand_v2 import EndToEndTests
         from sb_mexico.demand_v2.engine import build_demand
         fixture=EndToEndTests();fixture.setUp();self.addCleanup(fixture.doCleanups)
         fixture.config['demand'].pop('beta',None)
