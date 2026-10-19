@@ -21,6 +21,7 @@ from tools.wizard import (
     set_project_data_dir,
     open_file_location,
     validate_city_configuration,
+    inspect_build_cache_status,
     DATA_DIR,
     DIST_DIR,
     ROOT_DIR
@@ -476,6 +477,53 @@ class TestWizard(unittest.TestCase):
         p_dummy = res_dummy["parameters"]
         self.assertEqual(p_dummy["tasa_pea"], 0.62)
         self.assertEqual(p_dummy["til_1_state"], 0.45)
+
+    def test_save_full_city_data_preserves_min_zoom_and_advanced_fields(self):
+        tmp_path = os.path.join(os.path.dirname(__file__), "tmp_test_advanced_city.yaml")
+        saved_path = None
+        try:
+            city_dict = {
+                "city": {
+                    "code": "TEST_ADV",
+                    "name": "Ciudad Avanzada",
+                    "bbox": [-87.0, 21.0, -86.7, 21.3],
+                    "min_zoom": 9.5,
+                    "country": "MX",
+                    "create_building_foundations": True,
+                    "max_building_tile_size": 250000,
+                    "color_military_like_aerodrome": True,
+                    "places_suffix": "test_suffix"
+                },
+                "macroeconomics": {}
+            }
+            saved_path = save_full_city_data(tmp_path, city_dict)
+            reloaded = load_city_data(saved_path)
+            c = reloaded["city"]
+            self.assertEqual(c["min_zoom"], 9.5)
+            self.assertEqual(c["country"], "MX")
+            self.assertTrue(c["create_building_foundations"])
+            self.assertEqual(c["max_building_tile_size"], 250000)
+            self.assertTrue(c["color_military_like_aerodrome"])
+            self.assertEqual(c["places_suffix"], "test_suffix")
+        finally:
+            if saved_path and os.path.exists(saved_path):
+                os.remove(saved_path)
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    def test_inspect_build_cache_status(self):
+        status = inspect_build_cache_status("cities/cancun.yaml")
+        self.assertIn("city_code", status)
+        self.assertIn("has_cartography", status)
+        self.assertIn("map_available", status)
+        self.assertIn("has_nolabels_base", status)
+        self.assertIn("nolabels_available", status)
+        self.assertIn("has_demand", status)
+        self.assertIn("demand_available", status)
+        self.assertIn("demand_cohorts", status)
+        self.assertIn("has_zip", status)
+        self.assertIn("zip_available", status)
+        self.assertIn(status["city_code"], ("CUN", "CRI"))
 
     def test_wizard_html_javascript_syntax(self):
         """Verifica que los scripts de wizard.html compilan sin errores de sintaxis o variables duplicadas."""

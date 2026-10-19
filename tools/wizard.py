@@ -407,6 +407,18 @@ def load_city_data(rel_or_abs_path: str) -> Dict[str, Any]:
         city["bbox_locked"] = False
     else:
         city["bbox_locked"] = bool(city["bbox_locked"])
+    if "min_zoom" not in city:
+        city["min_zoom"] = None
+    if "country" not in city:
+        city["country"] = "MX"
+    if "create_building_foundations" not in city:
+        city["create_building_foundations"] = True
+    if "max_building_tile_size" not in city:
+        city["max_building_tile_size"] = None
+    if "color_military_like_aerodrome" not in city:
+        city["color_military_like_aerodrome"] = True
+    if "places_suffix" not in city:
+        city["places_suffix"] = ""
 
 
     if "min_pop_size" not in macro:
@@ -583,6 +595,24 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         lines.append(f'  lod_peripheral_labels: {_yaml_quote(city_cfg.get("lod_peripheral_labels", "none"))}')
     if city_cfg.get("lod_peripheral_buildings"):
         lines.append(f'  lod_peripheral_buildings: {_yaml_quote(city_cfg.get("lod_peripheral_buildings", "none"))}')
+    if city_cfg.get("min_zoom") is not None and str(city_cfg.get("min_zoom")).strip() != "":
+        try:
+            lines.append(f'  min_zoom: {float(city_cfg["min_zoom"])}')
+        except (ValueError, TypeError):
+            pass
+    if city_cfg.get("country"):
+        lines.append(f'  country: {_yaml_quote(str(city_cfg["country"]).upper()[:2])}')
+    if city_cfg.get("create_building_foundations") is not None:
+        lines.append(f'  create_building_foundations: {"true" if city_cfg.get("create_building_foundations") else "false"}')
+    if city_cfg.get("max_building_tile_size") is not None and str(city_cfg.get("max_building_tile_size")).strip() != "":
+        try:
+            lines.append(f'  max_building_tile_size: {int(city_cfg["max_building_tile_size"])}')
+        except (ValueError, TypeError):
+            pass
+    if city_cfg.get("color_military_like_aerodrome") is not None:
+        lines.append(f'  color_military_like_aerodrome: {"true" if city_cfg.get("color_military_like_aerodrome") else "false"}')
+    if city_cfg.get("places_suffix"):
+        lines.append(f'  places_suffix: {_yaml_quote(city_cfg["places_suffix"])}')
     lines.append("")
 
 
@@ -1080,6 +1110,50 @@ def set_project_data_dir(city_file: str, new_dir: str) -> Dict[str, Any]:
     cdata["data_dir"] = cleaned
     save_full_city_data(city_file, cdata)
     return {"status": "ok", "data_dir": cdata["data_dir"]}
+
+
+def inspect_build_cache_status(city_file: str) -> Dict[str, Any]:
+    resolved = _resolve_city_path(city_file)
+    cdata = load_city_data(resolved)
+    code = cdata.get("city", {}).get("code", "")
+    city_base = os.path.splitext(os.path.basename(resolved))[0].lower()
+    city_out_dir = os.path.join(DIST_DIR, city_base)
+
+    has_pmtiles = os.path.isfile(os.path.join(city_out_dir, f"{code}.pmtiles"))
+    has_roads = os.path.isfile(os.path.join(city_out_dir, "roads.geojson"))
+    has_demand = os.path.isfile(os.path.join(city_out_dir, "demand_data.json"))
+    has_zip = os.path.isfile(os.path.join(city_out_dir, f"{code}.zip"))
+
+    native_build_dir = os.path.expanduser(f"~/build_{code.lower()}")
+    nolabels_candidates = [
+        os.path.join(native_build_dir, code, f"{code}-nolabels.pmtiles"),
+        os.path.join(native_build_dir, f"{code}-nolabels.pmtiles"),
+        os.path.join(city_out_dir, f"{code}-nolabels.pmtiles"),
+    ]
+    has_nolabels = any(os.path.isfile(p) for p in nolabels_candidates)
+
+    demand_cohorts = 0
+    if has_demand:
+        try:
+            with open(os.path.join(city_out_dir, "demand_data.json"), "r", encoding="utf-8") as f:
+                djson = json.load(f)
+                demand_cohorts = len(djson.get("pops", []))
+        except Exception:
+            pass
+
+    return {
+        "city_code": code,
+        "has_cartography": bool(has_pmtiles and has_roads),
+        "map_available": bool(has_pmtiles and has_roads),
+        "map_file": f"{code}.pmtiles" if has_pmtiles else "",
+        "has_nolabels_base": bool(has_nolabels),
+        "nolabels_available": bool(has_nolabels),
+        "has_demand": bool(has_demand),
+        "demand_available": bool(has_demand),
+        "demand_cohorts": demand_cohorts,
+        "has_zip": bool(has_zip),
+        "zip_available": bool(has_zip),
+    }
 
 
 def inspect_data_files(city_name: str = "", city_code: str = "", city_file: str = "", data_dir_override: str = "") -> Dict[str, Any]:
@@ -1683,6 +1757,15 @@ def validate_city_configuration(city_file: str) -> Dict[str, Any]:
         except (ValueError, TypeError):
             errors.append("Las 4 coordenadas del BBOX deben ser números flotantes válidos.")
 
+    max_bldg_size = city_cfg.get("max_building_tile_size")
+    if max_bldg_size is not None and max_bldg_size != "":
+        try:
+            mbs_val = int(max_bldg_size)
+            if mbs_val < 50 or mbs_val > 5000:
+                warnings.append(f"Límite max_building_tile_size inusual: {mbs_val} KB. Rango recomendado: 100 a 2000 KB.")
+        except Exception:
+            errors.append("max_building_tile_size debe ser un entero positivo en KB o None.")
+
     # 2. Validación de Macroeconomía
     macro_cfg = cdata.get("macroeconomics", {})
     tasa_pea = macro_cfg.get("tasa_pea", 0.62)
@@ -1920,7 +2003,7 @@ class LogCaptureStream:
         self.original_stream.flush()
 
 
-def run_pipeline_task(config_file: str, skip_map: bool = False):
+def run_pipeline_task(config_file: str, skip_map: bool = False, labels_only: bool = False, skip_demand: bool = False, skip_packaging: bool = False):
     """Ejecuta el pipeline de compilación de Subway Builder México en un hilo en segundo plano."""
     global active_build
     try:
@@ -1957,8 +2040,12 @@ def run_pipeline_task(config_file: str, skip_map: bool = False):
         sys.stdout = LogCaptureStream(old_stdout)
 
         try:
-            if not skip_map:
+            if labels_only:
+                broadcast_log("🏷️ Modo rápido: Regenerando toponimia sobre capas previas (MapGen.add_labels)...", progress=15, step_name="Toponimia Rápida")
+            elif not skip_map:
                 broadcast_log("🗺️ Ejecutando compilación cartográfica 3D (MapGen vía WSL 2)...", progress=15, step_name="Cartografía 3D")
+            elif skip_demand:
+                broadcast_log("⚙️ Modo Config: Actualizando configuración y metadatos del mapa...", progress=30, step_name="Actualizando Config")
             else:
                 broadcast_log("📊 Procesando fuentes de datos INEGI y Modelo Gravitatorio...", progress=30, step_name="Ingesta INEGI")
             city_base = os.path.splitext(os.path.basename(_resolve_city_path(config_file)))[0].lower()
@@ -1966,7 +2053,9 @@ def run_pipeline_task(config_file: str, skip_map: bool = False):
             os.makedirs(city_out_dir, exist_ok=True)
             resolved_config = _resolve_city_path(config_file)
             result = execute_wizard_build(resolved_config, city_out_dir,
-                                          effective_data_dir, skip_map=skip_map)
+                                          effective_data_dir, skip_map=skip_map,
+                                          labels_only=labels_only, skip_demand=skip_demand,
+                                          skip_packaging=skip_packaging)
             with build_lock:
                 active_build["running"] = False
                 active_build["status"] = result['status']
@@ -1975,9 +2064,13 @@ def run_pipeline_task(config_file: str, skip_map: bool = False):
                 active_build["step_name"] = "Completado"
             if result['status'] == 'success':
                 broadcast_log("✨ ¡Paquete ZIP validado y listo para descargar!", progress=100, step_name="Finalizado")
+            elif result['status'] == 'map_only':
+                broadcast_log("🗺️ Cartografía compilada con éxito (modo Solo Mapa sin demanda).", progress=100, step_name="Solo Mapa")
+            elif result['status'] == 'unpackaged':
+                broadcast_log("📦 Archivos compilados en directorio del proyecto (sin empaquetar ZIP).", progress=100, step_name="Sin Empaquetar")
             else:
                 broadcast_log("Demanda generada; falta cartografía para el ZIP: " +
-                              ', '.join(result['missing_map_files']), progress=100,
+                              ', '.join(result.get('missing_map_files', [])), progress=100,
                               step_name="Solo demanda")
         finally:
             sys.stdout = old_stdout
@@ -2442,6 +2535,15 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                     "logs": list(active_build["logs"][-100:])
                 }
             self.serve_json(status_copy)
+        elif path == "/api/build-cache-status":
+            city_file = query.get("file", [""])[0]
+            if not city_file:
+                self.serve_error("Parámetro 'file' faltante", 400)
+                return
+            try:
+                self.serve_json(inspect_build_cache_status(city_file))
+            except Exception as e:
+                self.serve_error(str(e), 500)
         elif path == "/api/download":
             from sb_mexico.build_delivery import resolve_download
             city_file = query.get("file", [""])[0]
@@ -2463,6 +2565,43 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 self.wfile.write(data)
             except (ValueError, OSError, KeyError) as error:
                 self.serve_error(f"ZIP no disponible: {error}", 409)
+        elif path == "/api/description-md":
+            city_file = query.get("file", [""])[0]
+            try:
+                resolved = _resolve_city_path(city_file)
+                city_base = os.path.splitext(os.path.basename(resolved))[0].lower()
+                city_out_dir = os.path.join(DIST_DIR, city_base)
+
+                desc_path = None
+                manifest_path = os.path.join(city_out_dir, "wizard-build.json")
+                if os.path.exists(manifest_path):
+                    try:
+                        with open(manifest_path, "r", encoding="utf-8") as mf:
+                            m_data = json.load(mf)
+                        b_out = m_data.get("output_dir")
+                        if b_out and os.path.exists(os.path.join(b_out, "description.md")):
+                            desc_path = os.path.join(b_out, "description.md")
+                    except Exception:
+                        pass
+                if not desc_path or not os.path.exists(desc_path):
+                    root_desc = os.path.join(city_out_dir, "description.md")
+                    if os.path.exists(root_desc):
+                        desc_path = root_desc
+
+                if not desc_path or not os.path.exists(desc_path):
+                    raise FileNotFoundError("description.md no encontrado. Compila la demanda primero en el Paso 5.")
+
+                with open(desc_path, "rb") as f:
+                    data = f.read()
+
+                self.send_response(200)
+                self.send_header("Content-Type", "text/markdown; charset=utf-8")
+                self.send_header("Content-Disposition", f'attachment; filename="{city_base}_description.md"')
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+            except Exception as error:
+                self.serve_error(f"Ficha description.md no disponible: {error}", 404)
         else:
             self.serve_error("Ruta no encontrada", 404)
 
@@ -2967,6 +3106,9 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
 
                 city_file = req_data.get("file")
                 skip_map = bool(req_data.get("skip_map", False))
+                labels_only = bool(req_data.get("labels_only", False))
+                skip_demand = bool(req_data.get("skip_demand", False))
+                skip_packaging = bool(req_data.get("skip_packaging", False))
 
                 if not city_file:
                     self.serve_error("Falta el parámetro 'file'", 400)
@@ -2986,7 +3128,7 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
 
                 thread = threading.Thread(
                     target=run_pipeline_task,
-                    args=(city_file, skip_map),
+                    args=(city_file, skip_map, labels_only, skip_demand, skip_packaging),
                     daemon=True
                 )
                 thread.start()

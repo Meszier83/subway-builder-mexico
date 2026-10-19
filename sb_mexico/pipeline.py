@@ -79,6 +79,27 @@ def _dedup_glob(patterns: List[str]) -> List[str]:
     return result
 
 
+def compute_effective_min_zoom(city_info: Dict[str, Any], bbox_list: List[float]) -> float:
+    """Calcula o valida el minZoom para config.json."""
+    raw = city_info.get("min_zoom")
+    if raw is not None and str(raw).strip().lower() not in ("", "auto", "none"):
+        try:
+            val = float(raw)
+            if 6.0 <= val <= 14.0:
+                return round(val, 2)
+        except (ValueError, TypeError):
+            pass
+    if bbox_list and len(bbox_list) >= 4:
+        d_lon = abs(float(bbox_list[2]) - float(bbox_list[0]))
+        d_lat = abs(float(bbox_list[3]) - float(bbox_list[1]))
+        span = max(d_lon, d_lat, 0.05)
+        import math
+        suggested = math.log2(360.0 / (span * 1.8))
+        clamped = max(8.5, min(11.5, suggested))
+        return round(clamped * 2.0) / 2.0
+    return 9.5
+
+
 def load_city_config(config_path: str) -> Dict[str, Any]:
     """Carga y valida el archivo YAML de configuración de la ciudad."""
     resolved = config_path
@@ -237,7 +258,10 @@ def execute_pipeline(
     skip_map: bool = False,
     output_dir: str = ".",
     data_dir: Optional[str] = None,
-    include_driving_path: Optional[bool] = None
+    include_driving_path: Optional[bool] = None,
+    labels_only: bool = False,
+    skip_demand: bool = False,
+    skip_packaging: bool = False
 ) -> str:
     """
     Ejecuta el pipeline completo de principio a fin de manera determinista y autovalidada.
@@ -319,30 +343,31 @@ def execute_pipeline(
         return _dedup_glob(candidates)
 
     src_dir = search_dirs[0] if search_dirs else ROOT_DIR
-    if cfg.get('demand', {}).get('engine') != 'v2':
-        if macro.get('workplace_employment') == 'auto':
+    if not skip_demand:
+        if cfg.get('demand', {}).get('engine') != 'v2':
+            if macro.get('workplace_employment') == 'auto':
+                from sb_mexico.demand_sources import select_sources
+                from sb_mexico.automatic_workplace import resolve_automatic_workplace
+                # Fail conflicting source controls before expensive cartography.
+                resolve_automatic_workplace(
+                    select_sources(project_dir or national_data_dir, national_data_dir, 'denue', cfg.get('data_exclusions', [])),
+                    select_sources(project_dir or national_data_dir, national_data_dir, 'ce', cfg.get('data_exclusions', [])),
+                    macro, ROOT_DIR)
+            if macro.get('workplace_employment') == 'historical_transfer':
+                from sb_mexico.demand_sources import select_sources
+                from sb_mexico.historical_transfer import checked_sources
+                checked_sources(select_sources(project_dir or national_data_dir, national_data_dir,
+                                               'denue', cfg.get('data_exclusions', [])), macro, ROOT_DIR)
+        elif macro.get('workplace_employment') == 'auto':
+            # Fast preflight check for v2: verify CE activity years without loading DENUE CSVs
             from sb_mexico.demand_sources import select_sources
-            from sb_mexico.automatic_workplace import resolve_automatic_workplace
-            # Fail conflicting source controls before expensive cartography.
-            resolve_automatic_workplace(
-                select_sources(project_dir or national_data_dir, national_data_dir, 'denue', cfg.get('data_exclusions', [])),
-                select_sources(project_dir or national_data_dir, national_data_dir, 'ce', cfg.get('data_exclusions', [])),
-                macro, ROOT_DIR)
-        if macro.get('workplace_employment') == 'historical_transfer':
-            from sb_mexico.demand_sources import select_sources
-            from sb_mexico.historical_transfer import checked_sources
-            checked_sources(select_sources(project_dir or national_data_dir, national_data_dir,
-                                           'denue', cfg.get('data_exclusions', [])), macro, ROOT_DIR)
-    elif macro.get('workplace_employment') == 'auto':
-        # Fast preflight check for v2: verify CE activity years without loading DENUE CSVs
-        from sb_mexico.demand_sources import select_sources
-        from sb_mexico.ce_controls import read_saic_controls
-        ce_sources = select_sources(project_dir or national_data_dir, national_data_dir, 'ce', cfg.get('data_exclusions', []))
-        if ce_sources:
-            controls = read_saic_controls(ce_sources)
-            years = {r['reference_year'] for r in controls.values() if r.get('reference_year') is not None}
-            if len(years) > 1:
-                raise ValueError('Automatic CE transfer found multiple activity years; select one year of CE sources')
+            from sb_mexico.ce_controls import read_saic_controls
+            ce_sources = select_sources(project_dir or national_data_dir, national_data_dir, 'ce', cfg.get('data_exclusions', []))
+            if ce_sources:
+                controls = read_saic_controls(ce_sources)
+                years = {r['reference_year'] for r in controls.values() if r.get('reference_year') is not None}
+                if len(years) > 1:
+                    raise ValueError('Automatic CE transfer found multiple activity years; select one year of CE sources')
 
     # =========================================================================
     # 1. COMPILACIÓN CARTOGRÁFICA (SI NO SE OMITE)
@@ -368,17 +393,110 @@ def execute_pipeline(
             deleted_places=cfg.get("deleted_places", []),
             toponymy_mode=cfg.get("toponymy_mode", "replace"),
             toponymy_pipeline=cfg.get("toponymy"),
+            create_building_foundations=city_info.get("create_building_foundations", True),
+            max_building_tile_size=city_info.get("max_building_tile_size"),
+            color_military_like_aerodrome=city_info.get("color_military_like_aerodrome", True),
+            places_suffix=city_info.get("places_suffix", ""),
+            labels_only=labels_only,
             output_dir=out_dir
         )
     else:
         console.print(f"\n[dim]1. Compilación Cartográfica omitida por parámetro.[/dim]")
+
+    if skip_demand:
+        console.print(f"\n[bold green]2. Reutilizando Demanda Existente (skip_demand=True)[/bold green]")
+        demand_candidates = [
+            os.path.join(out_dir, "demand_data.json"),
+            os.path.join(src_dir, "demand_data.json"),
+        ]
+        existing_demand = next((c for c in demand_candidates if os.path.exists(c)), None)
+        if not existing_demand:
+            if not skip_map:
+                map_file = os.path.join(out_dir, f"{city_code}.pmtiles")
+                console.print(f"[cyan]-> Cartografía compilada con éxito. No se encontró demand_data.json previo (modo Solo Mapa sin demanda).[/cyan]")
+                return map_file
+            raise RuntimeError(f"No se encontró demand_data.json en '{out_dir}' ni '{src_dir}' para reutilizar demanda.")
+
+        if existing_demand != os.path.join(out_dir, "demand_data.json"):
+            shutil.copy2(existing_demand, os.path.join(out_dir, "demand_data.json"))
+
+        demand_out_path = os.path.join(out_dir, "demand_data.json")
+        with open(demand_out_path, "r", encoding="utf-8") as f:
+            demand_payload = json.load(f)
+
+        points = demand_payload.get("points", [])
+        pops = demand_payload.get("pops", [])
+        total_viajeros = sum(p.get("size", 0) for p in pops)
+
+        manual_center = city_info.get("initial_center")
+        if manual_center and isinstance(manual_center, (list, tuple)) and len(manual_center) == 2:
+            center_lon = float(manual_center[0])
+            center_lat = float(manual_center[1])
+        else:
+            total_mass = sum(p.get("residents", 0) + 1.5 * p.get("jobs", 0) for p in points)
+            if total_mass > 0:
+                center_lon = sum(p["location"][0] * (p.get("residents", 0) + 1.5 * p.get("jobs", 0)) for p in points) / total_mass
+                center_lat = sum(p["location"][1] * (p.get("residents", 0) + 1.5 * p.get("jobs", 0)) for p in points) / total_mass
+            else:
+                center_lon = (bbox_dict["min_lon"] + bbox_dict["max_lon"]) / 2.0
+                center_lat = (bbox_dict["min_lat"] + bbox_dict["max_lat"]) / 2.0
+
+        cfg_out_path = os.path.join(out_dir, "config.json")
+        config_data = {
+            "name": city_info.get("name", city_code),
+            "code": city_code,
+            "description": city_info.get("description", f"Mapa de {city_info.get('name', city_code)}"),
+            "bbox": [float(x) for x in bbox_list[:4]],
+            "country": str(city_info.get("country", "MX") or "MX").upper()[:2],
+            "population": int(total_viajeros),
+            "minZoom": compute_effective_min_zoom(city_info, bbox_list),
+            "initialViewState": {
+                "zoom": float(city_info.get("initial_zoom", 12.0)),
+                "latitude": round(float(center_lat), 5),
+                "longitude": round(float(center_lon), 5),
+                "pitch": 0,
+                "bearing": 0
+            },
+            "creator": city_info.get("creator", "Subway Builder México v7.2"),
+            "version": "7.2.0"
+        }
+        with open(cfg_out_path, "w", encoding="utf-8") as f:
+            json.dump(config_data, f, indent=2, ensure_ascii=False)
+
+        sp_doc = None
+        if pois_cfg:
+            sp_doc = generate_special_demand_points_doc(
+                map_code=city_code,
+                special_pois_cfg=pois_cfg,
+                demand_points=points
+            )
+            save_special_demand_points(sp_doc, os.path.join(out_dir, "special_demand_points.json"))
+            from sb_mexico.special_demand import write_railyard_metadata_dir
+            write_railyard_metadata_dir(out_dir, sp_doc)
+
+        from sb_mexico.special_demand import generate_railyard_description_md
+        city_summary_info = {
+            **city_info,
+            "code": city_code,
+            "bbox": bbox_list,
+            "version": "7.2.0"
+        }
+        generate_railyard_description_md(
+            city_info=city_summary_info,
+            demand_payload=demand_payload,
+            special_demand_points_doc=sp_doc,
+            out_dir=out_dir
+        )
+        if skip_packaging:
+            return demand_out_path
+        return package_demand_outputs(out_dir, city_code, demand_out_path, points, pops, total_viajeros)
 
     # =========================================================================
     # 2. INGESTA ESTADÍSTICA DE LA CUATRIFECTA INEGI
     # =========================================================================
     if cfg.get('demand', {}).get('engine') == 'v2':
         from sb_mexico.demand_v2.integration import execute_candidate
-        return execute_candidate(cfg, ROOT_DIR, project_dir, out_dir, include_driving_path)
+        return execute_candidate(cfg, ROOT_DIR, project_dir, out_dir, include_driving_path, skip_packaging=skip_packaging)
 
     console.print(f"\n[bold yellow]2. Ingesta y Calibración INEGI[/bold yellow]")
 
@@ -1064,62 +1182,45 @@ def execute_pipeline(
     cfg_out_path = os.path.join(out_dir, "config.json")
     demand_out_path = os.path.join(out_dir, "demand_data.json")
 
+    clean_demand_points = sanitize_demand_points(demand_points)
+    demand_payload = {"points": clean_demand_points, "pops": pops}
+
     try:
         from depot.demand import DemandData
-        dd = DemandData({"points": clean_demand_points, "pops": pops})
-        dd.sanitize()
-        # Generar config.json con viewport calculado por depot
-        dd.generate_config(
-            name=city_info["name"],
-            code=city_code,
-            description=city_info["description"],
-            creator=city_info.get("creator", "Subway Builder México v7.2"),
-            version="7.2.0",
-            filename=cfg_out_path
-        )
-        # Asegurar centrado baricéntrico inteligente
-        if os.path.exists(cfg_out_path):
-            with open(cfg_out_path, "r", encoding="utf-8") as f:
-                cfg_json = json.load(f)
-            if "initialViewState" not in cfg_json or not isinstance(cfg_json["initialViewState"], dict):
-                cfg_json["initialViewState"] = {}
-            cfg_json["initialViewState"]["latitude"] = round(center_lat, 5)
-            cfg_json["initialViewState"]["longitude"] = round(center_lon, 5)
-            cfg_json["initialViewState"]["zoom"] = city_info.get("initial_zoom", 12.0)
-            with open(cfg_out_path, "w", encoding="utf-8") as f:
-                json.dump(cfg_json, f, indent=2, ensure_ascii=False)
+        demand_payload = DemandData.sanitize(demand_payload)
+    except Exception:
+        pass
 
-        dd.save(demand_out_path)
-        console.print("[green][OK][/green] Sanitización y exportación mediante [bold]depot.demand.DemandData[/bold] exitosa.")
-    except Exception as e:
-        console.print(f"[yellow]Nota: depot.demand fallback nativo ({e}). Exportando directamente...[/yellow]")
-        # Exportación manual de respaldo
-        with open(demand_out_path, "w", encoding="utf-8") as f:
-            json.dump({"points": clean_demand_points, "pops": pops}, f, separators=(',', ':'))
+    with open(demand_out_path, "w", encoding="utf-8") as f:
+        json.dump(demand_payload, f, separators=(',', ':'))
 
-        config_data = {
-            "name": city_info["name"],
-            "code": city_code,
-            "description": city_info["description"],
-            "population": total_viajeros,
-            "initialViewState": {
-                "zoom": city_info.get("initial_zoom", 12.0),
-                "latitude": round(center_lat, 5),
-                "longitude": round(center_lon, 5),
-                "pitch": 0,
-                "bearing": 0
-            },
-            "creator": city_info.get("creator", "Subway Builder México v7.2"),
-            "version": "7.2.0"
-        }
-        with open(cfg_out_path, "w", encoding="utf-8") as f:
-            json.dump(config_data, f, indent=2, ensure_ascii=False)
+    config_data = {
+        "name": city_info.get("name", city_code),
+        "code": city_code,
+        "description": city_info.get("description", f"Mapa de {city_info.get('name', city_code)}"),
+        "bbox": [float(x) for x in bbox_list[:4]],
+        "country": str(city_info.get("country", "MX") or "MX").upper()[:2],
+        "population": int(total_viajeros),
+        "minZoom": compute_effective_min_zoom(city_info, bbox_list),
+        "initialViewState": {
+            "zoom": float(city_info.get("initial_zoom", 12.0)),
+            "latitude": round(float(center_lat), 5),
+            "longitude": round(float(center_lon), 5),
+            "pitch": 0,
+            "bearing": 0
+        },
+        "creator": city_info.get("creator", "Subway Builder México v7.2"),
+        "version": "7.2.0"
+    }
+    with open(cfg_out_path, "w", encoding="utf-8") as f:
+        json.dump(config_data, f, indent=2, ensure_ascii=False)
 
     if allocation_report is not None:
         with open(demand_out_path, encoding='utf-8') as stream:
             validate_integer_margins(json.load(stream)['pops'], allocation_report)
 
     # B. Generación y Validación de Metadatos de Demanda Especial (Subway Builder Modded Standard)
+    sp_doc = None
     if pois_cfg:
         sp_doc = generate_special_demand_points_doc(
             map_code=city_code,
@@ -1137,9 +1238,29 @@ def execute_pipeline(
         sp_out_path = os.path.join(out_dir, "special_demand_points.json")
         save_special_demand_points(sp_doc, sp_out_path)
 
+    # Generación de metadatos .railyard_map/ y ficha técnica description.md
+    from sb_mexico.special_demand import write_railyard_metadata_dir, generate_railyard_description_md
+    if sp_doc:
+        write_railyard_metadata_dir(out_dir, sp_doc)
+    city_summary_info = {
+        **city_info,
+        "code": city_code,
+        "bbox": bbox_list,
+        "version": "7.2.0"
+    }
+    generate_railyard_description_md(
+        city_info=city_summary_info,
+        demand_payload=demand_payload,
+        special_demand_points_doc=sp_doc,
+        out_dir=out_dir
+    )
+    console.print("[green][OK][/green] Ficha técnica Railyard ([bold]description.md[/bold]) y metadatos generados exitosamente.")
+
     # =========================================================================
     # 7. EMPAQUETADO EN ARCHIVO ZIP FINAL
     # =========================================================================
+    if skip_packaging:
+        return demand_out_path
     return package_demand_outputs(out_dir, city_code, demand_out_path, clean_demand_points, pops, total_viajeros, allocation_report)
 
 
@@ -1174,6 +1295,7 @@ def package_demand_outputs(out_dir, city_code, demand_out_path, clean_demand_poi
         "config.json",
         "demand_data.json",
         "special_demand_points.json",
+        "description.md",
         f"{city_code}.pmtiles",
         "buildings_index.bin.gz",
         "roads.geojson",
@@ -1187,6 +1309,14 @@ def package_demand_outputs(out_dir, city_code, demand_out_path, clean_demand_poi
             if os.path.exists(fpath):
                 zipf.write(fpath, arcname=fname)
                 console.print(f"  + Empaquetado: [dim]{fname}[/dim]")
+
+        railyard_dir = os.path.join(out_dir, ".railyard_map")
+        if os.path.isdir(railyard_dir):
+            for r_name in ["special_demand_points.json", "special_demand_types.json"]:
+                r_path = os.path.join(railyard_dir, r_name)
+                if os.path.exists(r_path):
+                    zipf.write(r_path, arcname=f".railyard_map/{r_name}")
+                    console.print(f"  + Empaquetado metadatos Railyard: [dim].railyard_map/{r_name}[/dim]")
 
     if allocation_report is not None:
         from .od_allocation import validate_integer_margins
@@ -1208,6 +1338,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Subway Builder México Pipeline")
     parser.add_argument("config", help="Ruta al archivo YAML de la ciudad")
     parser.add_argument("--skip-map", action="store_true", help="Omitir compilación cartográfica")
+    parser.add_argument("--labels-only", action="store_true", help="Compilar únicamente toponimia y etiquetas sobre mapa base existente")
+    parser.add_argument("--skip-demand", action="store_true", help="Reutilizar demanda existente sin re-simular")
+    parser.add_argument("--skip-packaging", action="store_true", help="Omitir generación del archivo ZIP final")
     parser.add_argument("--output-dir", default=".", help="Directorio de salida")
     parser.add_argument("--data-dir", default=None, help="Directorio de datos del proyecto")
     parser.add_argument(
@@ -1223,5 +1356,8 @@ if __name__ == "__main__":
         skip_map=args.skip_map,
         output_dir=args.output_dir,
         data_dir=args.data_dir,
-        include_driving_path=args.include_driving_path
+        include_driving_path=args.include_driving_path,
+        labels_only=args.labels_only,
+        skip_demand=args.skip_demand,
+        skip_packaging=args.skip_packaging
     )

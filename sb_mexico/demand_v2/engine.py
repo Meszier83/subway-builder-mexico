@@ -257,16 +257,64 @@ def write_result(result, request, output_dir):
                                                'pea_real','population_integer','occupied_integer','commuters_integer',
                                                'employment_source','placement_source']].to_dict('records'))}
     city = request.config['city']
-    center = city.get('initial_center', [(city['bbox'][0]+city['bbox'][2])/2, (city['bbox'][1]+city['bbox'][3])/2])
-    files['config.json'] = dict(name=city['name'], code=city['code'], description=city.get('description', ''),
-        population=sum(p['size'] for p in result['game']['pops']), creator=city.get('creator', 'Subway Builder México'),
-        version='7.1.0', initialViewState=dict(longitude=center[0], latitude=center[1], zoom=city.get('initial_zoom', 12), bearing=0, pitch=0))
+    manual_center = city.get('initial_center')
+    if manual_center and isinstance(manual_center, (list, tuple)) and len(manual_center) == 2:
+        center = [float(manual_center[0]), float(manual_center[1])]
+    else:
+        pts = result.get('game', {}).get('points') or []
+        mass = sum(p.get('residents', 0) + 1.5 * p.get('jobs', 0) for p in pts)
+        if mass > 0:
+            center = [
+                sum(p['location'][0] * (p.get('residents', 0) + 1.5 * p.get('jobs', 0)) for p in pts) / mass,
+                sum(p['location'][1] * (p.get('residents', 0) + 1.5 * p.get('jobs', 0)) for p in pts) / mass
+            ]
+        else:
+            center = [(city['bbox'][0]+city['bbox'][2])/2, (city['bbox'][1]+city['bbox'][3])/2]
+
+    from sb_mexico.pipeline import compute_effective_min_zoom
+    files['config.json'] = dict(
+        name=city['name'],
+        code=city['code'],
+        description=city.get('description', ''),
+        bbox=[float(x) for x in city['bbox'][:4]],
+        country=str(city.get('country', 'MX') or 'MX').upper()[:2],
+        population=sum(p['size'] for p in result['game']['pops']),
+        creator=city.get('creator', 'Subway Builder México v7.2'),
+        version='7.2.0',
+        minZoom=compute_effective_min_zoom(city, city['bbox']),
+        initialViewState=dict(
+            longitude=round(float(center[0]), 6),
+            latitude=round(float(center[1]), 6),
+            zoom=float(city.get('initial_zoom', 12.0)),
+            bearing=0,
+            pitch=0
+        )
+    )
     for name, value in files.items():
         (path/name).write_text(json.dumps(value, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
-    from sb_mexico.special_demand import generate_special_demand_points_doc, save_special_demand_points
+    from sb_mexico.special_demand import (
+        generate_special_demand_points_doc,
+        save_special_demand_points,
+        write_railyard_metadata_dir,
+        generate_railyard_description_md
+    )
+    sp_doc = None
     if request.config.get('pois'):
-        save_special_demand_points(generate_special_demand_points_doc(city['code'], request.config['pois'], result['points']),
-                                   str(path/'special_demand_points.json'))
+        sp_doc = generate_special_demand_points_doc(city['code'], request.config['pois'], result['points'])
+        save_special_demand_points(sp_doc, str(path/'special_demand_points.json'))
+        write_railyard_metadata_dir(str(path), sp_doc)
+    city_summary_info = {
+        **city,
+        "code": city['code'],
+        "bbox": city['bbox'],
+        "version": "7.2.0"
+    }
+    generate_railyard_description_md(
+        city_info=city_summary_info,
+        demand_payload=result['game'],
+        special_demand_points_doc=sp_doc,
+        out_dir=str(path)
+    )
     manifest = dict(schema_version=1, engine='v2', status='candidate', identity=result['identity'],
                     target_year=request.config.get('demand', {}).get('target_year', 2025),
                     files={name:hashlib.sha256((path/name).read_bytes()).hexdigest() for name in files},

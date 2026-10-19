@@ -208,7 +208,12 @@ def run_cartography(
     lod_peripheral_labels: str = "none",
     lod_peripheral_buildings: str = "none",
     denue_csv: Optional[str] = None,
-    curated_places: Optional[str] = None
+    curated_places: Optional[str] = None,
+    create_building_foundations: bool = True,
+    max_building_tile_size: Optional[int] = None,
+    color_military_like_aerodrome: bool = True,
+    places_suffix: str = "",
+    labels_only: bool = False
 ) -> int:
     if urban_parks_only:
         os.environ["SB_URBAN_PARKS_ONLY"] = "1"
@@ -256,15 +261,16 @@ def run_cartography(
     native_build_dir = os.path.abspath(os.path.expanduser(f"~/build_{city_code.lower()}"))
 
     if os.path.exists(native_build_dir):
-        # Limpiar teselas temporales, pmtiles parciales y archivos intermedios residuales recursivamente
-        for pat in ["*.mbtiles", "*.pmtiles", "*.pbf.tmp", "roads.pbf", "runways_taxiways.pbf", "places.osm.pbf", "*-nobuildings.osm.pbf", "*-merged-source.osm.pbf"]:
-            for stale in glob.glob(os.path.join(native_build_dir, "**", pat), recursive=True):
-                if stale.endswith(("_clipped.osm.pbf", "_lod_optimized.osm.pbf", f"{city_code.lower()}.osm.pbf")):
-                    continue
-                try:
-                    os.remove(stale)
-                except OSError:
-                    pass
+        # Limpiar teselas temporales, pmtiles parciales y archivos intermedios residuales (solo si no es labels_only)
+        if not labels_only:
+            for pat in ["*.mbtiles", "*.pmtiles", "*.pbf.tmp", "roads.pbf", "runways_taxiways.pbf", "places.osm.pbf", "*-nobuildings.osm.pbf", "*-merged-source.osm.pbf"]:
+                for stale in glob.glob(os.path.join(native_build_dir, "**", pat), recursive=True):
+                    if stale.endswith(("_clipped.osm.pbf", "_lod_optimized.osm.pbf", f"{city_code.lower()}.osm.pbf")):
+                        continue
+                    try:
+                        os.remove(stale)
+                    except OSError:
+                        pass
     else:
         os.makedirs(native_build_dir, exist_ok=True)
     os.makedirs(work_dir, exist_ok=True)
@@ -425,29 +431,51 @@ def run_cartography(
     MapGen = planned_mapgen(MapGen, curated_data if curated_override else None)
     try:
         os.chdir(native_build_dir)
-        m = MapGen(
-            city=city_code,
-            bbox=bbox,
-            osmpbf=pbf_name,
-            outputdir=build_output_dir,
-            RAM=ram_gb,
-            ncores=cores,
-            cities=ETIQUETAS_CITIES,
-            suburbs=ETIQUETAS_SUBURBS,
-            neighborhoods=ETIQUETAS_NEIGHBORHOODS,
-            neighborhoods_additional=additional_neighborhoods_geojson,
-            label_name_language="prefer:es",
-            road_name_preferred_language="es",
-            building_index_filter_size=building_filter_size,
-            building_index_simplification=building_simplification,
-            building_tile_simplification=building_simplification,
-            create_building_foundations=False,
-            create_ocean_foundations=include_ocean,
-            redownload_buildings=not buildings_cache_valid
-        )
+        mapgen_kwargs = {
+            "city": city_code,
+            "bbox": bbox,
+            "osmpbf": pbf_name,
+            "outputdir": build_output_dir,
+            "RAM": ram_gb,
+            "ncores": cores,
+            "cities": ETIQUETAS_CITIES,
+            "suburbs": ETIQUETAS_SUBURBS,
+            "neighborhoods": ETIQUETAS_NEIGHBORHOODS,
+            "neighborhoods_additional": additional_neighborhoods_geojson,
+            "label_name_language": "prefer:es",
+            "road_name_preferred_language": "es",
+            "building_index_filter_size": building_filter_size,
+            "building_tile_filter_size": building_filter_size,
+            "building_index_simplification": building_simplification,
+            "building_tile_simplification": building_simplification,
+            "create_building_foundations": bool(create_building_foundations),
+            "create_ocean_foundations": include_ocean,
+            "color_military_like_aerodrome": bool(color_military_like_aerodrome),
+            "places_suffix": str(places_suffix or ""),
+            "redownload_buildings": not buildings_cache_valid,
+        }
+        if max_building_tile_size is not None and int(max_building_tile_size) > 0:
+            mapgen_kwargs["max_building_tile_size"] = int(max_building_tile_size)
 
-        print("-> Ejecutando extracción de geometrías, vialidades, toponimia y edificios 3D...")
-        m.run_all()
+        m = MapGen(**mapgen_kwargs)
+
+        nolabels_candidates = [
+            os.path.join(build_output_dir, f"{city_code}-nolabels.pmtiles"),
+            os.path.join(build_output_dir, city_code, f"{city_code}-nolabels.pmtiles"),
+            os.path.join(native_build_dir, f"{city_code}-nolabels.pmtiles"),
+            os.path.join(native_build_dir, city_code, f"{city_code}-nolabels.pmtiles"),
+            os.path.join(getattr(m, "city_dir", ""), f"{city_code}-nolabels.pmtiles"),
+            os.path.join(build_output_dir, "base.pmtiles"),
+        ]
+        can_run_labels_only = bool(labels_only) and any(p and os.path.exists(p) for p in nolabels_candidates)
+        if can_run_labels_only:
+            print("-> [Modo Rápido labels_only] Regenerando capas toponímicas con MapGen.add_labels()...")
+            m.add_labels()
+        else:
+            if labels_only:
+                print(f"-> [AVISO] Capas base previas ({city_code}-nolabels.pmtiles) no encontradas en {build_output_dir}. Ejecutando MapGen.run_all() completo...")
+            print("-> Ejecutando extracción de geometrías, vialidades, toponimia y edificios 3D...")
+            m.run_all()
 
         # Guardar metadatos de BBOX de edificios 3D tras compilación exitosa
         try:
@@ -505,6 +533,11 @@ def main():
     parser.add_argument("--lod-peripheral-buildings", default="none", choices=["none", "large_only", "all"], help="Edificios 3D en periferia")
     parser.add_argument("--denue-csv", default=None, help="Ruta al archivo DENUE CSV para toponimia complementaria")
     parser.add_argument("--curated-places", default=None, help="Ruta al archivo GeoJSON de toponimia curada desde el Wizard")
+    parser.add_argument("--no-building-foundations", action="store_true", default=False, help="Desactivar generación de cimientos subterráneos de edificios")
+    parser.add_argument("--max-building-tile-size", type=int, default=None, help="Límite máximo en KB por tesela de edificios en Tippecanoe")
+    parser.add_argument("--no-color-military-like-aerodrome", action="store_true", default=False, help="No colorear zonas militares como aeródromos")
+    parser.add_argument("--places-suffix", type=str, default="", help="Sufijo a recortar en etiquetas OSM")
+    parser.add_argument("--labels-only", action="store_true", default=False, help="Modo rápido: solo regenerar capas de toponimia con MapGen.add_labels")
 
     args = parser.parse_args()
     ret = run_cartography(
@@ -522,7 +555,12 @@ def main():
         lod_peripheral_labels=args.lod_peripheral_labels,
         lod_peripheral_buildings=args.lod_peripheral_buildings,
         denue_csv=args.denue_csv,
-        curated_places=args.curated_places
+        curated_places=args.curated_places,
+        create_building_foundations=not args.no_building_foundations,
+        max_building_tile_size=args.max_building_tile_size,
+        color_military_like_aerodrome=not args.no_color_military_like_aerodrome,
+        places_suffix=args.places_suffix,
+        labels_only=args.labels_only
     )
     sys.exit(ret)
 

@@ -710,6 +710,9 @@
           updateCohortTelemetry();
           updateDemandEngineControls();
         }
+        if (step === 5) {
+          checkBuildCacheStatus();
+        }
         if (step === 6 && mapDemand) {
           mapDemand.invalidateSize();
           loadDemandDataPreview();
@@ -1441,6 +1444,39 @@
         updateZoomPreviewLayer();
         triggerAutoSave();
         showToast(`Zoom inicial adoptado: ${currentZoom}`, "success");
+      }
+    }
+
+    function suggestMinZoom() {
+      let b0 = parseFloat(document.getElementById('cfg_bbox_0')?.value);
+      let b1 = parseFloat(document.getElementById('cfg_bbox_1')?.value);
+      let b2 = parseFloat(document.getElementById('cfg_bbox_2')?.value);
+      let b3 = parseFloat(document.getElementById('cfg_bbox_3')?.value);
+      if (isNaN(b0) || isNaN(b1) || isNaN(b2) || isNaN(b3)) {
+        if (cityData && cityData.city && Array.isArray(cityData.city.bbox) && cityData.city.bbox.length === 4) {
+          b0 = parseFloat(cityData.city.bbox[0]);
+          b1 = parseFloat(cityData.city.bbox[1]);
+          b2 = parseFloat(cityData.city.bbox[2]);
+          b3 = parseFloat(cityData.city.bbox[3]);
+        }
+      }
+      if (isNaN(b0) || isNaN(b1) || isNaN(b2) || isNaN(b3)) {
+        showToast("No se pudo calcular el zoom mínimo: BBOX no definido", "warning");
+        return;
+      }
+      const dLon = Math.abs(b2 - b0);
+      const dLat = Math.abs(b3 - b1);
+      const span = Math.max(dLon, dLat, 0.05);
+      const rawZoom = Math.log2(360.0 / (span * 1.8));
+      const clamped = Math.max(8.5, Math.min(11.5, rawZoom));
+      const suggested = Math.round(clamped * 2.0) / 2.0;
+
+      const minZoomInput = document.getElementById('cfg_min_zoom');
+      if (minZoomInput) {
+        minZoomInput.value = suggested.toFixed(1);
+        if (cityData && cityData.city) cityData.city.min_zoom = suggested;
+        triggerAutoSave();
+        showToast(`Zoom mínimo sugerido: ${suggested} (span BBOX: ${span.toFixed(2)}°)`, "success");
       }
     }
 
@@ -4906,6 +4942,18 @@
       const zoomEl = document.getElementById('cfg_initial_zoom');
       if (zoomEl) cityData.city.initial_zoom = parseFloat(zoomEl.value);
 
+      const minZoomEl = document.getElementById('cfg_min_zoom');
+      if (minZoomEl && minZoomEl.value.trim() !== '') {
+        const parsedMin = parseFloat(minZoomEl.value);
+        if (!isNaN(parsedMin)) {
+          cityData.city.min_zoom = parsedMin;
+        } else {
+          delete cityData.city.min_zoom;
+        }
+      } else if (cityData.city) {
+        delete cityData.city.min_zoom;
+      }
+
       const lonEl = document.getElementById('cfg_initial_lon');
       const latEl = document.getElementById('cfg_initial_lat');
       if (lonEl && latEl && lonEl.value.trim() !== '' && latEl.value.trim() !== '') {
@@ -4949,6 +4997,21 @@
 
       const bldgSimpEl = document.getElementById('cfg_building_simplification');
       if (bldgSimpEl) cityData.city.building_simplification = parseFloat(bldgSimpEl.value) || 0.2;
+
+      const foundationsEl = document.getElementById('cfg_create_building_foundations');
+      if (foundationsEl) cityData.city.create_building_foundations = foundationsEl.checked;
+
+      const milAeroEl = document.getElementById('cfg_color_military_like_aerodrome');
+      if (milAeroEl) cityData.city.color_military_like_aerodrome = milAeroEl.checked;
+
+      const placesSuffixEl = document.getElementById('cfg_places_suffix');
+      if (placesSuffixEl) cityData.city.places_suffix = placesSuffixEl.value.trim();
+
+      const maxTileKbEl = document.getElementById('cfg_max_building_tile_size');
+      if (maxTileKbEl) {
+        const val = parseInt(maxTileKbEl.value, 10);
+        cityData.city.max_building_tile_size = (!isNaN(val) && val > 0) ? val : null;
+      }
 
       const b0 = parseFloat(document.getElementById('cfg_bbox_0').value) || 0;
       const b1 = parseFloat(document.getElementById('cfg_bbox_1').value) || 0;
@@ -5137,6 +5200,8 @@
 
       const izEl = document.getElementById('cfg_initial_zoom');
       if (izEl) izEl.value = c.initial_zoom || 11.5;
+      const minzEl = document.getElementById('cfg_min_zoom');
+      if (minzEl) minzEl.value = (c.min_zoom !== undefined && c.min_zoom !== null) ? c.min_zoom : '';
       const lonEl = document.getElementById('cfg_initial_lon');
       const latEl = document.getElementById('cfg_initial_lat');
       if (lonEl && latEl) {
@@ -5183,6 +5248,18 @@
 
       const bsimEl = document.getElementById('cfg_building_simplification');
       if (bsimEl) bsimEl.value = c.building_simplification !== undefined ? c.building_simplification : 0.2;
+
+      const foundationsEl = document.getElementById('cfg_create_building_foundations');
+      if (foundationsEl) foundationsEl.checked = c.create_building_foundations !== undefined ? Boolean(c.create_building_foundations) : true;
+
+      const milAeroEl = document.getElementById('cfg_color_military_like_aerodrome');
+      if (milAeroEl) milAeroEl.checked = c.color_military_like_aerodrome !== undefined ? Boolean(c.color_military_like_aerodrome) : true;
+
+      const placesSuffixEl = document.getElementById('cfg_places_suffix');
+      if (placesSuffixEl) placesSuffixEl.value = c.places_suffix || "";
+
+      const maxTileKbEl = document.getElementById('cfg_max_building_tile_size');
+      if (maxTileKbEl) maxTileKbEl.value = c.max_building_tile_size || "";
 
       const rawBbox = c.bbox || [-87.05, 21.0, -86.72, 21.31];
       const normBbox = [
@@ -5298,7 +5375,7 @@
       // Adjuntar listeners de auto-guardado a los campos de formulario
       const inputIds = [
         'cfg_residential_placement', 'cfg_residential_employment', 'cfg_demographic_reference', 'cfg_eic_indicators', 'cfg_eic_persons', 'cfg_workplace_employment', 'cfg_conapo_source_year', 'cfg_city_name', 'cfg_city_code', 'cfg_city_creator', 'cfg_city_desc',
-        'cfg_grid_size', 'cfg_initial_zoom', 'cfg_initial_lon', 'cfg_initial_lat', 'cfg_include_ocean', 'cfg_urban_parks_only',
+        'cfg_grid_size', 'cfg_initial_zoom', 'cfg_min_zoom', 'cfg_initial_lon', 'cfg_initial_lat', 'cfg_include_ocean', 'cfg_urban_parks_only',
         'cfg_min_residents', 'cfg_min_jobs',
         'cfg_building_filter_size', 'cfg_building_simplification',
         'cfg_bbox_0', 'cfg_bbox_1', 'cfg_bbox_2', 'cfg_bbox_3',
@@ -5309,7 +5386,9 @@
         'cfg_modal_experiment_enabled', 'cfg_modal_experiment_preset',
         'cfg_modal_traffic_speed', 'cfg_modal_motorization_rate',
         'cfg_restrict_demand_to_urban_core', 'cfg_lod_peripheral_roads',
-        'cfg_omit_pedestrian_paths', 'cfg_lod_peripheral_labels', 'cfg_lod_peripheral_buildings'
+        'cfg_omit_pedestrian_paths', 'cfg_lod_peripheral_labels', 'cfg_lod_peripheral_buildings',
+        'cfg_create_building_foundations', 'cfg_color_military_like_aerodrome',
+        'cfg_places_suffix', 'cfg_max_building_tile_size'
       ];
       inputIds.forEach(id => {
         const el = document.getElementById(id);
@@ -5356,6 +5435,13 @@
         cityData.exclusion_zones = [];
       }
       renderExclusionZones();
+
+      if (typeof setModularPreset === 'function') {
+        setModularPreset('full', true);
+      }
+      if (typeof checkBuildCacheStatus === 'function') {
+        checkBuildCacheStatus();
+      }
     }
 
     // -------------------------------------------------------------------------
@@ -12459,12 +12545,209 @@
       } catch (e) { wizardLifecycle.warn('system', e.message, checkSystemHealth); }
     }
 
+    let currentModularPreset = 'full';
+    let buildCacheData = null;
+
+    function setModularPreset(preset, silent = false) {
+      currentModularPreset = preset;
+      const selCarto = document.getElementById('selModularCartography');
+      const selDemand = document.getElementById('selModularDemand');
+      const chkZip = document.getElementById('chkPackageZip');
+
+      if (preset === 'full') {
+        if (selCarto) selCarto.value = 'full';
+        if (selDemand) selDemand.value = 'compile';
+        if (chkZip) chkZip.checked = true;
+      } else if (preset === 'map_only') {
+        if (selCarto) selCarto.value = 'full';
+        if (selDemand) selDemand.value = 'skip';
+        if (chkZip) chkZip.checked = true;
+      } else if (preset === 'labels_only') {
+        if (selCarto) selCarto.value = 'labels_only';
+        if (selDemand) selDemand.value = 'skip';
+        if (chkZip) chkZip.checked = true;
+      } else if (preset === 'demand_only') {
+        if (selCarto) selCarto.value = 'skip';
+        if (selDemand) selDemand.value = 'compile';
+        if (chkZip) chkZip.checked = true;
+      } else if (preset === 'config_only') {
+        if (selCarto) selCarto.value = 'skip';
+        if (selDemand) selDemand.value = 'skip';
+        if (chkZip) chkZip.checked = true;
+      }
+
+      syncModularCheckboxes();
+      updateModularPresetUI(preset);
+
+      if (!silent) {
+        const labels = {
+          full: 'Compilación Completa seleccionada',
+          map_only: 'Solo Mapa seleccionado (reutiliza demanda)',
+          labels_only: 'Solo Etiquetas seleccionado (toponimia rápida)',
+          demand_only: 'Solo Demanda seleccionado (reutiliza mapa)',
+          config_only: 'Solo Config seleccionado (actualización rápida de config y ZIP)'
+        };
+        if (labels[preset]) showToast(labels[preset], 'info');
+      }
+    }
+
+    function updateModularPresetUI(activePreset) {
+      const presets = ['full', 'map_only', 'labels_only', 'demand_only', 'config_only'];
+      const btnMap = {
+        full: document.getElementById('btnPresetFull'),
+        map_only: document.getElementById('btnPresetMapOnly'),
+        labels_only: document.getElementById('btnPresetLabels'),
+        demand_only: document.getElementById('btnPresetDemand'),
+        config_only: document.getElementById('btnPresetConfig')
+      };
+      const dotMap = {
+        full: document.getElementById('dotPresetFull'),
+        map_only: document.getElementById('dotPresetMapOnly'),
+        labels_only: document.getElementById('dotPresetLabels'),
+        demand_only: document.getElementById('dotPresetDemand'),
+        config_only: document.getElementById('dotPresetConfig')
+      };
+      const helpEl = document.getElementById('modularPresetHelp');
+
+      presets.forEach(p => {
+        const b = btnMap[p];
+        const d = dotMap[p];
+        if (!b) return;
+        if (p === activePreset) {
+          b.className = "modular-preset-btn p-2.5 rounded-lg border text-left transition flex flex-col justify-between bg-stone-800/90 border-metro-orange text-white shadow-xs cursor-pointer";
+          if (d) d.className = "w-2 h-2 rounded-full bg-metro-orange";
+        } else {
+          b.className = "modular-preset-btn p-2.5 rounded-lg border border-gray-700 bg-stone-900/60 hover:bg-stone-800 text-gray-300 text-left transition flex flex-col justify-between cursor-pointer";
+          if (d) d.className = "w-2 h-2 rounded-full bg-gray-600";
+        }
+      });
+
+      if (helpEl) {
+        const descMap = {
+          full: 'Modo: Compilación Completa (Cartografía 3D + Demanda + Config + ZIP)',
+          map_only: 'Modo: Solo Mapa (Cartografía 3D + Config + ZIP, reutiliza demanda)',
+          labels_only: 'Modo: Solo Etiquetas (Toponimia rápida sobre base previa + Config + ZIP)',
+          demand_only: 'Modo: Solo Demanda (INEGI/OSRM + Config + ZIP, reutiliza mapa)',
+          config_only: 'Modo: Solo Config (Actualiza zoom/cámara, metadatos y re-empaqueta ZIP)',
+          custom: 'Modo: Personalizado (Ajuste granular)'
+        };
+        helpEl.textContent = descMap[activePreset] || descMap.custom;
+      }
+    }
+
+    function detectModularPresetFromInputs() {
+      const carto = document.getElementById('selModularCartography')?.value || 'full';
+      const demand = document.getElementById('selModularDemand')?.value || 'compile';
+      const zip = document.getElementById('chkPackageZip')?.checked ?? true;
+
+      if (carto === 'full' && demand === 'compile' && zip) return 'full';
+      if (carto === 'full' && demand === 'skip' && zip) return 'map_only';
+      if (carto === 'labels_only' && demand === 'skip' && zip) return 'labels_only';
+      if (carto === 'skip' && demand === 'compile' && zip) return 'demand_only';
+      if (carto === 'skip' && demand === 'skip' && zip) return 'config_only';
+      return 'custom';
+    }
+
+    function onModularCartographyChanged(val) {
+      syncModularCheckboxes();
+      const detected = detectModularPresetFromInputs();
+      currentModularPreset = detected;
+      updateModularPresetUI(detected);
+    }
+
+    function onModularDemandChanged(val) {
+      syncModularCheckboxes();
+      const detected = detectModularPresetFromInputs();
+      currentModularPreset = detected;
+      updateModularPresetUI(detected);
+    }
+
+    function syncModularCheckboxes() {
+      const carto = document.getElementById('selModularCartography')?.value || 'full';
+      const demand = document.getElementById('selModularDemand')?.value || 'compile';
+      const chkSkipMap = document.getElementById('chkSkipMap');
+      const chkLabelsOnly = document.getElementById('chkLabelsOnly');
+      const chkSkipDemand = document.getElementById('chkSkipDemand');
+
+      if (chkSkipMap) chkSkipMap.checked = (carto === 'skip');
+      if (chkLabelsOnly) chkLabelsOnly.checked = (carto === 'labels_only');
+      if (chkSkipDemand) chkSkipDemand.checked = (demand === 'skip');
+
+      const detected = detectModularPresetFromInputs();
+      currentModularPreset = detected;
+      updateModularPresetUI(detected);
+    }
+
+    async function checkBuildCacheStatus() {
+      if (!currentCityFile) return;
+      const lblCarto = document.getElementById('lblCacheCartography');
+      const lblDemand = document.getElementById('lblCacheDemand');
+
+      try {
+        const res = await fetch(`/api/build-cache-status?file=${encodeURIComponent(currentCityFile)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        buildCacheData = data;
+
+        if (lblCarto) {
+          if (data.map_available) {
+            lblCarto.innerHTML = `<span class="text-emerald-400 font-semibold">✅ Disponible (${escapeHtml(data.map_file || 'pmtiles')})</span>`;
+          } else {
+            lblCarto.innerHTML = `<span class="text-amber-400">⚠️ No compilado</span>`;
+          }
+        }
+
+        if (lblDemand) {
+          if (data.demand_available) {
+            lblDemand.innerHTML = `<span class="text-emerald-400 font-semibold">✅ Disponible (${data.demand_cohorts || 0} cohortes)</span>`;
+          } else {
+            lblDemand.innerHTML = `<span class="text-amber-400">⚠️ No compilado</span>`;
+          }
+        }
+
+        const optLabels = document.querySelector('#selModularCartography option[value="labels_only"]');
+        if (optLabels) {
+          if (!data.nolabels_available) {
+            optLabels.disabled = true;
+            optLabels.textContent = "Solo Etiquetas (Requiere base previa)";
+          } else {
+            optLabels.disabled = false;
+            optLabels.textContent = "Solo Etiquetas (Rápido)";
+          }
+        }
+      } catch (err) {
+        console.warn("Error al verificar estado de caché de compilación:", err);
+      }
+    }
+
     async function startBuild() {
       if (!wizardLifecycle.canSave(currentCityFile)) {
         showToast('Carga un proyecto válido antes de compilar.', 'error');
         return;
       }
-      const skipMap = document.getElementById('chkSkipMap').checked;
+      syncModularCheckboxes();
+      const skipMap = document.getElementById('chkSkipMap')?.checked || false;
+      const labelsOnly = document.getElementById('chkLabelsOnly')?.checked || false;
+      const skipDemand = document.getElementById('chkSkipDemand')?.checked || false;
+      const chkPackageZip = document.getElementById('chkPackageZip');
+      const skipPackaging = chkPackageZip ? !chkPackageZip.checked : false;
+
+      // Validar si el usuario intenta compilar Solo Etiquetas sin base previa
+      if (labelsOnly && buildCacheData && !buildCacheData.nolabels_available) {
+        showToast('No existe un mapa base previo (-nolabels.pmtiles) para compilar solo etiquetas. Compila el mapa completo primero.', 'error');
+        return;
+      }
+      // Validar si el usuario intenta omitir mapa sin tener mapa compilado
+      if (skipMap && buildCacheData && !buildCacheData.map_available) {
+        showToast('No existe un mapa previo en dist/. No se puede omitir la cartografía.', 'error');
+        return;
+      }
+      // Validar si el usuario intenta omitir demanda sin tener demanda previa
+      if (skipDemand && buildCacheData && !buildCacheData.demand_available) {
+        showToast('No existe demanda previa en dist/ ni en data/. No se puede omitir la demanda.', 'error');
+        return;
+      }
+
       const btn = document.getElementById('btnStartBuild');
       const btnResults = document.getElementById('btnGoToResults');
       const btnDl = document.getElementById('btnDownloadZipStep5');
@@ -12486,7 +12769,7 @@
         if (await saveCurrentCity(true) === false) throw new Error('Guarda la configuración antes de compilar.');
         const state = JSON.stringify(cityData);
         if (file !== currentCityFile) throw new Error('El proyecto cambió; vuelve a compilar.');
-        if (cityData.demand?.engine === 'v2') {
+        if (cityData.demand?.engine === 'v2' && !skipDemand) {
           const sources = await fetchStartupJson(`/api/data-status?file=${encodeURIComponent(file)}`, 'Fuentes del nuevo motor', 30000);
           if (file !== currentCityFile || state !== JSON.stringify(cityData)) throw new Error('La configuración cambió; vuelve a compilar.');
           updateDemandEngineControls(sources);
@@ -12499,7 +12782,13 @@
         const res = await fetch('/api/build/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ file, skip_map: skipMap })
+          body: JSON.stringify({
+            file,
+            skip_map: skipMap,
+            labels_only: labelsOnly,
+            skip_demand: skipDemand,
+            skip_packaging: skipPackaging
+          })
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "No se pudo iniciar");
@@ -12743,6 +13032,14 @@
         return;
       }
       window.location.href = `/api/download?file=${encodeURIComponent(currentCityFile)}`;
+    }
+
+    function downloadDescriptionMd() {
+      if (!currentCityFile) {
+        showToast("Selecciona o carga un proyecto primero.", "warning");
+        return;
+      }
+      window.location.href = `/api/description-md?file=${encodeURIComponent(currentCityFile)}`;
     }
 
     // -------------------------------------------------------------------------

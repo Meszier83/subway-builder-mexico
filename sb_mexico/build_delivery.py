@@ -38,8 +38,8 @@ def validate_package(path, code):
         if len(names) != len(set(names)) or not required <= set(names) or archive.testzip():
             raise ValueError('Invalid or incomplete map package')
         for name in names:
-            if Path(name).name != name:
-                raise ValueError('Package members must be at the archive root')
+            if not (name.startswith(".railyard_map/") or Path(name).name == name):
+                raise ValueError('Package members must be at the archive root or in .railyard_map/')
             artifact = Path(path).parent / name
             digest = hashlib.sha256()
             with archive.open(name) as stream:
@@ -76,7 +76,7 @@ def validate_package(path, code):
         return commuters
 
 
-def execute_wizard_build(config_path, output_dir, data_dir, skip_map=False):
+def execute_wizard_build(config_path, output_dir, data_dir, skip_map=False, labels_only=False, skip_demand=False, skip_packaging=False):
     from sb_mexico.pipeline import execute_pipeline
     config_path = Path(config_path).resolve()
     root = Path(output_dir).resolve()
@@ -92,7 +92,9 @@ def execute_wizard_build(config_path, output_dir, data_dir, skip_map=False):
     map_keys = {'code', 'bbox', 'building_filter_size', 'building_simplification',
                 'include_ocean', 'urban_parks_only', 'urban_core_polygon',
                 'lod_peripheral_roads', 'include_pedestrian_paths',
-                'lod_peripheral_labels', 'lod_peripheral_buildings'}
+                'lod_peripheral_labels', 'lod_peripheral_buildings',
+                'create_building_foundations', 'max_building_tile_size',
+                'color_military_like_aerodrome', 'places_suffix'}
     result['cartography_config'] = {key: value for key, value in config['city'].items()
                                     if key in map_keys}
     result['cartography_config']['places'] = config.get('places', [])
@@ -114,10 +116,38 @@ def execute_wizard_build(config_path, output_dir, data_dir, skip_map=False):
             pass
     write_manifest(root, result)
     try:
+        prev_out = Path(previous['output_dir']) if previous and previous.get('output_dir') else None
+        if skip_demand:
+            demand_root = prev_out if prev_out and (prev_out / 'demand_data.json').is_file() else root
+            demand_files = [
+                'demand_data.json',
+                'demand_manifest.json',
+                'demand_pipeline_report.json',
+                'od_allocation_report.json',
+                'workplace_employment_report.json',
+                'residential_employment_report.json',
+                'population_projection_report.json',
+                'special_demand_points.json',
+                '.demand-v2-routes.json',
+            ]
+            result['reused_demand'] = {}
+            for name in demand_files:
+                src = demand_root / name
+                if src.is_file():
+                    shutil.copy2(src, stage / name)
+                    result['reused_demand'][name] = file_hash(src)
+
+        if labels_only:
+            geom_files = ['roads.geojson', 'buildings_index.bin.gz', 'runways_taxiways.geojson', 'ocean_depth_index.json.gz']
+            for name in geom_files:
+                if not (stage / name).exists():
+                    src = (prev_out / name) if (prev_out and (prev_out / name).is_file()) else (root / name)
+                    if src.is_file():
+                        shutil.copy2(src, stage / name)
+
         if skip_map:
             # Reuse only this project's cartography. Record provenance separately
             # from demand/package identity; asset presence alone does not prove age.
-            prev_out = Path(previous['output_dir']) if previous and previous.get('output_dir') else None
             asset_root = prev_out if prev_out and (prev_out / f'{code}.pmtiles').is_file() else root
             if previous and (previous.get('cartography_config') != result['cartography_config']
                              or previous.get('config_path') != str(config_path)):
@@ -141,13 +171,21 @@ def execute_wizard_build(config_path, output_dir, data_dir, skip_map=False):
         config['data_dir'] = str(Path(data_dir).resolve())
         snapshot.write_text(yaml.safe_dump(config, allow_unicode=True), encoding='utf-8')
         produced = Path(execute_pipeline(str(snapshot), output_dir=str(stage),
-                                        data_dir=str(data_dir), skip_map=skip_map)).resolve()
+                                        data_dir=str(data_dir), skip_map=skip_map,
+                                        labels_only=labels_only, skip_demand=skip_demand,
+                                        skip_packaging=skip_packaging)).resolve()
         if produced.parent != stage:
             raise ValueError('Build returned an artifact outside its staging directory')
         result['demand_path'] = str(stage / 'demand_data.json')
         if produced.suffix.lower() == '.zip':
             result['commuters'] = validate_package(produced, code)
             result.update(status='success', package_path=str(produced), package_hash=file_hash(produced))
+        elif produced.suffix.lower() == '.pmtiles':
+            result['status'] = 'map_only'
+            result['map_path'] = str(produced)
+        elif skip_packaging:
+            result['status'] = 'unpackaged'
+            result['produced_path'] = str(produced)
         else:
             result['status'] = 'demand_only'
             result['missing_map_files'] = [name for name in (f'{code}.pmtiles', 'roads.geojson')

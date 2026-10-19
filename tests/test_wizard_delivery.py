@@ -60,6 +60,8 @@ class WizardDeliveryTests(unittest.TestCase):
                       pops=[dict(id='p', size=10, residenceId='r', jobId='r')])
         (output / 'demand_data.json').write_text(json.dumps(demand))
         (output / 'config.json').write_text('{}')
+        if kwargs.get('skip_packaging'):
+            return str(output / 'config.json')
         if not (output / 'TST.pmtiles').exists():
             return str(output / 'demand_data.json')
         package = output / 'TST.zip'
@@ -259,6 +261,35 @@ class WizardDeliveryTests(unittest.TestCase):
         self.assertEqual(result['status'], 'demand_only')
         with self.assertRaises(ValueError):
             resolve_download(self.config, self.out)
+
+    def test_modular_skip_demand_reuses_prior_demand(self):
+        self.assets()
+        (self.out / 'demand_data.json').write_text(json.dumps({'pops': [{'id': '1'}]}))
+        with patch('sb_mexico.pipeline.execute_pipeline', side_effect=self.fake_pipeline):
+            result = execute_wizard_build(self.config, self.out, self.data, skip_map=True, skip_demand=True)
+        self.assertEqual(result['status'], 'success')
+        self.assertTrue(result.get('reused_demand'))
+
+    def test_modular_skip_packaging(self):
+        self.assets()
+        (self.out / 'demand_data.json').write_text(json.dumps({'pops': [{'id': '1'}]}))
+        with patch('sb_mexico.pipeline.execute_pipeline', side_effect=self.fake_pipeline):
+            result = execute_wizard_build(self.config, self.out, self.data, skip_map=True, skip_demand=True, skip_packaging=True)
+        self.assertEqual(result['status'], 'unpackaged')
+        self.assertTrue(result.get('reused_demand'))
+
+    def test_min_zoom_calculation(self):
+        from sb_mexico.pipeline import compute_effective_min_zoom
+        small_bbox = [-86.85, 21.10, -86.75, 21.20]
+        self.assertEqual(compute_effective_min_zoom({}, small_bbox), 11.0)
+
+        med_bbox = [-86.9, 21.0, -86.6, 21.3]
+        self.assertEqual(compute_effective_min_zoom({}, med_bbox), 9.5)
+
+        mega_bbox = [-88.0, 20.0, -86.0, 22.0]
+        self.assertEqual(compute_effective_min_zoom({}, mega_bbox), 8.5)
+
+        self.assertEqual(compute_effective_min_zoom({'min_zoom': 9.2}, mega_bbox), 9.2)
 
 
 if __name__ == '__main__':

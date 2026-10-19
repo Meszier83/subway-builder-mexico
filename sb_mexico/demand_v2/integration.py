@@ -37,7 +37,7 @@ def osrm_provider(routing):
     return provider
 
 
-def execute_candidate(config, root, project_dir, output_dir, include_driving_path=False):
+def execute_candidate(config, root, project_dir, output_dir, include_driving_path=False, skip_packaging=False):
     from .request import prepare_request
     from .engine import build_demand, write_result
     from sb_mexico.osrm import enrich_pops_with_osrm
@@ -75,6 +75,8 @@ def execute_candidate(config, root, project_dir, output_dir, include_driving_pat
             from sb_mexico.osrm import stop_osrm_daemon_wsl
             stop_osrm_daemon_wsl(config['city']['code'])
     demand_path = write_result(result, request, output_dir)
+    if skip_packaging:
+        return demand_path
     # The package contract is shared with the existing pipeline.
     from sb_mexico.pipeline import package_demand_outputs
     return package_demand_outputs(output_dir, config['city']['code'], demand_path,
