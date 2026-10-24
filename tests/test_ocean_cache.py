@@ -99,7 +99,10 @@ class TestOceanOptimization(unittest.TestCase):
             content = f.read()
 
         self.assertIn(".buildings_bbox.json", content)
-        self.assertIn("redownload_buildings=not buildings_cache_valid", content)
+        self.assertTrue(
+            "redownload_buildings=not buildings_cache_valid" in content
+            or '"redownload_buildings": not buildings_cache_valid' in content
+        )
         self.assertIn("Invalidando caché de edificios 3D", content)
 
     def test_cartography_has_buildings_cache_logic(self):
@@ -109,7 +112,10 @@ class TestOceanOptimization(unittest.TestCase):
             content = f.read()
 
         self.assertIn(".buildings_bbox.json", content)
-        self.assertIn("redownload_buildings=not buildings_cache_valid", content)
+        self.assertTrue(
+            "redownload_buildings=not buildings_cache_valid" in content
+            or '"redownload_buildings": not buildings_cache_valid' in content
+        )
 
 
 if __name__ == "__main__":

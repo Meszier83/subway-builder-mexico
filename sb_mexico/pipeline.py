@@ -79,25 +79,63 @@ def _dedup_glob(patterns: List[str]) -> List[str]:
     return result
 
 
-def compute_effective_min_zoom(city_info: Dict[str, Any], bbox_list: List[float]) -> float:
-    """Calcula o valida el minZoom para config.json."""
+def compute_effective_min_zoom(city_info: Dict[str, Any], bbox_list: List[float]) -> int:
+    """Calcula o valida el minZoom para config.json (estrictamente entero [9, 12] para Go/Railyard y MapLibre)."""
     raw = city_info.get("min_zoom")
     if raw is not None and str(raw).strip().lower() not in ("", "auto", "none"):
         try:
-            val = float(raw)
-            if 6.0 <= val <= 14.0:
-                return round(val, 2)
+            val = int(round(float(raw)))
+            if val < 9:
+                return 9
+            if val > 12:
+                return 12
+            return val
         except (ValueError, TypeError):
             pass
-    if bbox_list and len(bbox_list) >= 4:
+
+    import math
+
+    span_ref = None
+    # 1. Prioridad: Núcleo Urbano (Zonificación Concéntrica - Regla 13)
+    core = city_info.get("urban_core_polygon")
+    if core:
+        coords = []
+        if isinstance(core, dict):
+            if core.get("type") == "FeatureCollection":
+                for f in core.get("features", []):
+                    geom = f.get("geometry", {})
+                    if geom.get("type") == "Polygon":
+                        coords.extend(geom.get("coordinates", [[]])[0])
+            elif core.get("type") == "Feature":
+                geom = core.get("geometry", {})
+                if geom.get("type") == "Polygon":
+                    coords.extend(geom.get("coordinates", [[]])[0])
+            elif core.get("type") == "Polygon":
+                coords.extend(core.get("coordinates", [[]])[0])
+        elif isinstance(core, (list, tuple)):
+            for pt in core:
+                if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                    coords.append(pt)
+        if len(coords) >= 3:
+            lons = [float(pt[0]) for pt in coords]
+            lats = [float(pt[1]) for pt in coords]
+            c_span = max(max(lons) - min(lons), max(lats) - min(lats))
+            if c_span >= 0.05:
+                span_ref = c_span
+
+    # 2. Si no hay núcleo urbano válido, usar el BBOX metropolitano
+    if span_ref is None and bbox_list and len(bbox_list) >= 4:
         d_lon = abs(float(bbox_list[2]) - float(bbox_list[0]))
         d_lat = abs(float(bbox_list[3]) - float(bbox_list[1]))
-        span = max(d_lon, d_lat, 0.05)
-        import math
-        suggested = math.log2(360.0 / (span * 1.8))
-        clamped = max(8.5, min(11.5, suggested))
-        return round(clamped * 2.0) / 2.0
-    return 9.5
+        span_ref = max(d_lon, d_lat, 0.05)
+
+    if span_ref is not None:
+        # Fórmula calibrada MapLibre/WebGL (1920px ancho, 512px tesela, margen de resguardo)
+        suggested = math.log2(900.0 / span_ref)
+        clamped = max(9.0, min(12.0, suggested))
+        return int(round(clamped))
+
+    return 10
 
 
 def load_city_config(config_path: str) -> Dict[str, Any]:

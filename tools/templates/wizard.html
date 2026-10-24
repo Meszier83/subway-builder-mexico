@@ -367,10 +367,13 @@
                 <span>Sugerir</span>
               </button>
             </div>
-            <input type="number" step="0.25" min="6" max="14" id="cfg_min_zoom" placeholder="Auto (~9.5)" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-medium text-xs focus:border-metro-orange focus:outline-none">
-            <p class="text-[10px] text-stone-500 mt-1 leading-tight">
-              Controla el límite de alejamiento en Subway Builder. Estándar oficial: ~9.5 (el juego por defecto usa 8.0, permitiendo alejarse en exceso).
+            <input type="number" step="1" min="9" max="12" id="cfg_min_zoom" oninput="validateMinZoomInput(this.value)" placeholder="Auto (~10)" class="w-full bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-medium text-xs focus:border-metro-orange focus:outline-none">
+            <p id="cfg_min_zoom_hint" class="text-[10px] text-stone-500 mt-1 leading-tight">
+              Límite de alejamiento canónico (entero 9–12 para Railyard/MapLibre). Estándar oficial: ~10 (calculado sobre el núcleo urbano para preservar toponimia y usos de suelo).
             </p>
+            <div id="cfg_min_zoom_warning" class="hidden mt-1 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-1.5 font-medium leading-tight">
+              ⚠️ Valores menores a 9 apagan las etiquetas de ciudades y usos de suelo en MapLibre al alejar la cámara.
+            </div>
           </div>
 
           <!-- Preview de Zoom y Encuadre de Cámara (16:9 / Día 1) -->

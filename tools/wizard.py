@@ -597,7 +597,7 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         lines.append(f'  lod_peripheral_buildings: {_yaml_quote(city_cfg.get("lod_peripheral_buildings", "none"))}')
     if city_cfg.get("min_zoom") is not None and str(city_cfg.get("min_zoom")).strip() != "":
         try:
-            lines.append(f'  min_zoom: {float(city_cfg["min_zoom"])}')
+            lines.append(f'  min_zoom: {int(round(float(city_cfg["min_zoom"])))}')
         except (ValueError, TypeError):
             pass
     if city_cfg.get("country"):
@@ -1119,33 +1119,101 @@ def inspect_build_cache_status(city_file: str) -> Dict[str, Any]:
     city_base = os.path.splitext(os.path.basename(resolved))[0].lower()
     city_out_dir = os.path.join(DIST_DIR, city_base)
 
-    has_pmtiles = os.path.isfile(os.path.join(city_out_dir, f"{code}.pmtiles"))
-    has_roads = os.path.isfile(os.path.join(city_out_dir, "roads.geojson"))
-    has_demand = os.path.isfile(os.path.join(city_out_dir, "demand_data.json"))
-    has_zip = os.path.isfile(os.path.join(city_out_dir, f"{code}.zip"))
+    candidate_dirs = []
+
+    # 1. Directorio de salida registrado en el manifiesto wizard-build.json
+    manifest_path = os.path.join(city_out_dir, "wizard-build.json")
+    if os.path.isfile(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                wb = json.load(f)
+                pout = wb.get("output_dir")
+                if pout and os.path.isdir(pout) and pout not in candidate_dirs:
+                    candidate_dirs.append(pout)
+        except Exception:
+            pass
+
+    # 2. Subdirectorios ordenados por mtime en wizard-builds/
+    wb_dir = os.path.join(city_out_dir, "wizard-builds")
+    if os.path.isdir(wb_dir):
+        try:
+            subdirs = [
+                os.path.join(wb_dir, d) for d in os.listdir(wb_dir)
+                if os.path.isdir(os.path.join(wb_dir, d))
+            ]
+            if subdirs:
+                subdirs.sort(key=lambda d: os.path.getmtime(d), reverse=True)
+                for d in subdirs:
+                    if d not in candidate_dirs:
+                        candidate_dirs.append(d)
+        except Exception:
+            pass
+
+    # 3. Directorio plano del proyecto
+    if city_out_dir not in candidate_dirs:
+        candidate_dirs.append(city_out_dir)
+
+    # 4. Fallback por código de ciudad (ej. dist/cur o dist/cun)
+    if code:
+        code_out_dir = os.path.join(DIST_DIR, code.lower())
+        if os.path.isdir(code_out_dir):
+            if code_out_dir not in candidate_dirs:
+                candidate_dirs.append(code_out_dir)
+            code_manifest = os.path.join(code_out_dir, "wizard-build.json")
+            if os.path.isfile(code_manifest):
+                try:
+                    with open(code_manifest, "r", encoding="utf-8") as f:
+                        wb = json.load(f)
+                        pout = wb.get("output_dir")
+                        if pout and os.path.isdir(pout) and pout not in candidate_dirs:
+                            candidate_dirs.append(pout)
+                except Exception:
+                    pass
+
+    has_pmtiles = False
+    has_roads = False
+    has_demand = False
+    has_zip = False
+    map_file = ""
+    demand_cohorts = 0
+
+    for cdir in candidate_dirs:
+        p_pmtiles = os.path.join(cdir, f"{code}.pmtiles")
+        p_roads = os.path.join(cdir, "roads.geojson")
+        if not has_pmtiles and os.path.isfile(p_pmtiles):
+            has_pmtiles = True
+            map_file = f"{code}.pmtiles"
+        if not has_roads and os.path.isfile(p_roads):
+            has_roads = True
+        if not has_demand:
+            p_demand = os.path.join(cdir, "demand_data.json")
+            if os.path.isfile(p_demand):
+                has_demand = True
+                try:
+                    with open(p_demand, "r", encoding="utf-8") as f:
+                        djson = json.load(f)
+                        demand_cohorts = len(djson.get("pops", []))
+                except Exception:
+                    pass
+        if not has_zip:
+            p_zip = os.path.join(cdir, f"{code}.zip")
+            if os.path.isfile(p_zip):
+                has_zip = True
 
     native_build_dir = os.path.expanduser(f"~/build_{code.lower()}")
     nolabels_candidates = [
         os.path.join(native_build_dir, code, f"{code}-nolabels.pmtiles"),
         os.path.join(native_build_dir, f"{code}-nolabels.pmtiles"),
-        os.path.join(city_out_dir, f"{code}-nolabels.pmtiles"),
     ]
+    for cdir in candidate_dirs:
+        nolabels_candidates.append(os.path.join(cdir, f"{code}-nolabels.pmtiles"))
     has_nolabels = any(os.path.isfile(p) for p in nolabels_candidates)
-
-    demand_cohorts = 0
-    if has_demand:
-        try:
-            with open(os.path.join(city_out_dir, "demand_data.json"), "r", encoding="utf-8") as f:
-                djson = json.load(f)
-                demand_cohorts = len(djson.get("pops", []))
-        except Exception:
-            pass
 
     return {
         "city_code": code,
         "has_cartography": bool(has_pmtiles and has_roads),
         "map_available": bool(has_pmtiles and has_roads),
-        "map_file": f"{code}.pmtiles" if has_pmtiles else "",
+        "map_file": map_file,
         "has_nolabels_base": bool(has_nolabels),
         "nolabels_available": bool(has_nolabels),
         "has_demand": bool(has_demand),

@@ -281,15 +281,34 @@ class WizardDeliveryTests(unittest.TestCase):
     def test_min_zoom_calculation(self):
         from sb_mexico.pipeline import compute_effective_min_zoom
         small_bbox = [-86.85, 21.10, -86.75, 21.20]
-        self.assertEqual(compute_effective_min_zoom({}, small_bbox), 11.0)
+        res_small = compute_effective_min_zoom({}, small_bbox)
+        self.assertEqual(res_small, 12)
+        self.assertIsInstance(res_small, int)
 
         med_bbox = [-86.9, 21.0, -86.6, 21.3]
-        self.assertEqual(compute_effective_min_zoom({}, med_bbox), 9.5)
+        res_med = compute_effective_min_zoom({}, med_bbox)
+        self.assertEqual(res_med, 12)
+        self.assertIsInstance(res_med, int)
 
         mega_bbox = [-88.0, 20.0, -86.0, 22.0]
-        self.assertEqual(compute_effective_min_zoom({}, mega_bbox), 8.5)
+        res_mega = compute_effective_min_zoom({}, mega_bbox)
+        self.assertEqual(res_mega, 9)
+        self.assertIsInstance(res_mega, int)
 
-        self.assertEqual(compute_effective_min_zoom({'min_zoom': 9.2}, mega_bbox), 9.2)
+        # Urban Core Polygon takes precedence over mega BBOX
+        core_polygon = [[-89.87, 21.26], [-89.23, 21.11], [-89.62, 20.67]]
+        res_core = compute_effective_min_zoom({'urban_core_polygon': core_polygon}, mega_bbox)
+        self.assertEqual(res_core, 10)
+        self.assertIsInstance(res_core, int)
+
+        res_override = compute_effective_min_zoom({'min_zoom': 10}, mega_bbox)
+        self.assertEqual(res_override, 10)
+        self.assertIsInstance(res_override, int)
+
+        # Values < 9 are clamped to 9 floor
+        res_floor = compute_effective_min_zoom({'min_zoom': 7}, mega_bbox)
+        self.assertEqual(res_floor, 9)
+        self.assertIsInstance(res_floor, int)
 
 
 if __name__ == '__main__':

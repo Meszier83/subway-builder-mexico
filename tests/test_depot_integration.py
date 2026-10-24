@@ -296,6 +296,8 @@ class TestDepotIntegration(unittest.TestCase):
         self.assertEqual(cfg["bbox"], [-87.05, 21.0, -86.72, 21.31])
         self.assertEqual(cfg["country"], "MX")
         self.assertEqual(cfg["version"], "7.2.0")
+        self.assertIn("minZoom", cfg)
+        self.assertIsInstance(cfg["minZoom"], int)
 
 
 if __name__ == "__main__":

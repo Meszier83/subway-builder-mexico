@@ -117,8 +117,22 @@ def execute_wizard_build(config_path, output_dir, data_dir, skip_map=False, labe
     write_manifest(root, result)
     try:
         prev_out = Path(previous['output_dir']) if previous and previous.get('output_dir') else None
+        if not prev_out or not prev_out.is_dir():
+            wb_dir = root / 'wizard-builds'
+            if wb_dir.is_dir():
+                subdirs = [d for d in wb_dir.iterdir() if d.is_dir() and d != stage]
+                if subdirs:
+                    prev_out = max(subdirs, key=lambda d: d.stat().st_mtime)
+
         if skip_demand:
             demand_root = prev_out if prev_out and (prev_out / 'demand_data.json').is_file() else root
+            if not (demand_root / 'demand_data.json').is_file():
+                wb_dir = root / 'wizard-builds'
+                if wb_dir.is_dir():
+                    candidates = [d for d in wb_dir.iterdir() if d.is_dir() and d != stage and (d / 'demand_data.json').is_file()]
+                    if candidates:
+                        demand_root = max(candidates, key=lambda d: d.stat().st_mtime)
+
             demand_files = [
                 'demand_data.json',
                 'demand_manifest.json',
@@ -149,9 +163,17 @@ def execute_wizard_build(config_path, output_dir, data_dir, skip_map=False, labe
             # Reuse only this project's cartography. Record provenance separately
             # from demand/package identity; asset presence alone does not prove age.
             asset_root = prev_out if prev_out and (prev_out / f'{code}.pmtiles').is_file() else root
+            if not (asset_root / f'{code}.pmtiles').is_file():
+                wb_dir = root / 'wizard-builds'
+                if wb_dir.is_dir():
+                    candidates = [d for d in wb_dir.iterdir() if d.is_dir() and d != stage and (d / f'{code}.pmtiles').is_file()]
+                    if candidates:
+                        asset_root = max(candidates, key=lambda d: d.stat().st_mtime)
+
             if previous and (previous.get('cartography_config') != result['cartography_config']
                              or previous.get('config_path') != str(config_path)):
                 asset_root = stage  # Changed BBOX/map settings require fresh cartography.
+
             assets = ['toponymy-layout.json', f'{code}.pmtiles', 'roads.geojson', 'buildings_index.bin.gz',
                       'runways_taxiways.geojson', 'ocean_depth_index.json.gz']
             result['reused_cartography'] = {}

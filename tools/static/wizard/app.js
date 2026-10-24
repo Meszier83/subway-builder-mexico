@@ -1464,19 +1464,74 @@
         showToast("No se pudo calcular el zoom mínimo: BBOX no definido", "warning");
         return;
       }
-      const dLon = Math.abs(b2 - b0);
-      const dLat = Math.abs(b3 - b1);
-      const span = Math.max(dLon, dLat, 0.05);
-      const rawZoom = Math.log2(360.0 / (span * 1.8));
-      const clamped = Math.max(8.5, Math.min(11.5, rawZoom));
-      const suggested = Math.round(clamped * 2.0) / 2.0;
+
+      let spanRef = null;
+      let refSource = "BBOX";
+
+      // 1. Prioridad: Núcleo Urbano (Zonificación Concéntrica - Regla 13)
+      const core = cityData?.city?.urban_core_polygon;
+      if (core) {
+        let coords = [];
+        if (Array.isArray(core)) {
+          coords = core.filter(pt => Array.isArray(pt) && pt.length >= 2);
+        } else if (typeof core === 'object') {
+          if (core.type === 'FeatureCollection' && Array.isArray(core.features)) {
+            core.features.forEach(f => {
+              if (f?.geometry?.type === 'Polygon' && Array.isArray(f.geometry.coordinates?.[0])) {
+                coords.push(...f.geometry.coordinates[0]);
+              }
+            });
+          } else if (core.type === 'Feature' && core.geometry?.type === 'Polygon') {
+            coords = core.geometry.coordinates?.[0] || [];
+          } else if (core.type === 'Polygon' && Array.isArray(core.coordinates?.[0])) {
+            coords = core.coordinates[0];
+          }
+        }
+        if (coords.length >= 3) {
+          const lons = coords.map(pt => parseFloat(pt[0])).filter(v => !isNaN(v));
+          const lats = coords.map(pt => parseFloat(pt[1])).filter(v => !isNaN(v));
+          if (lons.length >= 3 && lats.length >= 3) {
+            const cSpan = Math.max(Math.max(...lons) - Math.min(...lons), Math.max(...lats) - Math.min(...lats));
+            if (cSpan >= 0.05) {
+              spanRef = cSpan;
+              refSource = "núcleo urbano";
+            }
+          }
+        }
+      }
+
+      if (!spanRef) {
+        const dLon = Math.abs(b2 - b0);
+        const dLat = Math.abs(b3 - b1);
+        spanRef = Math.max(dLon, dLat, 0.05);
+      }
+
+      const rawZoom = Math.log2(900.0 / spanRef);
+      const clamped = Math.max(9.0, Math.min(12.0, Math.round(rawZoom)));
+      const suggested = Math.round(clamped);
 
       const minZoomInput = document.getElementById('cfg_min_zoom');
       if (minZoomInput) {
-        minZoomInput.value = suggested.toFixed(1);
+        minZoomInput.value = suggested.toString();
         if (cityData && cityData.city) cityData.city.min_zoom = suggested;
+        validateMinZoomInput(suggested);
         triggerAutoSave();
-        showToast(`Zoom mínimo sugerido: ${suggested} (span BBOX: ${span.toFixed(2)}°)`, "success");
+        showToast(`Zoom mínimo sugerido: ${suggested} (basado en ${refSource}: ${spanRef.toFixed(2)}°)`, "success");
+      }
+    }
+
+    function validateMinZoomInput(val) {
+      const warnEl = document.getElementById('cfg_min_zoom_warning');
+      if (!warnEl) return;
+      if (val === undefined || val === null || val === '') {
+        warnEl.classList.add('hidden');
+        return;
+      }
+      const num = parseInt(val, 10);
+      if (!isNaN(num) && num < 9) {
+        warnEl.classList.remove('hidden');
+      } else {
+        warnEl.classList.add('hidden');
       }
     }
 
@@ -4944,7 +4999,7 @@
 
       const minZoomEl = document.getElementById('cfg_min_zoom');
       if (minZoomEl && minZoomEl.value.trim() !== '') {
-        const parsedMin = parseFloat(minZoomEl.value);
+        const parsedMin = parseInt(minZoomEl.value, 10);
         if (!isNaN(parsedMin)) {
           cityData.city.min_zoom = parsedMin;
         } else {
@@ -5201,7 +5256,10 @@
       const izEl = document.getElementById('cfg_initial_zoom');
       if (izEl) izEl.value = c.initial_zoom || 11.5;
       const minzEl = document.getElementById('cfg_min_zoom');
-      if (minzEl) minzEl.value = (c.min_zoom !== undefined && c.min_zoom !== null) ? c.min_zoom : '';
+      if (minzEl) {
+        minzEl.value = (c.min_zoom !== undefined && c.min_zoom !== null) ? c.min_zoom : '';
+        validateMinZoomInput(minzEl.value);
+      }
       const lonEl = document.getElementById('cfg_initial_lon');
       const latEl = document.getElementById('cfg_initial_lat');
       if (lonEl && latEl) {

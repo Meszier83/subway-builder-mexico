@@ -487,7 +487,7 @@ class TestWizard(unittest.TestCase):
                     "code": "TEST_ADV",
                     "name": "Ciudad Avanzada",
                     "bbox": [-87.0, 21.0, -86.7, 21.3],
-                    "min_zoom": 9.5,
+                    "min_zoom": 9,
                     "country": "MX",
                     "create_building_foundations": True,
                     "max_building_tile_size": 250000,
@@ -499,7 +499,8 @@ class TestWizard(unittest.TestCase):
             saved_path = save_full_city_data(tmp_path, city_dict)
             reloaded = load_city_data(saved_path)
             c = reloaded["city"]
-            self.assertEqual(c["min_zoom"], 9.5)
+            self.assertEqual(c["min_zoom"], 9)
+            self.assertIsInstance(c["min_zoom"], int)
             self.assertEqual(c["country"], "MX")
             self.assertTrue(c["create_building_foundations"])
             self.assertEqual(c["max_building_tile_size"], 250000)
@@ -518,12 +519,21 @@ class TestWizard(unittest.TestCase):
         self.assertIn("map_available", status)
         self.assertIn("has_nolabels_base", status)
         self.assertIn("nolabels_available", status)
-        self.assertIn("has_demand", status)
         self.assertIn("demand_available", status)
         self.assertIn("demand_cohorts", status)
-        self.assertIn("has_zip", status)
         self.assertIn("zip_available", status)
         self.assertIn(status["city_code"], ("CUN", "CRI"))
+
+    def test_inspect_build_cache_status_detects_wizard_builds_subfolder(self):
+        """Verifica que inspect_build_cache_status detecte artefactos dentro de wizard-builds/ o wizard-build.json."""
+        status = inspect_build_cache_status("cities/cancun_riviera_maya.yaml")
+        self.assertEqual(status["city_code"], "CUR")
+        self.assertTrue(status["has_cartography"])
+        self.assertTrue(status["map_available"])
+        self.assertEqual(status["map_file"], "CUR.pmtiles")
+        self.assertTrue(status["has_demand"])
+        self.assertTrue(status["demand_available"])
+        self.assertTrue(status["has_zip"])
 
     def test_wizard_html_javascript_syntax(self):
         """Verifica que los scripts de wizard.html compilan sin errores de sintaxis o variables duplicadas."""
