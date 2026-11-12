@@ -28,7 +28,14 @@ def assign(flow, rows, cols, origins, destinations, sizes_by_origin, seed, selec
     distribution={i:[] for i in range(len(origins))}
     for (i,key),edges in local.items():
         distribution[i].append((key,edges,float(flow[edges].sum())))
-    integer_flow=np.zeros(len(flow),dtype=np.int64)
+    return _assign_distribution(distribution, origins, sizes_by_origin, seed,
+                                flow if select_jobs else None)
+
+
+def _assign_distribution(distribution, origins, sizes_by_origin, seed, flow=None):
+    """Round municipal totals from row summaries, optionally selecting jobs."""
+    select_jobs = flow is not None
+    integer_flow = np.zeros(len(flow), dtype=np.int64) if select_jobs else None
     chunks={}
     diagnostics=[]
     parts=[]
@@ -78,7 +85,7 @@ def assign(flow, rows, cols, origins, destinations, sizes_by_origin, seed, selec
         for (i,key),count in assigned.items():
             if not count: continue
             realized[key]+=count
-            edges=local[i,key]
+            edges = next(edges for group, edges, _ in distribution[i] if group == key)
             if not select_jobs:
                 parts.append((i,key,edges,int(count)))
                 continue

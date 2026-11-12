@@ -49,7 +49,8 @@ def build_demand(request, stage='export'):
     point_report['point_mapping'] = {old:consolidation[new] for old,new in point_report['point_mapping'].items()}
     result['points'] = points
     result['report']['territory'] = point_report
-    result['report']['mobility'] = evidence['mobility']
+    mobility = result['report']['mobility'] = evidence['mobility']
+    del evidence
     result['retained'] = retained
     if stage == 'points':
         return result
@@ -77,8 +78,8 @@ def build_demand(request, stage='export'):
         return result
     if cohort_options['fixed_size']:
         # Pooling cannot hide an unsupported original residence.
-        from .allocation import support
-        support(result['statistical_points'],parameters)
+        from .allocation import validate_origin_support
+        validate_origin_support(result['statistical_points'],parameters)
     parameters['cohort_settings'] = cohort_options
     if request.progress:
         parameters['_beta_progress'] = request.progress
@@ -86,7 +87,7 @@ def build_demand(request, stage='export'):
         from .request import beta_identity
         parameters['_beta_cache_path'] = str(request.beta_cache)
         parameters['_beta_cache_identity'] = beta_identity(request, files)
-    cells, allocation = allocate(points, parameters, evidence['mobility'])
+    cells, allocation = allocate(points, parameters, mobility)
     result['cells'] = cells
     result['report']['allocation'] = allocation
     if stage == 'allocation':
@@ -111,7 +112,7 @@ def build_demand(request, stage='export'):
                 raise ValueError('OSRM support refinement did not close; no export produced') from error
             forbidden.update(error.pairs)
             parameters['_forbidden_pairs']=forbidden
-            cells,allocation=allocate(points,parameters,evidence['mobility'])
+            cells,allocation=allocate(points,parameters,mobility)
             result['cells']=cells; result['report']['allocation']=allocation
             pops=[]
             for cell in cells:

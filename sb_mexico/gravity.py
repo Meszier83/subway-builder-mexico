@@ -216,6 +216,8 @@ def build_demand_grid(
     resuelve la absorción de POIs Especiales, modula Zonas de Alta Afluencia
     y realiza el snapping a la red vial.
     """
+    from sb_mexico.special_demand import require_resolved_poi_demand
+    require_resolved_poi_demand(special_pois)
     rng = np.random.default_rng(seed)
     core_poly_prep = prepare_polygon_geom(urban_core_polygon) if (urban_core_polygon and restrict_demand_to_urban_core) else None
     denue_outside_core = 0

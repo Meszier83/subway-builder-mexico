@@ -95,7 +95,7 @@ def _code_stamp():
     code = [(p.name, file_sha256(p)) for p in sorted(Path(__file__).parent.glob('*.py'))]
     for name in ('gravity.py', 'residential.py', 'residential_employment.py', 'workplace_employment.py',
                  'historical_transfer.py', 'automatic_workplace.py', 'fine_workplace.py', 'ce_controls.py',
-                 'demographic_reference.py', 'historical_benchmark.py', 'source_identity.py', 'osrm.py'):
+                 'demographic_reference.py', 'historical_benchmark.py', 'source_identity.py', 'osrm.py', 'inegi.py', 'denue_encoding.py'):
         p = Path(__file__).parents[1]/name
         code.append((name, file_sha256(p)))
     return code

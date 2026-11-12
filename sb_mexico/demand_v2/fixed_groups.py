@@ -143,7 +143,8 @@ def resolve(points, size, exact=False):
     if exact:
         report['rounded_up_commuters'] = total_rounded_up
     from collections import Counter
-    contributions = Counter({p['id']:p['commuters'] for p in final if p['id'] in {o['id'] for o in points}})
+    original_ids = {p['id'] for p in points}
+    contributions = Counter({p['id']:p['commuters'] for p in final if p['id'] in original_ids})
     for group in report['groups']:
         for source in group['contributions']: contributions[source['id']] += source['commuters']
     if contributions != Counter({p['id']:p['commuters'] for p in points}):

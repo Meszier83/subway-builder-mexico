@@ -127,6 +127,128 @@ class DownloadTests(unittest.TestCase):
         archive(self.zip,{'conjunto_de_datos/denue_inegi_23_.csv':'latitud,longitud\n1,2\n'})
         with self.assertRaisesRegex(ValueError,'columnas'):d.extract(self.zip,self.folder,'denue','23')
 
+    def mexico_denue(self):
+        urls = [d.INEGI + '/contenidos/masiva/denue/denue_15_1_csv.zip',
+                d.INEGI + '/contenidos/masiva/denue/denue_15_2_csv.zip']
+        files = {}
+        for part, url in enumerate(urls, 1):
+            path = self.root / f'denue-part-{part}.zip'
+            archive(path, {f'conjunto_de_datos/denue_inegi_15_{part}.csv':
+                           'latitud,longitud,codigo_act,per_ocu,cve_ent,cve_mun\n'
+                           f'19.28,-99.65,721111,{part},15,106\n',
+                           'diccionario_de_datos/diccionario.csv': 'ignored'})
+            files[url] = path
+        geo = dict(states=[dict(code='15', name='México')],
+                   municipalities=[dict(code='15106', state='15', name='Toluca')])
+        return FixtureClient(files=files), geo
+
+    def test_denue_downloads_both_mexico_parts_and_other_states(self):
+        client, geo = self.mexico_denue()
+        url = d.INEGI + '/contenidos/masiva/denue/denue_09_csv.zip'
+        archive(self.zip, {'conjunto_de_datos/denue_inegi_09_.csv':
+                          'latitud,longitud,codigo_act,per_ocu,cve_ent,cve_mun\n'
+                          '19.4,-99.1,721111,1,09,001\n'})
+        client.files[url] = self.zip
+        geo['states'].insert(0, dict(code='09', name='Ciudad de México'))
+        outputs = d.acquire_source(client, geo, self.folder, 'denue')
+        expected_urls = [url] + list(client.files)[:2]
+        self.assertEqual([url for url, _ in client.calls], expected_urls)
+        self.assertEqual({Path(p).name for p in outputs},
+                         {'denue_inegi_09_.csv', 'denue_inegi_15_1.csv', 'denue_inegi_15_2.csv'})
+        from sb_mexico.demand_sources import select_sources
+        self.assertEqual(set(select_sources(self.folder, self.root/'national', 'denue')), set(outputs))
+        for name, entry in d.read_manifest(self.folder)['files'].items():
+            self.assertEqual(entry['kind'], 'denue')
+            self.assertEqual(entry['sha256'], d.sha256(self.folder/name))
+            self.assertEqual([r['url'] for r in entry['sources']], expected_urls)
+
+    def test_denue_single_archive_state_keeps_existing_url(self):
+        url = d.INEGI + '/contenidos/masiva/denue/denue_23_csv.zip'
+        archive(self.zip, {'conjunto_de_datos/denue_inegi_23_.csv':
+                          'latitud,longitud,codigo_act,per_ocu,cve_ent,cve_mun\n'
+                          '21,-86,721111,1,23,005\n'})
+        client = FixtureClient(files={url: self.zip})
+        outputs = d.acquire_source(client, self.geo(), self.folder, 'denue')
+        self.assertEqual([url for url, _ in client.calls], [url])
+        self.assertEqual([Path(p).name for p in outputs], ['denue_inegi_23_.csv'])
+
+    def test_denue_invalid_second_part_preserves_existing_inputs(self):
+        old = self.root/'old';old.mkdir();(old/'denue_old.csv').write_text('managed')
+        d.publish(old, self.folder, 'denue', [])
+        (self.folder/'manual.txt').write_text('preserve')
+        before = {p.name: p.read_bytes() for p in self.folder.iterdir()}
+        for failure in ('corrupt', 'columns', 'wrong_state', 'duplicate', 'duplicate_case'):
+            with self.subTest(failure=failure):
+                client, geo = self.mexico_denue()
+                second = list(client.files.values())[1]
+                if failure == 'corrupt':
+                    second.write_bytes(b'not a zip')
+                elif failure == 'columns':
+                    archive(second, {'denue_inegi_15_2.csv': 'latitud,longitud\n19,-99\n'})
+                elif failure == 'wrong_state':
+                    archive(second, {'denue_inegi_23_.csv': 'wrong state'})
+                else:
+                    with zipfile.ZipFile(list(client.files.values())[0]) as first:
+                        name = 'denue_inegi_15_1.csv'
+                        contents = first.read('conjunto_de_datos/' + name)
+                    archive(second, {name.upper() if failure == 'duplicate_case' else name: contents})
+                with self.assertRaises((ValueError, zipfile.BadZipFile)):
+                    d.acquire_source(client, geo, self.folder, 'denue')
+                self.assertEqual({p.name: p.read_bytes() for p in self.folder.iterdir()}, before)
+
+    def test_denue_failed_second_part_reuses_verified_cache_on_retry(self):
+        class Response(io.BytesIO):
+            def __init__(self, data, url):
+                super().__init__(data)
+                self.url, self.headers = url, {'Content-Length': str(len(data))}
+        for failure in ('html', 'unavailable'):
+            with self.subTest(failure=failure):
+                fixture, geo = self.mexico_denue()
+                urls = list(fixture.files)
+                folder = self.root/failure;folder.mkdir()
+                (folder/'manual.txt').write_text('preserve')
+                client = d.Client(self.root/('cache-' + failure))
+                failing = True
+                def respond(request, timeout):
+                    if request.full_url == urls[1] and failing:
+                        if failure == 'html':
+                            return Response(b'<!DOCTYPE html><html>not found</html>', request.full_url)
+                        raise d.urllib.error.URLError('second part unavailable')
+                    return Response(fixture.files[request.full_url].read_bytes(), request.full_url)
+                with patch.object(client.opener, 'open', side_effect=respond) as opened, patch.object(d.time, 'sleep'):
+                    with self.assertRaisesRegex((ValueError, d.urllib.error.URLError), 'HTML|unavailable'):
+                        d.acquire_source(client, geo, folder, 'denue')
+                    self.assertEqual([p.name for p in folder.iterdir()], ['manual.txt'])
+                    self.assertEqual(len(list(client.cache.glob('*.bin'))), 1)
+                    failing = False
+                    outputs = d.acquire_source(client, geo, folder, 'denue')
+                    self.assertEqual(len(outputs), 2)
+                    requests = [call.args[0].full_url for call in opened.call_args_list]
+                    self.assertEqual(requests.count(urls[0]), 1)
+                    self.assertEqual(requests.count(urls[1]), 2 if failure == 'html' else 4)
+                    for entry in d.read_manifest(folder)['files'].values():
+                        self.assertEqual([r['url'] for r in entry['sources']], urls)
+                        self.assertEqual([r['sha256'] for r in entry['sources']],
+                                         [d.sha256(fixture.files[url]) for url in urls])
+                    requests_before = opened.call_count
+                    d.acquire_source(client, geo, folder, 'denue')
+                    self.assertEqual(opened.call_count, requests_before)
+
+    def test_denue_parts_preserve_manual_and_modified_files(self):
+        for managed in (False, True):
+            with self.subTest(managed=managed):
+                client, geo = self.mexico_denue()
+                folder = self.root/('modified' if managed else 'manual');folder.mkdir()
+                name = 'denue_inegi_15_1.csv'
+                if managed:
+                    stage = self.root/'existing';stage.mkdir();(stage/name).write_text('original')
+                    d.publish(stage, folder, 'denue', [])
+                (folder/name).write_text('manual edit')
+                before = {p.name: p.read_bytes() for p in folder.iterdir()}
+                with self.assertRaisesRegex(ValueError, 'manual|modificado'):
+                    d.acquire_source(client, geo, folder, 'denue')
+                self.assertEqual({p.name: p.read_bytes() for p in folder.iterdir()}, before)
+
     def test_enoe_chooses_only_reference_state_workbook(self):
         xls=b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1fixture'
         archive(self.zip,{'Ciudades/2026_trim_2_Entidad_Quintana Roo.xls':b'wrong',

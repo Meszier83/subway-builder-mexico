@@ -158,6 +158,9 @@ def load_city_config(config_path: str) -> Dict[str, Any]:
     with open(resolved, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
+    from sb_mexico.special_demand import require_resolved_poi_demand
+    require_resolved_poi_demand(config.get("pois"))
+
     # Validaciones mínimas requeridas
     required_keys = ["city", "macroeconomics"]
     for k in required_keys:

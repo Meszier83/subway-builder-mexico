@@ -12,12 +12,17 @@ def targets_for_support(origins,destinations,rows,cols):
     nr,nd=len(origins),len(destinations)
     graph=coo_matrix((np.ones(len(rows)),(rows,nr+cols)),shape=(nr+nd,nr+nd)).tocsr()
     _,labels=connected_components(graph,directed=False)
+    return targets_for_components(origins, destinations, labels[:nr], labels[nr:])
+
+
+def targets_for_components(origins, destinations, source_labels, job_labels):
+    nd = len(destinations)
     targets=np.zeros(nd)
-    reachable=np.bincount(cols,minlength=nd)>0
+    reachable = np.isin(job_labels, source_labels)
     groups=[]
-    for component in sorted(set(labels[:nr])):
-        source=np.flatnonzero(labels[:nr]==component)
-        jobs=np.flatnonzero((labels[nr:]==component)&reachable)
+    for component in sorted(set(source_labels)):
+        source=np.flatnonzero(source_labels==component)
+        jobs=np.flatnonzero(job_labels==component)
         mass=sum(origins[i]['commuters'] for i in source)
         if not len(jobs):raise ValueError('Origin component without workplace support')
         weights=np.asarray([destinations[j]['attraction'] for j in jobs],float)
@@ -32,26 +37,35 @@ def targets_for_support(origins,destinations,rows,cols):
 def check_feasibility(budgets,targets,rows,cols):
     """Independent compiled max-flow check at milliperson resolution."""
     nr,nd=len(budgets),len(targets);source=nr+nd;sink=source+1
-    scale=min(1000,max(1,int((np.iinfo(np.int32).max-1)//max(1,budgets.sum()))))
-    supplies=np.rint(budgets*scale).astype(np.int64)
-    desired=targets*scale;demands=np.floor(desired).astype(np.int64)
     graph=coo_matrix((np.ones(len(rows)),(rows,nr+cols)),shape=(nr+nd,nr+nd)).tocsr()
     _,labels=connected_components(graph,directed=False)
-    # Apportion numerical check units inside each disconnected territory.
-    # Global apportionment can move millipersons between an island and mainland.
-    for component in set(labels[:nr]):
-        jobs=np.flatnonzero(labels[nr:]==component)
-        remainder=int(supplies[labels[:nr]==component].sum()-demands[jobs].sum())
-        order=np.argsort(-(desired[jobs]-demands[jobs]),kind='stable')
-        demands[jobs[order[:remainder]]]+=1
+    supplies, demands, scale = quantized_margins(budgets, targets, labels[:nr], labels[nr:])
     rr=np.r_[np.full(nr,source),rows,nr+np.arange(nd)]
     cc=np.r_[np.arange(nr),nr+cols,np.full(nd,sink)]
     capacities=np.r_[supplies,supplies[rows],demands]
     matrix=coo_matrix((capacities,(rr,cc)),shape=(sink+1,sink+1)).tocsr()
     result=maximum_flow(matrix,source,sink,method='dinic')
-    if result.flow_value!=int(supplies.sum()):
+    require_feasible(supplies.sum()-result.flow_value, scale)
+
+
+def quantized_margins(budgets, targets, source_labels, job_labels):
+    scale=min(1000,max(1,int((np.iinfo(np.int32).max-1)//max(1,budgets.sum()))))
+    supplies=np.rint(budgets*scale).astype(np.int64)
+    desired=targets*scale;demands=np.floor(desired).astype(np.int64)
+    # Apportion numerical check units inside each disconnected territory.
+    # Global apportionment can move millipersons between an island and mainland.
+    for component in set(source_labels):
+        jobs=np.flatnonzero(job_labels==component)
+        remainder=int(supplies[source_labels==component].sum()-demands[jobs].sum())
+        order=np.argsort(-(desired[jobs]-demands[jobs]),kind='stable')
+        demands[jobs[order[:remainder]]]+=1
+    return supplies, demands, scale
+
+
+def require_feasible(deficit, scale):
+    if deficit:
         raise ValueError('Estimated workplace distribution infeasible on complete permitted support; '
-                         f'deficit={(supplies.sum()-result.flow_value)/scale:.3f} commuters. No export produced')
+                         f'deficit={deficit/scale:.3f} commuters. No export produced')
 
 
 def project_margins(flow,rows,cols,budgets,targets):

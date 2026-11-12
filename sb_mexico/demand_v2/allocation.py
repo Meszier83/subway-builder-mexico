@@ -62,6 +62,43 @@ def support(points, config):
     return result
 
 
+def validate_origin_support(points, config):
+    """Check original residences before pooling, using one origin at a time."""
+    destinations = [p for p in points if p['attraction'] > 0]
+    territories = {}
+    for destination in destinations:
+        zone = destination['zone']
+        component = destination.get('road_component')
+        territories.setdefault((zone, None), []).append(destination)
+        if component is not None:
+            territories.setdefault((zone, component), []).append(destination)
+    distance_limit = config.get('max_distance_km')
+    latitude = np.mean([p['location'][1] for p in points]) if points else 0.
+    scale = np.array([111.32*math.cos(math.radians(latitude)), 110.574])
+    forbidden = {}
+    for origin, destination in config.get('_forbidden_pairs', ()):
+        forbidden.setdefault(origin, set()).add(destination)
+    for origin in points:
+        if origin['commuters'] <= 0:
+            continue
+        if not destinations:
+            raise ValueError('No permitted destinations for retained commuters')
+        blocked = forbidden.get(origin['id'], ())
+        candidates = territories.get((origin['zone'], origin.get('road_component')), ())
+        for destination in candidates:
+            if (destination['id'] == origin['id'] or destination['id'] in blocked
+                    or tuple(destination['location']) == tuple(origin['location'])):
+                continue
+            if distance_limit is not None:
+                delta = (np.asarray(destination['location'])-origin['location'])*scale
+                if np.linalg.norm(delta) > distance_limit:
+                    continue
+            break
+        else:
+            raise ValueError(f"Origin without support: {origin['id']}; commuters={origin['commuters']}; "
+                             f"zone={origin['zone']}; max_distance={distance_limit}")
+
+
 def row_normalize(log_weights, rows, budgets):
     maximum = np.full(len(budgets), -np.inf)
     np.maximum.at(maximum, rows, log_weights)
@@ -125,6 +162,10 @@ def municipal_groups(rows, cols, origins, destinations):
 def municipal_score(flow, rows, cols, origins, destinations, mobility, field):
     keys, groups = municipal_groups(rows, cols, origins, destinations)
     modeled = dict(zip(keys, np.bincount(groups, weights=flow, minlength=len(keys))))
+    return score_municipal_totals(modeled, origins, destinations, mobility, field)
+
+
+def score_municipal_totals(modeled, origins, destinations, mobility, field):
     represented_origins = {p['municipality'] for p in origins}
     represented_destinations = {p['municipality'] for p in destinations}
     observations = [r for r in mobility.get('flows', []) if r.get(field, 0) > 0 and
@@ -150,6 +191,10 @@ def municipal_score(flow, rows, cols, origins, destinations, mobility, field):
 def _allocate_regular(points, config, mobility):
     from .cohorts import settings
     cohort_options = config.get('cohort_settings') or settings({'demand':config})
+    if cohort_options.get('exact_size') and not config.get('_continuous_only'):
+        from .blocked_allocation import use_blocked_allocation, allocate_exact
+        if use_blocked_allocation(points):
+            return allocate_exact(points, config, mobility, cohort_options)
     origins, destinations, rows, cols, distance = support(points, config)
     budgets = np.asarray([p['commuters'] for p in origins], float)
     if not origins:

@@ -114,8 +114,11 @@ def consolidate_points(request, points):
             exclusion_zones=cfg.get('exclusion_zones', []),
             urban_core_polygon=city.get('urban_core_polygon') if city.get('restrict_demand_to_urban_core', True) else None,
             mapping_diagnostics=local_mapping)
+        members_by_geometry = {}
+        for point in group:
+            members_by_geometry.setdefault(local_mapping[point['id']], []).append(point)
         for item in geometry:
-            members = [p for p in group if local_mapping[p['id']] == item['id']]
+            members = members_by_geometry[item['id']]
             combined = dict(members[0], location=item['location'])
             for field in ('population','commuters','attraction','residents','jobs','pea_15ymas'):
                 combined[field] = sum(p[field] for p in members)

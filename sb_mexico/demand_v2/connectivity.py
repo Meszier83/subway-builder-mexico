@@ -23,9 +23,23 @@ def reconcile(request, points):
     evidence=[];queried=0
     from collections import Counter
     comp_counts = Counter(find(q.get('road_component')) for q in jobs)
+    # The common unbounded-distance case needs only one distinct job location
+    # in the current territory. Keep two representatives so a coincident
+    # origin cannot hide another job. Merge them with the component union.
+    representatives = {}
+    if max_distance is None:
+        for job in jobs:
+            by_zone = representatives.setdefault(job.get('road_component'), {})
+            locations = by_zone.setdefault(job['zone'], set())
+            if len(locations) < 2:
+                locations.add(tuple(job['location']))
     for origin in points:
         component=find(origin.get('road_component'))
         if not origin['commuters'] or component is None:continue
+        if max_distance is None:
+            locations = representatives.get(component, {}).get(origin['zone'], ())
+            if any(location != tuple(origin['location']) for location in locations):
+                continue
         distances=np.linalg.norm((coordinates-origin['location'])*scale,axis=1)
         candidates=[j for j,q in enumerate(jobs) if q['zone']==origin['zone'] and
             q['id']!=origin['id'] and q['location']!=origin['location'] and
@@ -47,6 +61,13 @@ def reconcile(request, points):
             if tuple(forward or ())!=('osrm','accepted') or tuple(reverse or ())!=('osrm','accepted'):continue
             canonical=min(component,other);parents[max(component,other)]=canonical
             comp_counts[canonical]=comp_counts.get(component,0)+comp_counts.get(other,0)
+            if max_distance is None:
+                keep = representatives.setdefault(canonical, {})
+                merged = representatives.pop(max(component, other), {})
+                for zone, locations in merged.items():
+                    combined = keep.setdefault(zone, set())
+                    combined.update(locations)
+                    keep[zone] = set(sorted(combined)[:2])
             evidence.append(dict(origin=origin['id'],destination=target['id'],components=[component,other],
                 merged_component=canonical,forward=list(forward),reverse=list(reverse)))
             break

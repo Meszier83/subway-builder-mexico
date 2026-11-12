@@ -282,6 +282,11 @@ def extract(archive_path, stage, kind, state=None, reference=None):
             outputs = [(m, stage / f'marco_2020_{state}' / PurePosixPath(m.filename).name) for m in chosen]
         if len({str(p).lower() for _, p in outputs}) != len(outputs):
             raise ValueError('Nombres de archivo duplicados en el ZIP')
+        if kind == 'denue':
+            existing = {p.name.lower() for p in stage.iterdir()}
+            for _, output in outputs:
+                if output.name.lower() in existing:
+                    raise ValueError('DENUE: nombre de CSV duplicado entre paquetes: ' + output.name)
         for member, output in outputs:
             output.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(member) as source, output.open('wb') as dest:
@@ -412,6 +417,12 @@ def fine_ce_catalog(client):
     return selected
 
 
+def denue_urls(state):
+    """INEGI publishes Estado de México as two required CSV archives."""
+    parts = ('15_1', '15_2') if state == '15' else (state,)
+    return [INEGI + f'/contenidos/masiva/denue/denue_{part}_csv.zip' for part in parts]
+
+
 def acquire_source(client, geo, folder, kind, enoe_state=None, enoe_year=2026, enoe_quarter=2, before_publish=None, ce_detail=False):
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
@@ -495,16 +506,17 @@ def acquire_source(client, geo, folder, kind, enoe_state=None, enoe_year=2026, e
             for state in geo['states']:
                 code = state['code']
                 if kind == 'denue':
-                    url = INEGI + f'/contenidos/masiva/denue/denue_{code}_csv.zip'
+                    urls = denue_urls(code)
                 elif kind == 'cpv':
-                    url = INEGI + f'/contenidos/programas/ccpv/2020/datosabiertos/ageb_manzana/ageb_mza_urbana_{code}_cpv2020_csv.zip'
+                    urls = [INEGI + f'/contenidos/programas/ccpv/2020/datosabiertos/ageb_manzana/ageb_mza_urbana_{code}_cpv2020_csv.zip']
                 elif kind == 'marco':
-                    url = links[code]
+                    urls = [links[code]]
                 else:
                     raise ValueError('Fuente desconocida')
-                path, record = client.fetch(url)
-                extract(path, stage, kind, state=code)
-                records.append(record)
+                for url in urls:
+                    path, record = client.fetch(url)
+                    extract(path, stage, kind, state=code)
+                    records.append(record)
         if before_publish:
             before_publish(stage)
         return publish(stage, folder, kind, records)

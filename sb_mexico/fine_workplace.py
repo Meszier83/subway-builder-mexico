@@ -30,7 +30,9 @@ def load_fine_workplaces(paths, bbox, macro, ce_paths=(), source_root=None, reta
     from sb_mexico.workplace_employment import band, bounded_fit, source_hashes
     from sb_mexico.residential_employment import file_sha256
     hashes = dict(denue=source_hashes(paths), ce=source_hashes(ce_paths))
+    from sb_mexico.denue_encoding import READER_VERSION
     cache_key = (
+        READER_VERSION,
         tuple(hashes['denue']),
         tuple(hashes['ce']),
         tuple(sorted((k, float(v)) for k, v in bbox.items())),
@@ -44,7 +46,9 @@ def load_fine_workplaces(paths, bbox, macro, ce_paths=(), source_root=None, reta
         cloned_clipped.attrs['workplace_employment'] = cloned_report
         return cloned_clipped, dict(cached_empty), cloned_report
     controls = read_saic_controls(ce_paths)
-    frame = classify_scope(load_denue(paths, bbox, full_scope=True).reset_index(drop=True), paths)
+    raw_denue = load_denue(paths, bbox, full_scope=True)
+    decoding_audit = raw_denue.attrs.get('denue_decoding', [])
+    frame = classify_scope(raw_denue.reset_index(drop=True), paths)
     for column in ('workplace_industry', 'workplace_band'):
         if column not in frame:
             frame[column] = ''
@@ -159,9 +163,10 @@ def load_fine_workplaces(paths, bbox, macro, ce_paths=(), source_root=None, reta
         raise ValueError('Sources changed during fine CE transfer')
     effective_mode = 'historical_fine_transfer' if transferred else 'ce_bounded'
     report = dict(schema_version=1,mode=effective_mode,formula_version=FORMULA_VERSION,
+        denue_decoding=decoding_audit,
         reference_year=year,model_year=resolve_projection_year(macro, allow_pending=True),source_sha256=hashes,
         implementation_sha256={n:file_sha256(Path(__file__).with_name(n)) for n in
-            ('fine_workplace.py','ce_controls.py','historical_benchmark.py','workplace_employment.py','inegi.py')},
+            ('fine_workplace.py','ce_controls.py','historical_benchmark.py','workplace_employment.py','inegi.py','denue_encoding.py')},
         comparability='CONDITIONAL_HISTORICAL_MODEL',controls=outcomes,coverage=coverage,
         full_scope_establishments=len(frame),transferred_establishments=len(transferred),fallback_establishments=len(frame)-len(transferred),
         fallback_reasons=dict(reasons),prior_full_scope_attraction=float(priors.sum()),full_scope_attraction=float(frame.calibrated_jobs.sum()),

@@ -6,6 +6,19 @@ from sb_mexico.fine_workplace import load_fine_workplaces
 from sb_mexico.workplace_employment import load_workplaces
 
 class FineWorkplaceTests(unittest.TestCase):
+    def test_reader_revision_invalidates_memory_cache_and_preserves_audit(self):
+        from unittest.mock import patch
+        from sb_mexico.inegi import load_denue
+        from sb_mexico.fine_workplace import _FINE_WORKPLACE_CACHE
+        with patch.dict(_FINE_WORKPLACE_CACHE,{},clear=True), patch('sb_mexico.inegi.load_denue',wraps=load_denue) as loader:
+            first=self.load()
+            self.load()
+            self.assertEqual(loader.call_count,1)
+            self.assertEqual(first[2]['denue_decoding'][0]['repairs'],0)
+            with patch('sb_mexico.denue_encoding.READER_VERSION','test-reader-next'):
+                self.load()
+            self.assertEqual(loader.call_count,2)
+
     def setUp(self):
         self.f=fixtures.HistoricalBenchmarkTests(); self.f.setUp(); self.addCleanup(self.f.doCleanups)
 

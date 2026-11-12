@@ -17,6 +17,18 @@ SCHEMAS_DIR = os.path.join(os.path.dirname(__file__), "schemas")
 TYPES_PATH = os.path.join(SCHEMAS_DIR, "special_demand_types.json")
 POINTS_SCHEMA_PATH = os.path.join(SCHEMAS_DIR, "special_demand_points.schema.json")
 
+
+def require_resolved_poi_demand(pois):
+    """Allow draft POIs in editors, but never compile undecided demand as zero."""
+    pending = [str(p.get("id", "sin ID")) for p in (pois or [])
+               if isinstance(p, dict) and "jobs" in p and p["jobs"] is None]
+    if pending:
+        raise ValueError(
+            f"Demanda pendiente en {len(pending)} POI(s): {', '.join(pending)}. "
+            "Define 'jobs' en el editor de POIs antes de compilar. "
+            "La matrícula de referencia no equivale a demanda configurada."
+        )
+
 # Mapeo taxonómico de prefijos clásicos a tipos canónicos de Subway Builder Modded
 PREFIX_TAXONOMY_MAP = {
     "AIR_": ("airport", "international_terminal"),

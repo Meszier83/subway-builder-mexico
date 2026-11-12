@@ -555,21 +555,19 @@ def _detect_denue_format(path: str) -> Tuple[str, str]:
     if not raw_sample:
         raise ValueError(f"El archivo DENUE está vacío: {path}")
 
-    encodings = ["utf-8-sig", "utf-8", "cp1252", "latin1"]
+    from sb_mexico.denue_encoding import prepared_denue
+    with prepared_denue(path) as (stream, valid_enc, audit):
+        if valid_enc != audit['encoding']:
+            raise ValueError(f'{path}: mixed DENUE input requires prepared_denue(), not a single encoding')
+        raw_sample = stream.read(65536)
+        # Only the complete header is needed; do not finalize a partial UTF-8 tail.
+        import codecs
+        decoded_sample = codecs.getincrementaldecoder(valid_enc)('strict').decode(raw_sample, final=False)
+    return valid_enc, _denue_delimiter(decoded_sample)
+
+
+def _denue_delimiter(decoded_sample):
     delimiters = [",", ";", "\t", "|"]
-
-    valid_enc = "latin1"
-    decoded_sample = None
-    for enc in encodings:
-        try:
-            decoded_sample = raw_sample.decode(enc)
-            valid_enc = enc
-            break
-        except UnicodeDecodeError:
-            continue
-
-    if decoded_sample is None:
-        decoded_sample = raw_sample.decode("latin1", errors="replace")
 
     first_line = decoded_sample.splitlines()[0] if decoded_sample.splitlines() else ""
 
@@ -586,7 +584,7 @@ def _detect_denue_format(path: str) -> Tuple[str, str]:
                 max_cols = len(cols)
                 best_delim = d
 
-    return valid_enc, best_delim
+    return best_delim
 
 
 def _parse_denue_strata_series(series: pd.Series) -> Tuple[pd.Series, pd.Series]:
@@ -626,6 +624,8 @@ def load_denue(denue_paths: Union[str, List[str]], bbox: Dict[str, float], *, fu
     seen = set()
     clean_paths = []
     for p in paths:
+        if p and not os.path.isfile(p):
+            raise FileNotFoundError(f"DENUE source is not a readable file: {p}")
         if p and os.path.exists(p):
             norm = os.path.abspath(p)
             if norm not in seen:
@@ -643,111 +643,115 @@ def load_denue(denue_paths: Union[str, List[str]], bbox: Dict[str, float], *, fu
     identities = RecordIdentityLedger('DENUE')
     from sb_mexico.residential import geo_code
 
+    from sb_mexico.denue_encoding import prepared_denue
+    decoding_audit = []
     for path in clean_paths:
         try:
-            enc, sep = _detect_denue_format(path)
-            reader = pd.read_csv(
-                path,
-                encoding=enc,
-                sep=sep,
-                chunksize=100_000,
-                dtype=str,
-                low_memory=False
-            )
-        except Exception:
-            continue
+            with prepared_denue(path) as (stream, enc, audit):
+                import codecs
+                sample = codecs.getincrementaldecoder(enc)('strict').decode(stream.read(65536), final=False)
+                stream.seek(0)
+                sep = _denue_delimiter(sample)
+                print(f"[DENUE] {path}: {audit['encoding']}; repairs={audit['repairs']}", flush=True)
+                with pd.read_csv(stream, encoding=enc, sep=sep, chunksize=100_000,
+                                 dtype=str, low_memory=False) as reader:
+                    for chunk in reader:
+                        chunk.columns = [c.strip().lower() for c in chunk.columns]
 
-        for chunk in reader:
-            chunk.columns = [c.strip().lower() for c in chunk.columns]
+                        col_lat = "latitud" if "latitud" in chunk.columns else ("lat" if "lat" in chunk.columns else None)
+                        col_lon = "longitud" if "longitud" in chunk.columns else ("lon" if "lon" in chunk.columns else None)
 
-            col_lat = "latitud" if "latitud" in chunk.columns else ("lat" if "lat" in chunk.columns else None)
-            col_lon = "longitud" if "longitud" in chunk.columns else ("lon" if "lon" in chunk.columns else None)
+                        if not col_lat or not col_lon:
+                            continue
 
-            if not col_lat or not col_lon:
-                continue
+                        chunk["lat"] = pd.to_numeric(chunk[col_lat], errors="coerce")
+                        chunk["lon"] = pd.to_numeric(chunk[col_lon], errors="coerce")
 
-            chunk["lat"] = pd.to_numeric(chunk[col_lat], errors="coerce")
-            chunk["lon"] = pd.to_numeric(chunk[col_lon], errors="coerce")
+                        # Normalización de claves municipales antes del recorte BBOX
+                        if "cve_mun" in chunk.columns and "cve_ent" in chunk.columns:
+                            chunk["cve_mun_clean"] = [
+                                format_cve_mun(m, e) for m, e in zip(chunk["cve_mun"], chunk["cve_ent"])
+                            ]
+                        elif "cve_mun" in chunk.columns:
+                            chunk["cve_mun_clean"] = [format_cve_mun(m) for m in chunk["cve_mun"]]
+                        else:
+                            chunk["cve_mun_clean"] = "-1"
 
-            # Normalización de claves municipales antes del recorte BBOX
-            if "cve_mun" in chunk.columns and "cve_ent" in chunk.columns:
-                chunk["cve_mun_clean"] = [
-                    format_cve_mun(m, e) for m, e in zip(chunk["cve_mun"], chunk["cve_ent"])
-                ]
-            elif "cve_mun" in chunk.columns:
-                chunk["cve_mun_clean"] = [format_cve_mun(m) for m in chunk["cve_mun"]]
-            else:
-                chunk["cve_mun_clean"] = "-1"
+                        # Resolver estrato combinando per_ocu y personal_ocupado
+                        if "per_ocu" in chunk.columns and "personal_ocupado" in chunk.columns:
+                            per_s = chunk["per_ocu"].fillna("").astype(str).str.strip()
+                            per_alt = chunk["personal_ocupado"].fillna("").astype(str).str.strip()
+                            per_s = per_s.where(per_s != "", per_alt)
+                        elif "per_ocu" in chunk.columns:
+                            per_s = chunk["per_ocu"].fillna("").astype(str).str.strip()
+                        elif "personal_ocupado" in chunk.columns:
+                            per_s = chunk["personal_ocupado"].fillna("").astype(str).str.strip()
+                        else:
+                            per_s = pd.Series([""] * len(chunk), index=chunk.index)
 
-            # Resolver estrato combinando per_ocu y personal_ocupado
-            if "per_ocu" in chunk.columns and "personal_ocupado" in chunk.columns:
-                per_s = chunk["per_ocu"].fillna("").astype(str).str.strip()
-                per_alt = chunk["personal_ocupado"].fillna("").astype(str).str.strip()
-                per_s = per_s.where(per_s != "", per_alt)
-            elif "per_ocu" in chunk.columns:
-                per_s = chunk["per_ocu"].fillna("").astype(str).str.strip()
-            elif "personal_ocupado" in chunk.columns:
-                per_s = chunk["personal_ocupado"].fillna("").astype(str).str.strip()
-            else:
-                per_s = pd.Series([""] * len(chunk), index=chunk.index)
+                        jobs, micro = _parse_denue_strata_series(per_s)
+                        chunk["jobs_formal"] = jobs
+                        chunk["is_micro_small"] = micro
+                        if full_scope:
+                            chunk['workplace_band'] = per_s
+                            chunk['workplace_industry'] = chunk.get('codigo_act', pd.Series('', index=chunk.index)).fillna('').astype(str).str.strip()
 
-            jobs, micro = _parse_denue_strata_series(per_s)
-            chunk["jobs_formal"] = jobs
-            chunk["is_micro_small"] = micro
-            if full_scope:
-                chunk['workplace_band'] = per_s
-                chunk['workplace_industry'] = chunk.get('codigo_act', pd.Series('', index=chunk.index)).fillna('').astype(str).str.strip()
+                        # Official IDs distinguish businesses that share coordinates. Dedup
+                        # before the municipal totals, including records outside the BBOX.
+                        keep = []
+                        identity_columns = [c for c in ('clee','id','cve_mun_clean','jobs_formal','is_micro_small',
+                                                       'lat','lon','cve_loc','ageb','manzana') if c in chunk]
+                        if full_scope:
+                            identity_columns.extend(('workplace_band', 'workplace_industry'))
+                        for values in chunk[identity_columns].itertuples(index=False, name=None):
+                            row = dict(zip(identity_columns, values))
+                            aliases = [(name, identities.clean(row.get(name))) for name in ('clee', 'id')
+                                       if identities.clean(row.get(name))]
+                            payload = (row['cve_mun_clean'], row['jobs_formal'], bool(row['is_micro_small']),
+                                       identities.clean(row.get('lat')), identities.clean(row.get('lon')),
+                                       geo_code(row.get('cve_loc'), 4), geo_code(row.get('ageb'), 4),
+                                       geo_code(row.get('manzana'), 3))
+                            if full_scope:
+                                payload += (str(row['workplace_band']), str(row['workplace_industry']))
+                            try:
+                                keep.append(identities.keep(aliases, payload))
+                            except ValueError:
+                                reader.close()
+                                raise
+                        chunk = chunk.loc[keep]
 
-            # Official IDs distinguish businesses that share coordinates. Dedup
-            # before the municipal totals, including records outside the BBOX.
-            keep = []
-            identity_columns = [c for c in ('clee','id','cve_mun_clean','jobs_formal','is_micro_small',
-                                           'lat','lon','cve_loc','ageb','manzana') if c in chunk]
-            if full_scope:
-                identity_columns.extend(('workplace_band', 'workplace_industry'))
-            for values in chunk[identity_columns].itertuples(index=False, name=None):
-                row = dict(zip(identity_columns, values))
-                aliases = [(name, identities.clean(row.get(name))) for name in ('clee', 'id')
-                           if identities.clean(row.get(name))]
-                payload = (row['cve_mun_clean'], row['jobs_formal'], bool(row['is_micro_small']),
-                           identities.clean(row.get('lat')), identities.clean(row.get('lon')),
-                           geo_code(row.get('cve_loc'), 4), geo_code(row.get('ageb'), 4),
-                           geo_code(row.get('manzana'), 3))
-                if full_scope:
-                    payload += (str(row['workplace_band']), str(row['workplace_industry']))
-                try:
-                    keep.append(identities.keep(aliases, payload))
-                except ValueError:
-                    reader.close()
-                    raise
-            chunk = chunk.loc[keep]
+                        # Totales globales de empleo formal por municipio (antes del recorte BBOX)
+                        valid_mun = chunk[chunk["cve_mun_clean"] != "-1"]
+                        if not valid_mun.empty:
+                            chunk_totals = valid_mun.groupby("cve_mun_clean")["jobs_formal"].sum()
+                            for mun_code, total_jobs in chunk_totals.items():
+                                mun_totals_global[mun_code] = mun_totals_global.get(mun_code, 0.0) + float(total_jobs)
 
-            # Totales globales de empleo formal por municipio (antes del recorte BBOX)
-            valid_mun = chunk[chunk["cve_mun_clean"] != "-1"]
-            if not valid_mun.empty:
-                chunk_totals = valid_mun.groupby("cve_mun_clean")["jobs_formal"].sum()
-                for mun_code, total_jobs in chunk_totals.items():
-                    mun_totals_global[mun_code] = mun_totals_global.get(mun_code, 0.0) + float(total_jobs)
+                        # Filtro espacial estricto dentro del BBOX
+                        in_bbox = (
+                            (chunk["lon"] >= min_lon) & (chunk["lon"] <= max_lon) &
+                            (chunk["lat"] >= min_lat) & (chunk["lat"] <= max_lat) &
+                            chunk["lat"].notna() & chunk["lon"].notna()
+                        )
+                        filtered = chunk.copy() if full_scope else chunk[in_bbox].copy()
+                        if not filtered.empty:
+                            filtered_chunks.append(filtered)
 
-            # Filtro espacial estricto dentro del BBOX
-            in_bbox = (
-                (chunk["lon"] >= min_lon) & (chunk["lon"] <= max_lon) &
-                (chunk["lat"] >= min_lat) & (chunk["lat"] <= max_lat) &
-                chunk["lat"].notna() & chunk["lon"].notna()
-            )
-            filtered = chunk.copy() if full_scope else chunk[in_bbox].copy()
-            if not filtered.empty:
-                filtered_chunks.append(filtered)
+        except (pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeError) as error:
+            raise ValueError(f"Error reading DENUE {path}: {error}") from error
+        decoding_audit.append(dict(audit))
 
     if not filtered_chunks:
         df_empty = pd.DataFrame(columns=[
             "lat", "lon", "cve_mun_clean", "jobs_formal", "is_micro_small", "ageb_clean", "mza_clean"
         ])
+        df_empty.attrs["denue_decoding"] = decoding_audit
         df_empty.attrs["mun_totals_global"] = mun_totals_global
         df_empty.attrs['source_identity'] = identities.report
         return df_empty
 
     df_denue = pd.concat(filtered_chunks, ignore_index=True)
+    df_denue.attrs["denue_decoding"] = decoding_audit
     df_denue.attrs["mun_totals_global"] = mun_totals_global
     df_denue.attrs['source_identity'] = identities.report
 
