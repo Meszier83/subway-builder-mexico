@@ -845,7 +845,7 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
     for poi in pois_cfg:
         p_id = poi.get("id", "POI_Nuevo")
         loc = poi.get("loc", [0.0, 0.0])
-        jobs = int(poi["jobs"]) if poi.get("jobs") is not None else 0
+        jobs = "null" if "jobs" in poi and poi["jobs"] is None else int(poi.get("jobs", 0))
         rad = int(poi["radius_m"]) if poi.get("radius_m") is not None else 100
         mode = poi.get("mode", "MAX").upper()
 
@@ -912,7 +912,16 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary_path, fpath)
+        # Windows readers (including a concurrent status request) can briefly
+        # deny replacement. Keep the previous file intact and retry publication.
+        for attempt in range(20):
+            try:
+                os.replace(temporary_path, fpath)
+                break
+            except PermissionError:
+                if os.name != 'nt' or attempt == 19:
+                    raise
+                time.sleep(0.05)
     finally:
         if temporary_path and os.path.exists(temporary_path):
             os.remove(temporary_path)
@@ -1990,7 +1999,9 @@ def validate_city_configuration(city_file: str) -> Dict[str, Any]:
         if p_mode not in ["MAX", "BOOST", "ADDITIVE", "REPLACE", "SUM"]:
             warnings.append(f"POI '{p_id}': Modo '{p_mode}' no estándar. Usar 'MAX', 'BOOST', 'ADDITIVE' o 'REPLACE'.")
 
-        if p_jobs is None or int(p_jobs) <= 0:
+        if "jobs" in poi and p_jobs is None:
+            errors.append(f"POI '{p_id}': Demanda pendiente. Define 'jobs' en el editor de POIs antes de compilar.")
+        elif p_jobs is None or int(p_jobs) <= 0:
             warnings.append(f"POI '{p_id}': Número de empleos ('jobs') nulo o menor a 1.")
 
     # 6. Estado de Archivos de Datos

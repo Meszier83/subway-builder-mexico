@@ -242,7 +242,7 @@ def save_city_data(
     for poi in new_pois:
         p_id = poi.get("id", "POI_Sin_Nombre")
         loc = poi.get("loc", [0.0, 0.0])
-        jobs = int(poi.get("jobs", 5000))
+        jobs = "null" if "jobs" in poi and poi["jobs"] is None else int(poi.get("jobs", 5000))
         rad = int(poi.get("radius_m", 750))
         mode = poi.get("mode", "MAX").upper()
 

@@ -22,6 +22,7 @@ with tempfile.TemporaryDirectory() as temporary:
     subprocess.run(['node', str(ROOT / 'tests/source_download_ui.cjs')], check=True)
     subprocess.run(['node', str(ROOT / 'tests/eic_source_status_ui.cjs')], check=True)
     subprocess.run(['node', str(ROOT / 'tests/demand_v2_ui.cjs')], check=True)
+    subprocess.run(['node', str(ROOT / 'tests/wizard_density_ui.cjs')], check=True)
     subprocess.run(['node', str(ROOT / 'tests/demand_engine_toggle_ui.cjs')], check=True)
     subprocess.run(['node', str(ROOT / 'tests/beta_policy_ui.cjs')], check=True)
     subprocess.run(['node', str(ROOT / 'tests/isolated_drawing_ui.cjs')], check=True)

@@ -197,6 +197,73 @@ npm ci --prefix tools/wizard-assets
 node tools/build_wizard_assets.cjs
 ```
 
+## POIs universitarios investigados con IA
+
+El [flujo aprobado de POIs universitarios](college-pois.md) usa matrícula
+escolarizada como aproximación de demanda: mínimo 500 antes de redondear a 50,
+BOOST y radio inicial de 100 m para puntos nuevos. Incluye el prompt, fuentes,
+estimaciones cuando faltan cifras y revisión de coordenadas en el Wizard.
+Las correcciones y descartes manuales prevalecen al repetir la investigación.
+El caso de Torreón documenta la propuesta inicial y la revisión posterior.
+Una cuota en blanco se guarda como `jobs: null` para revisar la ubicación.
+El editor conserva las notas de procedencia y muestra **Pendiente** hasta que
+se defina la cuota. La compilación se bloquea mientras quede algún POI pendiente.
+
+## Capas de puntos en POI Studio
+
+En el paso **POI Studio**, los botones **Empleos DENUE** (rojo) y
+**Residentes CPV** (azul) permiten mostrar y ocultar las capas por separado.
+La consulta guarda primero la configuración y carga la referencia del proyecto
+activo. Los POIs especiales se excluyen de estas capas de referencia.
+
+Al activar una capa, el botón muestra **Cargando puntos…** y ambos botones quedan
+deshabilitados hasta terminar la consulta. Si falla, se muestra el error y la capa
+solicitada no se activa vacía. Apagar una capa ya visible es inmediato y no vuelve
+a consultar las fuentes. Después de actualizar el código, volver a abrir el Wizard
+y recargar la página con **Ctrl+F5** para usar los recursos actualizados.
+
+### Corrección de compatibilidad con V2 — 2026-10-31
+
+El servidor devolvía puntos válidos de V2, pero el cliente exigía los campos de
+diagnóstico del motor legado, como `employment_mode`. La validación rechazaba
+la respuesta con «La referencia de demanda no coincide con el método de ocupados
+seleccionado» y descartaba los puntos antes de dibujarlos.
+
+La validación ahora distingue los contratos: para V2 comprueba
+`diagnostics.engine`, la identidad de la referencia y el año 2025 del informe
+candidato; para el legado conserva las comprobaciones de ocupados, EIC y método
+de empleo. Una respuesta de otro motor sigue siendo rechazada. El informe de
+empleo V2 se obtiene de `diagnostics.candidate_report.workplaces`.
+
+La corrección está en `tools/static/wizard/app.js`, con su hash actualizado en
+`tools/static/wizard/manifest.json`. La regresión se cubre con
+`tests/wizard_density_ui.cjs`, incluido en `tools/check_wizard_ui.py`: prueba ambas
+capas, exclusión de POIs especiales, POIs con cuota pendiente en el estado del
+cliente, prevención de consultas duplicadas durante la carga, apagado sin consulta,
+errores y validación de respuestas V2/legado.
+
+Verificación realizada en el checkout de desarrollo:
+
+- Navegador con el proyecto de Torreón: se reprodujo el rechazo original;
+  después de la corrección aparecieron los puntos rojos y azules. Al apagar
+  empleo, los puntos residenciales permanecieron visibles.
+- Pasaron `node tests/wizard_density_ui.cjs`, `node tests/demand_v2_ui.cjs`,
+  las cuatro pruebas de `test_poi_pending_demand.py` y las doce de
+  `test_wizard_delivery.py`. Estas últimas se repitieron con acceso a sockets
+  locales después de un bloqueo del sandbox (`WinError 10013`).
+- Pasaron la comprobación de sintaxis JavaScript, los hashes del manifiesto
+  y `git diff --check`.
+
+El 2026-11-03 se actualizaron los arneses de compilación, empleo residencial y
+tamaño de celda para incluir sus dependencias actuales. Pasó
+`python tools/check_wizard_ui.py` completo. La prueba de compilación verifica
+que un POI con cuota pendiente bloquea el envío y que definir la cuota permite
+continuar con la validación de fuentes.
+
+Esta comprobación cubre la visualización en el Wizard. No valida una nueva
+compilación ni la jugabilidad de un paquete. La instancia temporal de prueba se
+detuvo al finalizar.
+
 ## Verificación reproducible
 
 Desde la raíz, con las dependencias de `requirements.txt` instaladas:
@@ -204,6 +271,7 @@ Desde la raíz, con las dependencias de `requirements.txt` instaladas:
 ```sh
 python -m unittest discover -s tests -q
 python tools/check_wizard_ui.py
+node tests/wizard_density_ui.cjs
 node tests/residential_employment_ui.cjs
 node tests/historical_benchmark_ui.cjs
 node tests/historical_transfer_ui.cjs
@@ -273,3 +341,87 @@ El Wizard conserva `isolated_zones[].polygon` como pares `[lon, lat]`, lo muestr
 en ambos mapas y lo guarda sin sustituirlo por su caja envolvente. El motor usa
 el contorno real, incluyendo su frontera; `polygon` prevalece si también hay `bbox`.
 La auditoría previa a compilar verifica la geometría.
+
+### Compilación de edificios con memoria acotada
+
+El backend predeterminado `bounded` descarga las huellas de Overture a Parquet y procesa la
+geometría por lotes. La selección global, los GeoJSON y los índices usan archivos
+temporales en ext4. Conserva el BBOX, el núcleo urbano, las opciones LOD y el
+límite global existente de 850.000 edificios. Los empates de área en el corte
+usan el orden de lectura de la caché; el informe registra cuántos hay.
+
+Los presupuestos se ajustan a la memoria disponible: DuckDB tiene un techo
+inicial de 2 GiB y Planetiler de 3 GiB de heap, con dos hilos para esas etapas.
+El registro muestra la etapa activa y los recuentos. La compilación requiere
+espacio adicional en disco para cachés y archivos de trabajo. El backend está
+verificado con `depot==1.2.7`; otra versión requiere una revisión de compatibilidad.
+
+Una compilación nueva reutiliza la descarga completa cuando coinciden su BBOX,
+versión de caché y checksum. La caché conserva la versión de Overture registrada
+hasta pedir una actualización. Cambiar núcleo, LOD o simplificación vuelve a
+generar la geometría derivada. Cada ejecución tiene su directorio de trabajo;
+el modo de etiquetas reutiliza una base anterior sólo si coinciden sus fuentes
+y opciones geométricas.
+
+Opciones de diagnóstico al iniciar el Wizard desde PowerShell:
+
+```powershell
+$env:SB_BUILDINGS_BACKEND = 'legacy'  # Comparar con el motor anterior.
+.\wizard.bat
+```
+
+`SB_BUILDINGS_BACKEND=bounded` selecciona el motor nuevo explícitamente.
+`SB_BUILDINGS_REFRESH=1` solicita otra descarga de edificios. Reiniciar el
+servidor es necesario para cargar cambios de código o de estas variables.
+
+Tras una terminación forzada puede quedar un archivo de bloqueo. Su ruta
+aparece en el error y contiene el PID del propietario. Verificar que ese proceso
+ya terminó antes de retirar el bloqueo. Un código 9 o 137 indica terminación
+abrupta; el registro del kernel permite confirmar si faltó memoria.
+
+Para revisar un índice generado:
+
+```powershell
+python tools/check_building_index.py ruta/buildings_index.bin.gz
+```
+
+El verificador comprueba por bloques la cabecera, tamaños, offsets, referencias
+y coordenadas.
+La evidencia y los límites de validación están en
+[los resultados de CDMX](cdmx-building-memory-results.md).
+
+### Lectura de DENUE con codificaciones mixtas
+
+El lector valida cada CSV completo antes de consumir sus registros. Acepta
+UTF-8 y CP1252 mediante decodificación estricta. Cuando un byte indefinido en
+CP1252 pertenece a una secuencia UTF-8 válida y recuperable, prepara una copia
+temporal UTF-8 por bloques. El CSV original conserva sus bytes y checksum.
+Los pares de bytes ambiguos que ya son válidos en CP1252 mantienen su lectura.
+
+El registro identifica la fuente, política y número de recuperaciones, por
+ejemplo `cp1252+utf8; repairs=1`. Los errores sin interpretación segura muestran
+la ruta y el desplazamiento del byte; detienen la ingesta para evitar una carga
+incompleta. El informe de empleo fino conserva la auditoría y la revisión del
+lector forma parte de las identidades de caché.
+
+La corrección de Guerrero se verificó contra los ocho CSV seleccionados para
+CDMX, sin retirar registros ni cambiar estratos, coordenadas o controles de
+empleo. Se puede continuar con **Omitir (Reutilizar existente)** en cartografía,
+**Compilar Demanda Completa** y empaquetado ZIP habilitado, siempre que las
+opciones cartográficas sigan correspondiendo a los archivos preparados.
+Ver [resultados y estado del reintento](denue-mixed-encoding-fix-results.md).
+
+### Memoria de asignación en mapas grandes
+
+Antes de agrupar cohortes fijas, Demanda V2 verifica que cada residencia
+original tenga al menos un destino permitido. La comprobación termina en el
+primer destino válido de cada origen.
+
+Cuando una asignación ordinaria con cohortes exactas supera cinco millones de
+pares potenciales, el motor guarda los pesos de distancia en un archivo temporal
+y evalúa el mismo objetivo de entropía por bloques. Un grafo de intervalos
+comprueba la factibilidad del soporte completo. El redondeo conserva el
+presupuesto de cada origen, el tamaño exacto de cohorte y los límites enteros
+por destino. La reparación del redondeo empieza con los pares propuestos y sus
+vecinos permitidos más cercanos, con acceso al soporte completo si hace falta.
+El registro muestra el espacio temporal requerido y el avance de la asignación.

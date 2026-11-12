@@ -37,7 +37,7 @@ function harness() {
     'renderPoiMarkersOnMap','renderPlacesList','renderPlacesMarkersOnMap','renderIsolatedZones',
     'renderAffluenceZones','renderExclusionZones','updatePoiPreviewFromForm']) context[name]=()=>{};
   vm.createContext(context);
-  vm.runInContext(['selectedDemandEngine','updateDemandEngineControls','syncDemandEngineFields','syncCohortCount','updateDemandMethodsSummary','workplaceSourceStatus','updateWorkplaceSourceStatus','refreshWorkplaceSourceStatus','syncStateFromInputs','populateFormFields','triggerAutoSave','loadDemandDensityForPoi'].map(fn).join('\n'),context);
+  vm.runInContext(['selectedDemandEngine','updateDemandEngineControls','syncDemandEngineFields','syncCohortCount','updateDemandMethodsSummary','workplaceSourceStatus','updateWorkplaceSourceStatus','refreshWorkplaceSourceStatus','syncStateFromInputs','populateFormFields','validateMinZoomInput','triggerAutoSave','validateDensityResponse','loadDemandDensityForPoi'].map(fn).join('\n'),context);
   return {context, element};
 }
 (async()=>{

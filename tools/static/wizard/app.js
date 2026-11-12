@@ -694,7 +694,9 @@
           renderPoiList();
           renderPoiMarkersOnMap();
           renderBboxOnPoiMap();
-          loadDemandDensityForPoi();
+          // Location-review drafts have no demand to simulate yet. Avoid an
+          // automatic save/source scan merely to display their campus pins.
+          if (!(cityData.pois || []).some(p => p.jobs === null)) loadDemandDensityForPoi();
           if (cityData && cityData.city && cityData.city.bbox && Array.isArray(cityData.city.bbox) && cityData.city.bbox.length === 4) {
             const b = cityData.city.bbox;
             const minLat = Math.min(parseFloat(b[1]), parseFloat(b[3]));
@@ -4477,7 +4479,7 @@
       const enName = (document.getElementById('editPoiNameEn')?.value || '').trim();
       const pMode = document.getElementById('editPoiMode')?.value || 'MAX';
       const rawJobs = parseInt(document.getElementById('editPoiJobs')?.value, 10);
-      const pJobs = isNaN(rawJobs) ? 0 : Math.max(0, rawJobs);
+      const pJobs = isNaN(rawJobs) ? null : Math.max(0, rawJobs);
       const rawRad = parseInt(document.getElementById('editPoiRadiusNum')?.value || document.getElementById('editPoiRadius')?.value, 10);
       const pRad = isNaN(rawRad) ? 100 : Math.max(50, rawRad);
       const lon = parseFloat(document.getElementById('editPoiLon')?.value);
@@ -4491,6 +4493,7 @@
       }
 
       const poiObj = {
+        ...(cityData.pois[activeEditingPoiIndex] || {}),
         id: pId,
         name: nameVal,
         type: pCat.toLowerCase(),
@@ -7099,6 +7102,11 @@
     }
 
     function calculatePoiLiveStats(poi) {
+      if (poi.jobs === null) {
+        return { manual: 0, absorbed: 0, absorbedPop: 0, absorbedNodes: 0,
+          finalJobs: 0, mode: 'REVISIÓN', pending: true,
+          formulaText: 'Demanda pendiente: define una cuota antes de compilar.' };
+      }
       const jobsManual = parseInt(poi.jobs) || 0;
       const radius = (poi.radius_m !== undefined && poi.radius_m !== null) ? parseInt(poi.radius_m) : 100;
       const mode = (poi.mode || 'MAX').toUpperCase();
@@ -7209,13 +7217,13 @@
               <span class="font-bold text-metro-text truncate font-sans text-xs" title="${nameStr}">${nameStr}</span>
             </div>
             <span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold shrink-0 bg-metro-card border border-metro-border text-metro-text">
-              ${poi.mode || 'MAX'}
+              ${stats.pending ? 'REVISIÓN' : (poi.mode || 'MAX')}
             </span>
           </div>
           <div class="flex justify-between text-[11px] font-mono text-metro-muted">
             <span>ID: <strong class="text-metro-text">${poi.id}</strong></span>
             <span>Radio: <strong class="text-metro-text">${pRad}m</strong></span>
-            <span>Final: <strong class="text-metro-green font-bold">${stats.finalJobs.toLocaleString()}</strong></span>
+            <span>Final: <strong class="text-metro-green font-bold">${stats.pending ? 'Pendiente' : stats.finalJobs.toLocaleString()}</strong></span>
           </div>
           <div class="text-[10px] font-mono text-metro-muted/80 truncate border-t border-metro-border/30 pt-1" title="${stats.formulaText}">
             ${stats.formulaText}
@@ -7244,6 +7252,7 @@
     }
 
     function openPoiEditorForNew(coords = null) {
+      showPoiResearchNotes(null);
       activeEditingPoiIndex = -1;
       document.getElementById('editorTitleLabel').innerText = "Nuevo POI Especial";
       document.getElementById('editPoiCategory').value = "AIR";
@@ -7293,7 +7302,8 @@
       document.getElementById('editPoiId').value = poi.id || "";
       document.getElementById('editPoiNameEs').value = typeof poi.name === 'object' ? (poi.name.es || "") : (poi.name || "");
       document.getElementById('editPoiNameEn').value = typeof poi.name === 'object' ? (poi.name.en || "") : "";
-      document.getElementById('editPoiJobs').value = (poi.jobs !== undefined && poi.jobs !== null) ? poi.jobs : 0;
+      document.getElementById('editPoiJobs').value = poi.jobs === null ? '' : (poi.jobs ?? 0);
+      showPoiResearchNotes(poi);
       setPoiRadiusValue((poi.radius_m !== undefined && poi.radius_m !== null) ? poi.radius_m : 100);
       document.getElementById('editPoiMode').value = poi.mode || "MAX";
       document.getElementById('editPoiLon').value = poi.loc ? poi.loc[0].toFixed(5) : 0;
@@ -7304,6 +7314,21 @@
       switchPoiTab('editor');
       updatePoiPreviewFromForm();
       renderPoiList();
+    }
+
+    function showPoiResearchNotes(poi) {
+      const panel = document.getElementById('poiResearchNotes');
+      if (!panel) return;
+      const m = poi?.metadata;
+      panel.hidden = !m?.enrollment_cycle;
+      panel.textContent = m?.enrollment_cycle ? [
+        `Referencia de matrícula (${m.enrollment_cycle}) · ${m.enrollment_status || ''}`,
+        `Escolarizada: ${m.enrollment_school_based} · Mixta: ${m.enrollment_mixed} · No escolarizada: ${m.enrollment_non_school_based}`,
+        'La matrícula no equivale a demanda. Radio y modo provisionales para revisar la ubicación.',
+        m.enrollment_source ? `Matrícula: ${m.enrollment_source}` : 'Matrícula sin resolver.',
+        `Ubicación: ${m.location_source || 'Sin fuente'}`,
+        m.review_notes || ''
+      ].filter(Boolean).join('\n') : '';
     }
 
     function onPoiTaxonomyChanged(val) {
@@ -7429,6 +7454,7 @@
       const lat = parseFloat(document.getElementById('editPoiLat').value);
       const radius = parseInt(document.getElementById('editPoiRadiusNum')?.value || document.getElementById('editPoiRadius').value) || 750;
       const jobsManual = parseInt(document.getElementById('editPoiJobs').value) || 0;
+      const pendingDemand = document.getElementById('editPoiJobs').value.trim() === '';
       const mode = document.getElementById('editPoiMode').value;
       const cat = document.getElementById('editPoiCategory').value;
       const meta = TAXONOMY_META[cat] || TAXONOMY_META.CUSTOM;
@@ -7500,11 +7526,12 @@
       const elDiagnosis = document.getElementById('statDiagnosisText');
       const modeBadge = document.getElementById('editorStatModeBadge');
 
-      if (modeBadge) modeBadge.innerText = mode;
+      if (pendingDemand) diagnosis = 'Demanda pendiente. Puedes revisar y guardar la ubicación; define la cuota antes de compilar. La matrícula de referencia no es la cuota de viajes.';
+      if (modeBadge) modeBadge.innerText = pendingDemand ? 'REVISIÓN' : mode;
       if (elAbsJobs) elAbsJobs.innerText = absorbedJobs.toLocaleString();
       if (elAbsPop) elAbsPop.innerText = absorbedPop.toLocaleString();
       if (elAbsNodes) elAbsNodes.innerText = absorbedNodesCount.toLocaleString();
-      if (elFinalJobs) elFinalJobs.innerText = finalJobs.toLocaleString();
+      if (elFinalJobs) elFinalJobs.innerText = pendingDemand ? 'Pendiente' : finalJobs.toLocaleString();
       if (elDiagnosis) elDiagnosis.innerText = diagnosis || "Ajusta las coordenadas y radio para ver la absorción en vivo.";
 
       // Calcular y renderizar POIs afectados o solapados
@@ -7627,7 +7654,7 @@
       const enName = document.getElementById('editPoiNameEn').value.trim();
       const pMode = document.getElementById('editPoiMode').value;
       const rawJobs = parseInt(document.getElementById('editPoiJobs').value, 10);
-      const pJobs = isNaN(rawJobs) ? 0 : Math.max(0, rawJobs);
+      const pJobs = isNaN(rawJobs) ? null : Math.max(0, rawJobs);
       const rawRad = parseInt(document.getElementById('editPoiRadiusNum')?.value || document.getElementById('editPoiRadius')?.value, 10);
       const pRad = isNaN(rawRad) ? 100 : Math.max(50, rawRad);
       const lon = parseFloat(document.getElementById('editPoiLon').value);
@@ -7644,6 +7671,7 @@
       }
 
       const poiObj = {
+        ...(cityData.pois?.[activeEditingPoiIndex] || {}),
         id: pId,
         name: nameVal,
         type: pCat.toLowerCase(),
@@ -7925,12 +7953,12 @@
           <div class="p-2.5 bg-white text-stone-900 rounded-lg shadow-xl text-xs space-y-1 min-w-[210px]">
             <div class="flex items-center justify-between space-x-2">
               <span class="font-bold text-stone-900 truncate">${nameStr}</span>
-              <span class="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold" style="background: ${meta.color}22; color: ${meta.color}; border: 1px solid ${meta.color}66">${poi.mode || 'MAX'}</span>
+              <span class="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold" style="background: ${meta.color}22; color: ${meta.color}; border: 1px solid ${meta.color}66">${stats.pending ? 'REVISIÓN' : (poi.mode || 'MAX')}</span>
             </div>
             <div class="text-[11px] font-mono text-stone-600">ID: <strong class="text-stone-900">${poi.id}</strong></div>
             <div class="flex justify-between text-[11px] font-mono text-stone-700 pt-1 border-t border-stone-200">
               <span>Radio: <strong class="text-stone-900">${pRad}m</strong></span>
-              <span>Final: <strong class="text-emerald-700 font-bold">${stats.finalJobs.toLocaleString()}</strong></span>
+              <span>Final: <strong class="text-emerald-700 font-bold">${stats.pending ? 'Pendiente' : stats.finalJobs.toLocaleString()}</strong></span>
             </div>
             ${formulaBadgeHtml}
             <div class="text-[10px] text-stone-500 pt-1 border-t border-stone-200 flex items-center justify-between">
@@ -11738,6 +11766,19 @@
     let densityLoadedCityFile = null;
     let densityRequestId = 0;
 
+    function validateDensityResponse(data) {
+      if (cityData.demand?.engine === 'v2') {
+        if (data.diagnostics?.engine !== 'v2' || !data.diagnostics.identity || data.diagnostics.candidate_report?.target_year !== 2025) {
+          throw new Error('La referencia de demanda no corresponde al motor V2 seleccionado.');
+        }
+        return;
+      }
+      if (data.diagnostics?.engine === 'v2') throw new Error('La referencia de demanda no corresponde al motor seleccionado.');
+      if (cityData.macroeconomics?.residential_employment === 'census_employed' && data.diagnostics?.employment_mode !== 'census_employed') throw new Error('La referencia de demanda no coincide con el método de ocupados seleccionado.');
+      if (cityData.macroeconomics?.demographic_reference?.mode === 'eic2025' && data.diagnostics?.residential_employment?.demographic_reference?.mode !== 'eic2025') throw new Error('La vista previa no corresponde a la referencia EIC 2025 seleccionada.');
+      if (['auto','ce_bounded','historical_transfer'].includes(cityData.macroeconomics?.workplace_employment) && data.diagnostics?.workplace_mode !== cityData.macroeconomics.workplace_employment) throw new Error('La referencia de empleo no coincide con el método seleccionado.');
+    }
+
     async function loadDemandDensityForPoi(force = false) {
       const requestId = ++densityRequestId;
       const requestedFile = currentCityFile;
@@ -11753,10 +11794,8 @@
         const data = await res.json();
         if (requestId !== densityRequestId || requestedFile !== currentCityFile || requestedState !== JSON.stringify(cityData)) return;
         if (!res.ok) throw new Error(data.error || data.message || 'No se pudo cargar la referencia de demanda');
-        if (cityData.macroeconomics?.residential_employment === 'census_employed' && data.diagnostics?.employment_mode !== 'census_employed') throw new Error('La referencia de demanda no coincide con el método de ocupados seleccionado.');
-        if (cityData.macroeconomics?.demographic_reference?.mode === 'eic2025' && data.diagnostics?.residential_employment?.demographic_reference?.mode !== 'eic2025') throw new Error('La vista previa no corresponde a la referencia EIC 2025 seleccionada.');
-        if (['auto','ce_bounded','historical_transfer'].includes(cityData.macroeconomics?.workplace_employment) && data.diagnostics?.workplace_mode !== cityData.macroeconomics.workplace_employment) throw new Error('La referencia de empleo no coincide con el método seleccionado.');
-        const workplace = data.diagnostics?.workplace_employment;
+        validateDensityResponse(data);
+        const workplace = data.diagnostics?.workplace_employment || data.diagnostics?.candidate_report?.workplaces;
         const workplaceLabel = document.getElementById('workplaceCoverage');
         updateWorkplaceSourceStatus(workplace);
         const coverage = data.diagnostics?.residential_placement;
@@ -11781,6 +11820,7 @@
         updatePoiPreviewFromForm();
         renderPoiMarkersOnMap();
         renderPoiList();
+        return true;
       } catch (e) {
         if (requestId !== densityRequestId || requestedFile !== currentCityFile) return;
         console.warn("No se pudo precargar densidad para POI Studio:", e);
@@ -11793,12 +11833,29 @@
         updateWorkplaceSourceStatus();
         if (workplaceLabel) workplaceLabel.textContent += ` Vista sin validar: ${e.message}`;
         showToast(e.message, 'error');
+        return false;
       }
     }
 
     function toggleDensityLayer(type) {
       if (!mapPoi) return;
-      loadDemandDensityForPoi().then(() => {
+      const buttonIds = {jobs: 'btnToggleDensityJobs', pop: 'btnToggleDensityPop'};
+      if (!buttonIds[type]) return;
+      if (densityLayers[type]) {
+        mapPoi.removeLayer(densityLayers[type]);
+        densityLayers[type] = null;
+        document.getElementById(buttonIds[type])?.classList.remove(
+          ...(type === 'jobs' ? ['bg-rose-500/30', 'border-rose-500'] : ['bg-blue-500/30', 'border-blue-500']));
+        return;
+      }
+      const buttons = Object.values(buttonIds).map(id => document.getElementById(id)).filter(Boolean);
+      if (buttons.some(button => button.disabled)) return;
+      const button = document.getElementById(buttonIds[type]);
+      const label = button?.innerHTML;
+      buttons.forEach(button => { button.disabled = true; });
+      if (button) button.textContent = 'Cargando puntos…';
+      loadDemandDensityForPoi().then(loaded => {
+        if (!loaded) return;
         if (type === 'jobs') {
           if (densityLayers.jobs) {
             mapPoi.removeLayer(densityLayers.jobs);
@@ -11918,6 +11975,9 @@
             document.getElementById('btnToggleDensityPop')?.classList.add('bg-blue-500/30', 'border-blue-500');
           }
         }
+      }).finally(() => {
+        buttons.forEach(button => { button.disabled = false; });
+        if (button) button.innerHTML = label;
       });
     }
 
@@ -12206,6 +12266,10 @@
     }
 
     function runAreaSimulationInWizard(type, selectionObj) {
+      if ((cityData.pois || []).some(p => p.jobs === null)) {
+        showToast('Demanda pendiente en POIs: define las cuotas antes de simular la absorción.', 'warning');
+        return;
+      }
       if (!mapPoi || !densityPoints || densityPoints.length === 0) return;
 
       if (!measureHighlightGroup) {
@@ -12781,6 +12845,12 @@
     async function startBuild() {
       if (!wizardLifecycle.canSave(currentCityFile)) {
         showToast('Carga un proyecto válido antes de compilar.', 'error');
+        return;
+      }
+      syncActivePoiFromEditor();
+      const pendingPois = (cityData.pois || []).filter(p => p.jobs === null);
+      if (pendingPois.length) {
+        showToast(`Demanda pendiente en ${pendingPois.length} POI(s). Define las cuotas en el editor antes de compilar.`, 'error');
         return;
       }
       syncModularCheckboxes();

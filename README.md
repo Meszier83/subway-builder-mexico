@@ -21,6 +21,12 @@
 
 Para los métodos predeterminados, compatibilidad y diagnósticos actuales, consulta [Demanda y Wizard](docs/demand-wizard.md). Esta guía actualiza las descripciones históricas siguientes.
 
+Para explorar un mapa ya generado, abre `map_analyzer.bat` o ejecuta
+`python tools/map_analyzer.py`. El [Map Analyzer](docs/map-analyzer.md) es un visor
+local independiente con mapas de calor de residentes/empleos, balance territorial,
+correlación por celdas y flujos de viajes. Importa ZIP o `demand_data.json` sin
+modificar el mapa ni ejecutar el generador.
+
 ## Vision del Proyecto
 
 En Mexico no existe un repositorio publico universal de matrices origen-destino a escala micrometrica (como *LODES/LEHD* en EE. UU.). Tradicionalmente, crear ciudades mexicanas para simuladores de transporte exigia recurrir a encuestas domiciliarias desactualizadas o a la distribucion uniforme artificial, generando megapuntos irreales o redes colapsadas.
@@ -158,6 +164,11 @@ Si prefieres editar POIs de forma standalone en mapa satelital:
 ```bash
 python tools/poi_studio.py --city cities/cancun_riviera_maya.yaml
 ```
+
+Para preparar universidades de un mapa nuevo, consulta
+[POIs universitarios: investigación con IA y revisión en el Wizard](docs/college-pois.md).
+Incluye el prompt reutilizable, el mínimo de 500 antes de redondear, la cuota basada
+en matrícula escolarizada y el caso de Torreón. No requiere un generador adicional.
 
 ---
 

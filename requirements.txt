@@ -1,6 +1,8 @@
 # Subway Builder México v7.1 - Dependencias
 # ==========================================
-depot>=0.1.0
+depot==1.2.7
+duckdb>=1.5,<2
+pyarrow>=14
 pandas>=2.0.0
 numpy>=1.24.0
 shapely>=2.0.0

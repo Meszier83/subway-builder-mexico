@@ -47,14 +47,15 @@ Descomprime los ZIP antes de usar sus datos. El endpoint de carga guarda el paqu
 
 [Portal de descarga](https://www.inegi.org.mx/app/descarga/)
 
-1. Selecciona DENUE, la entidad federativa del proyecto y la edición que quieres utilizar. Descarga el paquete CSV.
-2. Descomprime el ZIP y conserva `conjunto_de_datos/denue_inegi_NN_.csv`, donde NN es la clave estatal de dos dígitos. Colócalo directamente en la carpeta de datos del proyecto; no copies el diccionario como entrada.
+1. Selecciona DENUE, la entidad federativa del proyecto y la edición que quieres utilizar. Descarga todos los paquetes CSV de esa entidad; Estado de México se publica en dos partes.
+2. Descomprime cada ZIP y conserva sus CSV de datos `conjunto_de_datos/denue_inegi_NN_*.csv`, donde NN es la clave estatal de dos dígitos. Colócalos directamente en la carpeta de datos del proyecto, conservando sus nombres; no copies el diccionario como entrada.
 3. Pulsa Detectar y comprueba los archivos encontrados. Usa una sola edición por entidad; el nombre no certifica cobertura ni fecha.
 
 CSV: *denue*.csv. Se leen todos los archivos seleccionados. Un ZIP pendiente de extracción no sirve como entrada.
 
-Ruta vigente por entidad: `https://www.inegi.org.mx/contenidos/masiva/denue/denue_NN_csv.zip`.
+Ruta habitual por entidad: `https://www.inegi.org.mx/contenidos/masiva/denue/denue_NN_csv.zip`.
 Por ejemplo, [Quintana Roo, clave 23](https://www.inegi.org.mx/contenidos/masiva/denue/denue_23_csv.zip).
+Estado de México, clave 15, requiere ambos paquetes: [parte 1](https://www.inegi.org.mx/contenidos/masiva/denue/denue_15_1_csv.zip) y [parte 2](https://www.inegi.org.mx/contenidos/masiva/denue/denue_15_2_csv.zip). La ruta `denue_15_csv.zip` devuelve una página de error. El descargador automático valida todas las partes antes de publicar los CSV en el proyecto; si alguna falla, conserva las fuentes existentes.
 No inventes rutas con fechas: INEGI puede responder HTTP 200 con una página de error.
 La ruta vigente puede cambiar de edición; conserva fecha y hash de la descarga.
 

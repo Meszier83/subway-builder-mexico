@@ -17,6 +17,7 @@ except ImportError:
 from typing import Dict, List, Optional, Tuple, Any
 from shapely.geometry import shape, mapping, MultiPolygon, Polygon
 from shapely.ops import unary_union
+from .building_runs import exclusive_city_run
 
 ETIQUETAS_CITIES = ['city', 'borough', 'town']
 ETIQUETAS_SUBURBS = ['city', 'borough', 'town', 'suburb', 'quarter']
@@ -264,6 +265,7 @@ def build_city_map_wsl(
     wsl_cmd = [
         "wsl.exe", "-d", "Ubuntu", "-e",
         "python3", "-u", "-m", "sb_mexico.cartography_runner",
+        "--buildings-backend", os.environ.get("SB_BUILDINGS_BACKEND", "bounded"),
         "--city-code", city_code,
         "--bbox", str(bbox[0]), str(bbox[1]), str(bbox[2]), str(bbox[3]),
         "--osm-pbf", wsl_pbf,
@@ -273,6 +275,8 @@ def build_city_map_wsl(
     ]
     if not create_building_foundations:
         wsl_cmd.append("--no-building-foundations")
+    if os.environ.get("SB_BUILDINGS_REFRESH") == "1":
+        wsl_cmd.append("--refresh-buildings")
     if max_building_tile_size is not None and int(max_building_tile_size) > 0:
         wsl_cmd.extend(["--max-building-tile-size", str(int(max_building_tile_size))])
     if not color_military_like_aerodrome:
@@ -376,15 +380,20 @@ def build_city_map_wsl(
         bufsize=1
     )
 
+    last_output = ""
     try:
         if proc.stdout:
             for line in iter(proc.stdout.readline, ""):
+                last_output = line.strip()[-300:]
                 print(line, end="", flush=True)
             proc.stdout.close()
 
         ret = proc.wait()
         if ret != 0:
-            raise RuntimeError(f"La compilación cartográfica en WSL falló con código de salida {ret}.")
+            detail = f" Último mensaje: {last_output}" if last_output else ""
+            if ret in (9, 137, -9):
+                detail += " Terminación abrupta; comprobar el registro del kernel para confirmar o descartar falta de memoria."
+            raise RuntimeError(f"La compilación cartográfica en WSL falló con código de salida {ret}.{detail}")
     finally:
         if proc.poll() is None:
             try:
@@ -406,6 +415,7 @@ def build_city_map_wsl(
     return generated_files
 
 
+@exclusive_city_run
 def build_city_map(
     city_code: str,
     bbox: List[float],
@@ -491,6 +501,8 @@ def build_city_map(
 
     try:
         from depot.maps import MapGen
+        from .cartography_backend import mapgen_for_build
+        mapgen_for_build(MapGen, None)  # Fail unsupported backends before extraction.
     except (ImportError, ModuleNotFoundError) as e:
         print(f"  [WARN] 'depot.maps' no está disponible en este entorno ({e}).")
         generated_files = {}
@@ -503,6 +515,17 @@ def build_city_map(
     work_dir = os.path.abspath(output_dir)
     native_build_dir = os.path.abspath(build_dir or os.path.expanduser(f"~/build_{city_code.lower()}"))
 
+    bounded_backend = os.environ.get("SB_BUILDINGS_BACKEND", "bounded") == "bounded"
+    bounded_base = native_build_dir
+    if bounded_backend:
+        from .building_runs import select_run, record_run
+        local_options = locals()
+        geometry_settings = {key: local_options[key] for key in ('city_code', 'bbox', 'building_filter_size', 'building_simplification', 'include_ocean', 'urban_parks_only', 'lod_peripheral_roads', 'include_pedestrian_paths', 'lod_peripheral_labels', 'lod_peripheral_buildings', 'create_building_foundations', 'max_building_tile_size', 'color_military_like_aerodrome')}
+        geometry_settings["urban_core_polygon"] = urban_core_polygon
+        geometry_settings["osm_source"] = osm_pbf_path
+        native_build_dir, geometry_fingerprint = select_run(bounded_base, labels_only, geometry_settings)
+
+
     # Localizar archivo PBF
     if not osm_pbf_path or not os.path.exists(osm_pbf_path):
         candidates = glob.glob(os.path.join(work_dir, "*.osm.pbf"))
@@ -512,8 +535,13 @@ def build_city_map(
 
     osm_pbf_name = os.path.basename(osm_pbf_path)
     cores, ram_mb = get_optimal_hardware_resources()
+    if os.environ.get("SB_BUILDINGS_BACKEND", "bounded") == "bounded":
+        cores = min(cores, 2)
 
     os.makedirs(native_build_dir, exist_ok=True)
+    if bounded_backend:
+        from .building_runs import reuse_reference_sources
+        reuse_reference_sources(bounded_base, native_build_dir)
     target_pbf_path = os.path.join(native_build_dir, osm_pbf_name)
 
     # Inyección opcional de toponimia curada si se definieron 'places'
@@ -633,9 +661,9 @@ def build_city_map(
         with open(curated_path, "w", encoding="utf-8") as cf:
             json.dump(collection, cf, ensure_ascii=False, indent=2)
         os.environ["SB_CURATED_PLACES_GEOJSON"] = curated_path
-    from .toponymy_tiles import planned_mapgen
+    from .cartography_backend import mapgen_for_build
     try:
-        MapGen = planned_mapgen(MapGen, collection)
+        MapGen = mapgen_for_build(MapGen, collection)
         os.chdir(native_build_dir)
         mapgen_kwargs = {
             "city": city_code,
@@ -662,6 +690,10 @@ def build_city_map(
         if max_building_tile_size is not None and int(max_building_tile_size) > 0:
             mapgen_kwargs["max_building_tile_size"] = int(max_building_tile_size)
 
+        if os.environ.get("SB_BUILDINGS_BACKEND", "bounded") == "bounded":
+            mapgen_kwargs["redownload_buildings"] = os.environ.get("SB_BUILDINGS_REFRESH") == "1"
+            mapgen_kwargs["bounded_core"] = urban_core_polygon
+            mapgen_kwargs["bounded_lod"] = lod_peripheral_buildings
         m = MapGen(**mapgen_kwargs)
 
         can_run_labels_only = (
@@ -703,8 +735,11 @@ def build_city_map(
         "ocean_depth_index_contours.json.gz"
     ]
 
+    if bounded_backend:
+        expected_files += ["buildings-manifest.json", "buildings-selection.json"]
+
     for filename in expected_files:
-        matches = glob.glob(os.path.join(native_build_dir, "**", filename), recursive=True)
+        matches = ([os.path.join(m.city_dir, filename)] if os.path.isfile(os.path.join(m.city_dir, filename)) else []) if os.environ.get("SB_BUILDINGS_BACKEND", "bounded") == "bounded" else glob.glob(os.path.join(native_build_dir, "**", filename), recursive=True)
         if matches:
             src = matches[0]
             dst = os.path.join(work_dir, filename)
@@ -718,4 +753,9 @@ def build_city_map(
                 continue
             print(f"  [WARN] Advertencia: no se encontró {filename} en {native_build_dir}")
 
+    if bounded_backend:
+        required = {f"{city_code}.pmtiles", "roads.geojson", "buildings_index.bin.gz"}
+        if not required.issubset(generated_files):
+            raise RuntimeError("Bounded build did not produce all required cartography artifacts")
+        record_run(bounded_base, native_build_dir, geometry_fingerprint)
     return generated_files

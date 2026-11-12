@@ -2,7 +2,8 @@
 name: subway-builder
 description: >-
   Configurar, compilar y diagnosticar mapas del repositorio Subway Builder Mexico:
-  fuentes INEGI/CONAPO, demanda gravitatoria, POIs, OSRM y cartografia depot.maps.
+  fuentes INEGI/CONAPO, demanda gravitatoria, investigacion de POIs universitarios,
+  OSRM y cartografia depot.maps.
   Usar para este pipeline y sus herramientas Wizard/POI Studio, no para desarrollo
   general de juegos ni para optimizar redes ferroviarias en otros proyectos.
 ---
@@ -47,6 +48,7 @@ Leer solo las referencias necesarias para la tarea:
 | Tarea | Referencia y puntos de entrada |
 | --- | --- |
 | Configurar ciudad o POIs | [city_configuration_guide.md](references/city_configuration_guide.md); `cities/*.yaml`, `tools/poi_studio.py` |
+| Investigar universidades o preparar un prompt de campus | [POIs universitarios](../../../docs/college-pois.md): criterio vigente, prompt y revision en el Wizard |
 | Ingesta y calibracion | [data_sources_and_census.md](references/data_sources_and_census.md); `sb_mexico/inegi.py` |
 | Demanda y cohortes | [gravity_model_and_math.md](references/gravity_model_and_math.md); `sb_mexico/gravity.py`, `sb_mexico/pipeline.py` |
 | Ruteo y cache OSRM | [routing_osrm_wsl.md](references/routing_osrm_wsl.md); `sb_mexico/osrm.py` |
@@ -57,6 +59,18 @@ Leer solo las referencias necesarias para la tarea:
 Antes de editar, leer los puntos de entrada pertinentes y las diferencias locales.
 Aplicar la correccion minima y verificar el comportamiento afectado. Los ejemplos
 de Cancun ilustran comandos; sustituir la ciudad por la seleccionada por el usuario.
+
+## POIs universitarios
+
+Para investigar campus o preparar un prompt de IA, leer la guia de
+[POIs universitarios](../../../docs/college-pois.md). Aplicar sus defaults de
+matricula, umbral, redondeo, BOOST y radio salvo indicacion del usuario; mantener
+la demanda como aproximacion practica, sin exigir asistencia diaria exacta.
+Entregar coordenadas numericas WGS84 como `loc: [longitud, latitud]`.
+Preparar la investigacion o aplicarla al Wizard segun el alcance ya autorizado.
+Conservar las correcciones manuales y los campus descartados al repetir el flujo.
+Torreon es un ejemplo, no una lista para copiar a otros mapas. Usar la guia y su
+prompt; no crear un generador como parte de este flujo.
 
 ## Ejecucion local
 

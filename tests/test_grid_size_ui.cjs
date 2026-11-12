@@ -93,6 +93,7 @@ const context = {
   updateModalSimulatorPreview() {},
   renderUrbanCorePolygon() {},
   updateZoomPreviewLayer() {},
+  validateMinZoomInput() {},
   renderGrowthFactorsTable() {},
   renderPoiList() {},
   renderPoiMarkersOnMap() {},

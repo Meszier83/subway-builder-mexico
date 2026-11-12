@@ -32,6 +32,7 @@ function harness() {
         min_pop_size:50,target_pop_size:50,max_pop_size:50},
       pois:[{id:'AIR_keep',jobs:100}], isolated_zones:[{id:'island'}],exclusion_zones:[{id:'water'}]},
     window:{}, densityLoadedCityFile:null, activeEditingPoiIndex:-1, isBboxLocked:false,
+    buildCacheData:null, syncModularCheckboxes(){},
     autoSaveTimer:null, citySaveChain:Promise.resolve(), AbortSignal:{timeout(){}},
     setTimeout(){return 1;},clearTimeout(){}, localStorage:{setItem:(key,value)=>drafts.set(key,value),removeItem:key=>drafts.delete(key)},
     wizardLifecycle:{canSave:()=>true}, cancelConapoRequest(){},updateWorkplaceSourceStatus(){},updateDemandMethodsSummary(){},
@@ -46,7 +47,7 @@ function harness() {
     }};
   vm.createContext(context);
   for (const name of ['selectedDemandEngine','updateDemandEngineControls','syncDemandEngineFields',
-    'onDemandEngineChange','syncStateFromInputs','syncCohortCount','triggerAutoSave','saveCurrentCity','startBuild']) {
+    'onDemandEngineChange','syncStateFromInputs','syncCohortCount','syncActivePoiFromEditor','triggerAutoSave','saveCurrentCity','startBuild']) {
     const match=source.match(new RegExp('    (?:async )?function '+name+'\\(.*?\\n    }','s'));
     assert.ok(match,name);vm.runInContext(match[0],context);
   }
@@ -108,6 +109,12 @@ function harness() {
   assert.match(h.notices.at(-1),/EIC 2025.*Preparar descargas/);
   assert.equal(h.context.cityData.demand.engine,'v2');
   h.context.fetchStartupJson=async()=>({denue:{status:'ok'},cpv:{status:'ok'},marco:{status:'ok'},eic:{status:'ok'}});
+  h.context.cityData.pois.push({id:'UNI_Draft',jobs:null});
+  const requestsBeforeDraft = h.saved.length;
+  await h.context.startBuild();
+  assert.equal(h.saved.length,requestsBeforeDraft);
+  assert.match(h.notices.at(-1),/Demanda pendiente en 1 POI/);
+  h.context.cityData.pois.at(-1).jobs = 500;
   await h.context.startBuild();assert.equal(h.saved.at(-1).url,'/api/build/start');assert.equal(h.saved.at(-1).body.file,'a.yaml');
   console.log('Demand engine toggle: activation, reload/reversal, preserved map settings, drafts, stale project and build preflight: PASS');
 })().catch(error=>{console.error(error);process.exitCode=1;});

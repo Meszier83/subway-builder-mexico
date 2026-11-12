@@ -1010,7 +1010,7 @@
           <div class="grid grid-cols-2 gap-2">
             <div class="space-y-1">
               <label class="text-[10px] font-bold uppercase tracking-wider text-stone-500">Cuota Empleos / Viajes</label>
-              <input type="number" id="editPoiJobs" oninput="updatePoiPreviewFromForm()" value="0" class="w-full font-mono text-xs bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-bold">
+              <input type="number" id="editPoiJobs" oninput="updatePoiPreviewFromForm()" value="0" placeholder="Demanda pendiente" class="w-full font-mono text-xs bg-white border border-stone-300 rounded-lg px-2.5 py-1.5 text-stone-900 font-bold">
             </div>
             <div class="space-y-1">
               <label class="text-[10px] font-bold uppercase tracking-wider text-stone-500">Modo Asignación</label>
@@ -1026,6 +1026,8 @@
             <p><strong>BOOST:</strong> Suma la cuota manual sobre el DENUE local. Ideal para estudiantes sobre áreas comerciales.</p>
             <p><strong>REPLACE:</strong> Fija exactamente la cuota manual y reemplaza el DENUE local.</p>
           </div>
+
+          <div id="poiResearchNotes" hidden class="text-xs text-stone-700 bg-amber-50 border border-amber-200 rounded-lg p-2 whitespace-pre-line break-words"></div>
 
           <!-- PANEL INTEGRADO: TELEMETRÍA DE ABSORCIÓN & POIs AFECTADOS -->
           <div class="p-3 bg-stone-50 border border-stone-200 rounded-xl space-y-2.5 shadow-xs">
@@ -2239,8 +2241,8 @@
           <div class="source-guide-body">
             <p>Ubica establecimientos y aporta su actividad y estrato de empleo.</p>
             <a href="https://www.inegi.org.mx/app/descarga/" target="_blank" rel="noopener noreferrer" class="source-guide-link">Abrir INEGI ↗</a>
-            <p>Ruta vigente: <code>https://www.inegi.org.mx/contenidos/masiva/denue/denue_NN_csv.zip</code>. Conserva fecha y edición; no inventes enlaces con fechas.</p>
-            <ol><li>Selecciona DENUE, la entidad federativa del proyecto y la edición que quieres utilizar. Descarga el paquete CSV.</li><li>Descomprime el ZIP y copia conjunto_de_datos/denue_inegi_NN_.csv directamente al proyecto. NN es la clave estatal; no copies el diccionario como datos.</li><li>Pulsa Detectar y comprueba los archivos encontrados. Usa una sola edición por entidad; el nombre no certifica cobertura ni fecha.</li></ol>
+            <p>Ruta habitual: <code>https://www.inegi.org.mx/contenidos/masiva/denue/denue_NN_csv.zip</code>. Estado de México (15) requiere <a href="https://www.inegi.org.mx/contenidos/masiva/denue/denue_15_1_csv.zip" target="_blank" rel="noopener noreferrer" class="source-guide-link">parte 1 ↗</a> y <a href="https://www.inegi.org.mx/contenidos/masiva/denue/denue_15_2_csv.zip" target="_blank" rel="noopener noreferrer" class="source-guide-link">parte 2 ↗</a>; la ruta sin número de parte devuelve una página de error. Conserva fecha y edición; no inventes enlaces con fechas.</p>
+            <ol><li>Selecciona DENUE, la entidad federativa del proyecto y la edición que quieres utilizar. Descarga todos sus paquetes CSV.</li><li>Descomprime cada ZIP y copia sus CSV conjunto_de_datos/denue_inegi_NN_*.csv directamente al proyecto, conservando sus nombres. NN es la clave estatal; no copies el diccionario como datos.</li><li>Pulsa Detectar y comprueba los archivos encontrados. Usa una sola edición por entidad; el nombre no certifica cobertura ni fecha.</li></ol>
             <p class="source-guide-note">CSV: *denue*.csv. Se leen todos los archivos seleccionados. Un ZIP pendiente de extracción no sirve como entrada.</p>
           </div>
         </details>

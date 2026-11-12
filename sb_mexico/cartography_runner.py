@@ -21,6 +21,8 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+from sb_mexico.building_runs import exclusive_city_run
+
 from sb_mexico.cartography import (
     get_optimal_hardware_resources,
     ETIQUETAS_CITIES,
@@ -193,6 +195,7 @@ def apply_urban_lod_filtering(
         return input_pbf
 
 
+@exclusive_city_run
 def run_cartography(
     city_code: str,
     bbox: List[float],
@@ -253,12 +256,24 @@ def run_cartography(
 
     try:
         from depot.maps import MapGen
+        from .cartography_backend import mapgen_for_build
+        mapgen_for_build(MapGen, None)  # Fail unsupported backends before extraction.
     except ImportError as e:
         print(f"ERROR: 'depot.maps' no está disponible en este entorno Python ({e}).", file=sys.stderr)
         return 1
 
     work_dir = os.path.abspath(output_dir)
     native_build_dir = os.path.abspath(os.path.expanduser(f"~/build_{city_code.lower()}"))
+
+    bounded_backend = os.environ.get("SB_BUILDINGS_BACKEND", "bounded") == "bounded"
+    bounded_base = native_build_dir
+    if bounded_backend:
+        from .building_runs import select_run, record_run
+        local_options = locals()
+        geometry_settings = {key: local_options[key] for key in ('city_code', 'bbox', 'building_filter_size', 'building_simplification', 'include_ocean', 'urban_parks_only', 'lod_peripheral_roads', 'include_pedestrian_paths', 'lod_peripheral_labels', 'lod_peripheral_buildings', 'create_building_foundations', 'max_building_tile_size', 'color_military_like_aerodrome')}
+        geometry_settings["urban_core_geojson"] = urban_core_geojson
+        geometry_settings["osm_source"] = osm_pbf
+        native_build_dir, geometry_fingerprint = select_run(bounded_base, labels_only, geometry_settings)
 
     if os.path.exists(native_build_dir):
         # Limpiar teselas temporales, pmtiles parciales y archivos intermedios residuales (solo si no es labels_only)
@@ -274,6 +289,9 @@ def run_cartography(
     else:
         os.makedirs(native_build_dir, exist_ok=True)
     os.makedirs(work_dir, exist_ok=True)
+    if bounded_backend:
+        from .building_runs import reuse_reference_sources
+        reuse_reference_sources(bounded_base, native_build_dir)
 
     print(f"===========================================================")
     print(f"  SUBWAY BUILDER MÉXICO - WSL CARTOGRAPHY ENGINE")
@@ -389,6 +407,8 @@ def run_cartography(
             print("-> [Caché Edificios 3D] Reutilizando edificios 3D previamente descargados (BBOX verificado).")
 
     cores, ram_mb = get_optimal_hardware_resources()
+    if os.environ.get("SB_BUILDINGS_BACKEND", "bounded") == "bounded":
+        cores = min(cores, 2)
     # MapGen expects RAM in Gigabytes (its setter converts GB to MB: self._RAM = int(RAM * 1000))
     ram_gb = max(2.0, round(ram_mb / 1000.0, 1))
 
@@ -427,8 +447,8 @@ def run_cartography(
     print(f"-> Inicializando MapGen (Cores: {cores}, RAM asignada: {ram_gb} GB [{ram_mb} MB])...")
 
     prev_cwd = os.getcwd()
-    from .toponymy_tiles import planned_mapgen
-    MapGen = planned_mapgen(MapGen, curated_data if curated_override else None)
+    from .cartography_backend import mapgen_for_build
+    MapGen = mapgen_for_build(MapGen, curated_data if curated_override else None)
     try:
         os.chdir(native_build_dir)
         mapgen_kwargs = {
@@ -457,6 +477,8 @@ def run_cartography(
         if max_building_tile_size is not None and int(max_building_tile_size) > 0:
             mapgen_kwargs["max_building_tile_size"] = int(max_building_tile_size)
 
+        if os.environ.get("SB_BUILDINGS_BACKEND", "bounded") == "bounded":
+            mapgen_kwargs["redownload_buildings"] = os.environ.get("SB_BUILDINGS_REFRESH") == "1"
         m = MapGen(**mapgen_kwargs)
 
         nolabels_candidates = [
@@ -498,8 +520,11 @@ def run_cartography(
     ]
 
     copied_count = 0
+    if bounded_backend:
+        expected_files += ["buildings-manifest.json", "buildings-selection.json"]
+
     for filename in expected_files:
-        matches = glob.glob(os.path.join(native_build_dir, "**", filename), recursive=True)
+        matches = ([os.path.join(m.city_dir, filename)] if os.path.isfile(os.path.join(m.city_dir, filename)) else []) if os.environ.get("SB_BUILDINGS_BACKEND", "bounded") == "bounded" else glob.glob(os.path.join(native_build_dir, "**", filename), recursive=True)
         if matches:
             src = matches[0]
             dst = os.path.join(work_dir, filename)
@@ -513,11 +538,18 @@ def run_cartography(
             print(f"  ⚠ Advertencia: no se encontró {filename} en {native_build_dir}")
 
     print(f"-> {copied_count}/{len(expected_files)} artefactos cartográficos generados exitosamente.")
+    if bounded_backend:
+        required = (f"{city_code}.pmtiles", "roads.geojson", "buildings_index.bin.gz")
+        if not all(os.path.isfile(os.path.join(m.city_dir, item)) for item in required):
+            raise RuntimeError("Bounded build did not produce all required cartography artifacts")
+        record_run(bounded_base, native_build_dir, geometry_fingerprint)
     return 0 if copied_count >= 2 else 1
 
 
 def main():
     parser = argparse.ArgumentParser(description="Subway Builder México - WSL Cartography Runner")
+    parser.add_argument("--buildings-backend", choices=("bounded", "legacy"), default=os.environ.get("SB_BUILDINGS_BACKEND", "bounded"))
+    parser.add_argument("--refresh-buildings", action="store_true", default=os.environ.get("SB_BUILDINGS_REFRESH") == "1")
     parser.add_argument("--city-code", required=True, help="Código de ciudad")
     parser.add_argument("--bbox", nargs=4, type=float, required=True, help="min_lon min_lat max_lon max_lat")
     parser.add_argument("--osm-pbf", required=True, help="Ruta al archivo .osm.pbf")
@@ -540,6 +572,9 @@ def main():
     parser.add_argument("--labels-only", action="store_true", default=False, help="Modo rápido: solo regenerar capas de toponimia con MapGen.add_labels")
 
     args = parser.parse_args()
+    os.environ["SB_BUILDINGS_BACKEND"] = args.buildings_backend
+    if args.refresh_buildings:
+        os.environ["SB_BUILDINGS_REFRESH"] = "1"
     ret = run_cartography(
         city_code=args.city_code,
         bbox=args.bbox,
