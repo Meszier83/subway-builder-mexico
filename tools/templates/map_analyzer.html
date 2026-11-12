@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Subway Builder · Map Analyzer</title>
+  <link rel="stylesheet" href="/leaflet.css">
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="/leaflet.js"></script>
+  <script defer src="/core.js"></script>
+  <script defer src="/import.js"></script>
+  <script defer src="/app.js"></script>
+</head>
+<body data-map-theme="dark">
+  <aside>
+    <header><span class="eyebrow">SUBWAY BUILDER / SPATIAL TOOLS</span><h1>Map Analyzer<span class="dot">.</span></h1><p class="intro">Find the people. Follow the trips.</p></header>
+    <label class="import-button" for="map-file">↗ Open a map ZIP or demand JSON</label>
+    <input id="map-file" type="file" accept=".zip,.json" hidden>
+    <p id="status" role="status" aria-live="polite">Your map stays on this computer. Imports are read-only.</p>
+    <div id="warnings" role="alert" hidden></div>
+    <section class="dataset"><h2 id="dataset-name">No map loaded</h2><div class="stats"><div><strong id="total-residents">—</strong><span>Resident commuters</span></div><div><strong id="total-jobs">—</strong><span>Job arrivals</span></div></div><p class="muted" id="trip-total">Open a map to explore its demand.</p></section>
+    <fieldset id="controls" disabled>
+      <legend class="eyebrow">01 / EXPLORE CONCENTRATION</legend>
+      <label>View<select id="view-mode"><option value="single">Single map</option><option value="people-jobs">People and jobs</option><option value="versions">Compare map exports</option></select></label>
+      <div id="compare-controls" hidden>
+        <label class="import-button" for="comparison-file">Open comparison B</label><input id="comparison-file" type="file" accept=".zip,.json" hidden>
+        <p id="comparison-status" class="muted">Choose the second map export.</p>
+        <label>Metric<select id="version-metric"><option value="residents">People</option><option value="jobs">Jobs</option><option value="trips">Trip connections</option></select></label>
+        <label>Display<select id="version-display"><option value="side-by-side">Side by side</option><option value="difference">Difference (B − A)</option></select></label>
+        <label id="comparison-filter-label" hidden>Trip filter<select id="comparison-filter"><option value="all">All trips</option><option value="out">Origins in selected area</option><option value="in">Destinations in selected area</option></select></label>
+        <button id="remove-comparison" class="text-button">Remove comparison B</button>
+        <div id="comparison-results"></div>
+      </div>
+      <label id="scale-label" hidden>Color scale<select id="scale-mode"><option value="shared">Shared</option><option value="independent">Independent</option></select></label>
+      <div class="segmented" id="layers"><button data-layer="residents" class="active" aria-pressed="true">People</button><button data-layer="jobs" aria-pressed="false">Jobs</button><button data-layer="balance" aria-pressed="false">Balance</button></div>
+      <label>Display<select id="display"><option value="heat">Smooth heatmap</option><option value="grid">Count grid</option></select></label>
+      <label>Map background<select id="map-theme"><option value="dark" selected>Dark · demand focus</option><option value="light">Light · streets</option></select></label>
+      <details id="strength-label"><summary>Fine-tune appearance</summary><label id="contrast-adjustment" title="Adjust visual contrast without changing any counts.">Visual contrast <output id="strength-value">1.0×</output><input id="strength" type="range" min="0.7" max="3" step="0.1" value="1"></label></details>
+      <label id="smoothing-label">Smoothing radius <output id="smoothing-value">600 m</output><input id="smoothing" type="range" min="200" max="2000" step="100" value="600"></label>
+      <label>Analysis cell size<select id="cell-size"><option value="250">250 m</option><option value="500" selected>500 m</option><option value="1000">1 km</option></select></label>
+      <p class="muted" id="concentration">—</p>
+      <div class="section-rule"></div>
+      <h3 class="eyebrow section-title">02 / PEOPLE & JOBS TOGETHER</h3>
+      <div class="correlation"><strong id="correlation">—</strong><span>Pearson correlation<br><small id="cell-count">Occupied cells only</small></span></div>
+      <canvas id="scatter" height="110" aria-label="Residents versus jobs per analysis cell"></canvas>
+      <p class="muted">Each dot is one cell. Click a dot to inspect it. The score describes co-location; it does not measure trip connections. Changing cell size can change the result.</p>
+      <div class="section-rule"></div>
+      <h3 class="eyebrow section-title">03 / FOLLOW THE TRIPS</h3>
+      <label class="check"><input id="show-flows" type="checkbox"> Show strongest trip links</label>
+      <label>When an area is selected<select id="flow-direction"><option value="out">Where residents go →</option><option value="in">Where workers come from ←</option></select></label>
+      <label>Area radius<select id="radius"><option value="400">400 m</option><option value="800" selected>800 m</option><option value="1200">1.2 km</option></select></label>
+      <div id="selection" class="selection"><strong>Click the map to inspect an area.</strong><p>See counts and the trips connected to it.</p></div>
+      <button id="clear-selection" class="text-button" hidden>Clear selected area</button>
+      <p id="flow-summary" class="muted">Trip links are aggregated by analysis cell.</p>
+      <button id="export-grid" class="secondary">↓ Export analysis grid as CSV</button>
+      <button id="export-analysis" class="secondary">↓ Export analysis JSON</button>
+      <button id="export-trips" class="secondary" hidden>↓ Export selected trips CSV</button>
+      <button id="export-comparison" class="secondary" hidden>↓ Export comparison cells CSV</button>
+      <button id="export-comparison-trips" class="secondary" hidden>↓ Export comparison trips CSV</button>
+      <button id="export-image-tiles" class="secondary">↓ Export map PNG with streets</button>
+      <button id="export-image" class="secondary">↓ Export demand-only map PNG</button>
+      <p class="muted">If street tiles cannot be exported, use the demand-only PNG.</p>
+    </fieldset>
+    <footer>Counts describe the imported game's modeled demand, not total census population or observed employment. Circles use straight-line distance; trip links show connections, not street routes.</footer>
+  </aside>
+  <main><div id="map-layout"><div id="map" aria-label="Demand map"></div><div id="map-secondary" aria-label="Comparison map" hidden><div id="secondary-title" class="secondary-title"></div><div id="secondary-legend" class="secondary-legend"><span id="secondary-legend-text"></span><div id="secondary-gradient"></div><div id="secondary-ticks" class="legend-ticks"></div></div></div></div><div id="empty" class="empty"><span class="eyebrow">A DIFFERENT VIEW OF YOUR CITY</span><h2>Where does your<br>city come together?</h2><p>Open a Subway Builder map to explore its people,<br>jobs, and the journeys between them.</p><button id="open-empty">Open a map ↗</button></div><div class="map-top"><span id="map-label">DEMAND EXPLORER</span><button id="fit-map" disabled>Fit map ↗</button></div><div id="legend" class="map-legend" hidden><strong id="legend-title"></strong><div id="legend-gradient"></div><div class="legend-ends"><span id="legend-low"></span><span id="legend-high"></span></div><div id="legend-ticks" class="legend-ticks"></div><div id="balance-key" hidden></div><p id="legend-note"></p></div><p id="basemap-status" class="basemap-status" hidden>Street background unavailable. Demand analysis still works.</p>
+    <div id="inspector" class="map-inspector" hidden>
+      <details open><summary>Inspect an area</summary>
+      <label>Analysis<select id="analysis-mode"><option value="single">Single area</option><option value="pair">Area to area</option></select></label><div id="pair-controls" hidden><label>Edit<select id="pair-target"><option value="a">Area A</option><option value="b">Area B</option></select></label><label>Circle radius (m)<input id="pair-radius" type="number" min="50" max="50000" value="800"></label><button id="pair-clear-a">Clear Area A</button> <button id="pair-clear-b">Clear Area B</button> <button id="pair-swap">Swap areas</button><label>Highlight<select id="pair-direction"><option value="ab">A → B</option><option value="ba">B → A</option></select></label><div id="pair-results" aria-live="polite"></div></div>
+      <div class="inspect-controls"><label>Tool <select id="inspect-mode"><option value="circle">Circle</option><option value="cell">Cell</option><option value="polygon">Polygon</option></select></label><button id="inspector-clear">Clear</button></div>
+      <div id="polygon-controls" hidden><p id="polygon-status">Click to add polygon vertices.</p><button id="polygon-finish">Finish</button> <button id="polygon-undo">Undo vertex</button> <button id="polygon-cancel">Cancel</button></div>
+      <div id="inspector-summary">Click the map to inspect an area.</div>
+      <label>Trip view <select id="trip-view"><option value="off">Off</option><option value="destinations">Where residents go</option><option value="origins">Where workers come from</option><option value="links">Trip links</option></select></label>
+      <div id="trip-results" hidden></div></details>
+    </div>
+  </main>
+</body>
+</html>
