@@ -1,0 +1,9 @@
+{
+  "id": "com.meszier83.cur-economic-pilot",
+  "name": "CUR Economic Pilot",
+  "description": "Optional experimental Cancún income and travel-cost profile for the Railyard CUR map. One switch; existing fares are preserved.",
+  "version": "0.1.0",
+  "author": {"name": "Meszier83"},
+  "main": "index.js",
+  "dependencies": {"subway-builder": "1.7.2", "com.railyard.maploader": ">=0.2.10"}
+}

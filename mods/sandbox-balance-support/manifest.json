@@ -1,0 +1,9 @@
+{
+  "id": "com.meszier83.sandbox-balance-support",
+  "name": "Sandbox Balance Support",
+  "description": "Automatically subsidizes global sandbox finances to keep aggregate operating profit positive. Individual line finances are unchanged.",
+  "version": "0.1.0",
+  "author": {"name": "Meszier83"},
+  "main": "index.js",
+  "dependencies": {"subway-builder": "1.7.2"}
+}
