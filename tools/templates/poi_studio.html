@@ -1884,7 +1884,7 @@
                 if (data.cities.length > 0) {
                     const urlParams = new URLSearchParams(window.location.search);
                     const requested = urlParams.get('city');
-                    const target = data.cities.find(c => c.path.includes(requested)) || data.cities[0];
+                    const target = (requested ? data.cities.find(c => c.path.includes(requested)) : null) || data.cities[0];
                     select.value = target.path;
                     loadCity(target.path);
                 }

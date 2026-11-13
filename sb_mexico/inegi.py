@@ -453,81 +453,90 @@ def parse_conapo_projections(
                            year_basis='confirmed_source_year' if source_year else 'unverified',
                            available_years=[], value_kind='population')
 
-    for enc in ['utf-8-sig', 'latin1', 'utf-8', 'cp1252']:
+    df = None
+    for enc in ['utf-8-sig', 'utf-8', 'cp1252', 'latin1']:
         try:
             df = pd.read_csv(conapo_path, encoding=enc, low_memory=False)
-            cols = [str(c).strip().upper() for c in df.columns]
-            df.columns = cols
-
-            if 'CLAVE' in cols and any('POB' in c for c in cols):
-                pob_candidates = [c for c in cols if 'POB_TOTAL' in c or 'POB_MIT_MUN' in c or 'POBTOT' in c or c.startswith('POB')]
-                col_pob = pob_candidates[0]
-
-                # Si el archivo tiene desglose por sexo y además contiene una fila TOTAL,
-                # filtramos por TOTAL para no duplicar sumas. Si solo tiene HOMBRES y MUJERES,
-                # se mantiene completo para que el groupby sume ambos sexos.
-                if 'SEXO' in cols:
-                    sex_vals = set(df['SEXO'].dropna().astype(str).str.strip().str.upper().unique())
-                    if 'TOTAL' in sex_vals:
-                        df = df[df['SEXO'].astype(str).str.strip().str.upper() == 'TOTAL']
-
-                df['cve_clean'] = pd.to_numeric(df['CLAVE'], errors='coerce').fillna(0).astype(int)
-                df = df[df['cve_clean'] > 0]
-                df['pob_clean'] = pd.to_numeric(df[col_pob].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-                if diagnostics is not None and 'NOM_MUN' in df:
-                    diagnostics['municipality_names'] = {
-                        f'{int(key):05d}': str(value).strip()
-                        for key, value in df.groupby('cve_clean')['NOM_MUN'].first().items()}
-
-                # Detectar columna de año normalizando posibles variantes
-                col_ano = None
-                for c in cols:
-                    c_norm = c.replace('Ñ', 'N').replace('Á', 'A').replace('Ó', 'O')
-                    if c_norm in ['ANO', 'ANIO', 'YEAR', 'AO']:
-                        col_ano = c
-                        break
-
-                # Filtrar año si el archivo contiene desglose temporal multianual
-                if col_ano:
-                    df['ANO_num'] = pd.to_numeric(df[col_ano], errors='coerce')
-                    available_years = np.sort(df['ANO_num'].dropna().unique())
-                    if diagnostics is not None:
-                        diagnostics['available_years'] = [int(y) for y in available_years]
-                    
-                    if as_growth_factors and 2020 in available_years:
-                        chosen_year = target_year if target_year in available_years else (
-                            available_years[np.argmin(np.abs(available_years - target_year))]
-                        )
-                        df_target = df[df['ANO_num'] == chosen_year].groupby('cve_clean')['pob_clean'].sum()
-                        df_2020 = df[df['ANO_num'] == 2020].groupby('cve_clean')['pob_clean'].sum()
-                        ratios = {}
-                        for cve, val_target in df_target.items():
-                            val_base = df_2020.get(cve, 0)
-                            if val_base > 0 and val_target > 0:
-                                ratios[f"{cve:05d}"] = round(float(val_target / val_base), 4)
-                        if ratios:
-                            if diagnostics is not None:
-                                diagnostics.update(effective_year=int(chosen_year),
-                                    year_basis='exact' if chosen_year == target_year else 'nearest_available',
-                                    value_kind='growth_factor', base_year=2020,
-                                    denominator='CONAPO population 2020')
-                            return ratios
-
-                    if len(available_years) > 0:
-                        chosen_year = target_year if target_year in available_years else (
-                            available_years[np.argmin(np.abs(available_years - target_year))]
-                        )
-                        df = df[df['ANO_num'] == chosen_year]
-                        if diagnostics is not None:
-                            diagnostics.update(effective_year=int(chosen_year),
-                                year_basis='exact' if chosen_year == target_year else 'nearest_available')
-
-                grouped = df.groupby('cve_clean')['pob_clean'].sum()
-                projections = {f"{cve:05d}": float(val) for cve, val in grouped.items() if val > 0}
-                if projections:
-                    return projections
-        except Exception:
+            break
+        except UnicodeDecodeError:
             continue
+        except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError):
+            return {}
+    if df is None:
+        return {}
+
+    cols = [str(c).strip().upper() for c in df.columns]
+    df.columns = cols
+
+    if 'CLAVE' in cols and any('POB' in c for c in cols):
+        pob_candidates = [c for c in cols if 'POB_TOTAL' in c or 'POB_MIT_MUN' in c or 'POBTOT' in c or c.startswith('POB')]
+        if not pob_candidates:
+            pob_candidates = [c for c in cols if 'POB' in c]
+        col_pob = pob_candidates[0]
+
+        # Si el archivo tiene desglose por sexo y además contiene una fila TOTAL,
+        # filtramos por TOTAL para no duplicar sumas. Si solo tiene HOMBRES y MUJERES,
+        # se mantiene completo para que el groupby sume ambos sexos.
+        if 'SEXO' in cols:
+            sex_vals = set(df['SEXO'].dropna().astype(str).str.strip().str.upper().unique())
+            if 'TOTAL' in sex_vals:
+                df = df[df['SEXO'].astype(str).str.strip().str.upper() == 'TOTAL']
+
+        df['cve_clean'] = pd.to_numeric(df['CLAVE'], errors='coerce').fillna(0).astype(int)
+        df = df[df['cve_clean'] > 0]
+        df['pob_clean'] = pd.to_numeric(df[col_pob].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+        if diagnostics is not None and 'NOM_MUN' in df:
+            diagnostics['municipality_names'] = {
+                f'{int(key):05d}': str(value).strip()
+                for key, value in df.groupby('cve_clean')['NOM_MUN'].first().items()}
+
+        # Detectar columna de año normalizando posibles variantes
+        col_ano = None
+        for c in cols:
+            c_norm = c.replace('Ñ', 'N').replace('Á', 'A').replace('Ó', 'O')
+            if c_norm in ['ANO', 'ANIO', 'YEAR', 'AO']:
+                col_ano = c
+                break
+
+        # Filtrar año si el archivo contiene desglose temporal multianual
+        if col_ano:
+            df['ANO_num'] = pd.to_numeric(df[col_ano], errors='coerce')
+            available_years = np.sort(df['ANO_num'].dropna().unique())
+            if diagnostics is not None:
+                diagnostics['available_years'] = [int(y) for y in available_years]
+
+            if as_growth_factors and 2020 in available_years:
+                chosen_year = target_year if target_year in available_years else (
+                    available_years[np.argmin(np.abs(available_years - target_year))]
+                )
+                df_target = df[df['ANO_num'] == chosen_year].groupby('cve_clean')['pob_clean'].sum()
+                df_2020 = df[df['ANO_num'] == 2020].groupby('cve_clean')['pob_clean'].sum()
+                ratios = {}
+                for cve, val_target in df_target.items():
+                    val_base = df_2020.get(cve, 0)
+                    if val_base > 0 and val_target > 0:
+                        ratios[f"{cve:05d}"] = round(float(val_target / val_base), 4)
+                if ratios:
+                    if diagnostics is not None:
+                        diagnostics.update(effective_year=int(chosen_year),
+                            year_basis='exact' if chosen_year == target_year else 'nearest_available',
+                            value_kind='growth_factor', base_year=2020,
+                            denominator='CONAPO population 2020')
+                    return ratios
+
+            if len(available_years) > 0:
+                chosen_year = target_year if target_year in available_years else (
+                    available_years[np.argmin(np.abs(available_years - target_year))]
+                )
+                df = df[df['ANO_num'] == chosen_year]
+                if diagnostics is not None:
+                    diagnostics.update(effective_year=int(chosen_year),
+                        year_basis='exact' if chosen_year == target_year else 'nearest_available')
+
+        grouped = df.groupby('cve_clean')['pob_clean'].sum()
+        projections = {f"{cve:05d}": float(val) for cve, val in grouped.items() if val > 0}
+        if projections:
+            return projections
     return {}
 
 

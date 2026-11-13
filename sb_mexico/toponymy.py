@@ -116,7 +116,6 @@ def extract_settlement_suggestions(
     para asistir al usuario en POI Studio.
     """
     from .toponymy_sources import read_denue_sources, denue_places
-    from .toponymy_sources import read_denue_sources, denue_places
     if not os.path.exists(denue_path) or not bbox or len(bbox) != 4:
         return []
     return denue_places(read_denue_sources([denue_path], bbox), min_count=min_count)
@@ -132,7 +131,6 @@ def extract_city_localities_from_denue(
     a partir de la columna 'localidad' del DENUE del INEGI dentro del BBOX.
     Calcula la mediana de coordenadas de sus establecimientos para situar el nodo urbano.
     """
-    from .toponymy_sources import read_denue_sources, denue_places
     from .toponymy_sources import read_denue_sources, denue_places
     if not os.path.exists(denue_path) or not bbox or len(bbox) != 4:
         return []

@@ -89,7 +89,8 @@ def transport_parts(problem, v, w, parts, size, seed):
                 phase = int(hashlib.sha256(repr((problem.origins[i]['id'], key, size, seed)).encode())
                             .hexdigest()[:13], 16)/16**13
                 positions = (np.arange(count)+phase)*cumulative[-1]/count
-                for job in jobs[np.searchsorted(cumulative, positions, side='right')]:
+                selected = np.minimum(np.searchsorted(cumulative, positions, side='right'), len(cumulative)-1)
+                for job in jobs[selected]:
                     proposal[part, int(job)] += 1
                     nearest[part].add(int(job))
                 delta = (problem.coordinates[jobs]-problem.origins[i]['location'])*problem.scale

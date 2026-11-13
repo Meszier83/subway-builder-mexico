@@ -269,10 +269,10 @@
           return;
         }
 
-        cont.innerHTML = cities.map(c => {
+        cont.innerHTML = cities.map((c, idx) => {
           const isCurrent = c.path === currentCityFile;
           const poiCount = c.poi_count || 0;
-          const bboxStr = c.bbox ? `[${c.bbox.map(n => typeof n === 'number' ? n.toFixed(2) : n).join(', ')}]` : 'Sin BBOX';
+          const bboxStr = c.bbox ? `[${c.bbox.map(n => typeof n === 'number' ? n.toFixed(2) : escapeHtml(String(n))).join(', ')}]` : 'Sin BBOX';
           const dataDirStr = c.data_dir || `data/${c.code ? c.code.toLowerCase() : ''}`;
 
           return `
@@ -283,18 +283,18 @@
             }">
               <div class="overflow-hidden space-y-1">
                 <div class="flex items-center space-x-2">
-                  <span class="font-bold text-stone-900 text-sm truncate">${c.name}</span>
-                  <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-stone-100 text-stone-800 border border-stone-300 uppercase">${c.code}</span>
+                  <span class="font-bold text-stone-900 text-sm truncate">${escapeHtml(c.name || '')}</span>
+                  <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-stone-100 text-stone-800 border border-stone-300 uppercase">${escapeHtml(c.code || '')}</span>
                   ${isCurrent ? '<span class="text-[10px] bg-amber-200 text-amber-900 px-2 py-0.5 rounded font-bold">Activo</span>' : ''}
                 </div>
                 <div class="flex flex-wrap items-center gap-x-3 text-[11px] text-stone-600 font-mono">
                   <span>📍 POIs: <strong>${poiCount}</strong></span>
                   <span>🗺️ BBOX: ${bboxStr}</span>
-                  <span>📂 Carpeta: <code class="text-stone-800 font-bold bg-stone-100 px-1 rounded">${dataDirStr}</code></span>
+                  <span>📂 Carpeta: <code class="text-stone-800 font-bold bg-stone-100 px-1 rounded">${escapeHtml(dataDirStr)}</code></span>
                 </div>
               </div>
               <div class="flex items-center space-x-2 shrink-0">
-                <button onclick="selectAndLoadProject('${c.path}')" class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 ${
+                <button data-open-project="${idx}" class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 ${
                   isCurrent
                     ? 'bg-amber-200 text-amber-900 cursor-default'
                     : 'bg-metro-orange hover:bg-orange-600 text-white shadow'
@@ -302,13 +302,21 @@
                   <i data-lucide="check" class="w-3.5 h-3.5"></i>
                   <span>${isCurrent ? 'Abierto' : 'Abrir'}</span>
                 </button>
-                <button onclick="confirmDeleteProject('${c.path}', '${c.name}')" class="p-1.5 rounded-lg text-rose-600 hover:text-rose-800 hover:bg-rose-50 transition border border-transparent hover:border-rose-200" title="Eliminar proyecto">
+                <button data-delete-project="${idx}" class="p-1.5 rounded-lg text-rose-600 hover:text-rose-800 hover:bg-rose-50 transition border border-transparent hover:border-rose-200" title="Eliminar proyecto">
                   <i data-lucide="trash-2" class="w-4 h-4"></i>
                 </button>
               </div>
             </div>
           `;
         }).join('');
+        cont.querySelectorAll('[data-open-project]').forEach(btn => {
+          const item = cities[Number(btn.dataset.openProject)];
+          if (item) btn.addEventListener('click', () => selectAndLoadProject(item.path));
+        });
+        cont.querySelectorAll('[data-delete-project]').forEach(btn => {
+          const item = cities[Number(btn.dataset.deleteProject)];
+          if (item) btn.addEventListener('click', () => confirmDeleteProject(item.path, item.name));
+        });
         lucide.createIcons();
       } catch (e) {
         cont.innerHTML = `<div class="p-4 text-rose-600 text-xs">Error al cargar proyectos: ${e.message}</div>`;
@@ -5836,18 +5844,21 @@
           const exclusions = status.exclusions || [];
           if (exclusions.length > 0) {
             exCont.classList.remove('hidden');
-            exList.innerHTML = exclusions.map(ex => `
+            exList.innerHTML = exclusions.map((ex, idx) => `
               <div class="flex items-center justify-between bg-stone-50 border border-stone-200 px-3 py-2 rounded-lg text-xs">
                 <div class="flex items-center space-x-2 truncate mr-2">
                   <span class="w-2 h-2 rounded-full bg-stone-400 shrink-0"></span>
-                  <span class="truncate text-stone-600 font-mono line-through font-semibold">${ex}</span>
+                  <span class="truncate text-stone-600 font-mono line-through font-semibold">${escapeHtml(ex)}</span>
                 </div>
-                <button onclick="relinkDataFile('${ex}')" class="px-2 py-1 bg-white hover:bg-stone-100 border border-stone-300 text-emerald-700 hover:text-emerald-800 rounded font-semibold text-[11px] flex items-center space-x-1 transition shadow-2xs shrink-0" title="Volver a incluir este archivo en la compilación">
+                <button data-relink-file="${idx}" class="px-2 py-1 bg-white hover:bg-stone-100 border border-stone-300 text-emerald-700 hover:text-emerald-800 rounded font-semibold text-[11px] flex items-center space-x-1 transition shadow-2xs shrink-0" title="Volver a incluir este archivo en la compilación">
                   <i data-lucide="undo-2" class="w-3.5 h-3.5"></i>
                   <span>Restaurar</span>
                 </button>
               </div>
             `).join('');
+            exList.querySelectorAll('[data-relink-file]').forEach(btn => {
+              btn.addEventListener('click', () => relinkDataFile(exclusions[Number(btn.dataset.relinkFile)]));
+            });
           } else {
             exCont.classList.add('hidden');
             exList.innerHTML = '';

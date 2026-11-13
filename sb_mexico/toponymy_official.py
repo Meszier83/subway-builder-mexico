@@ -116,12 +116,15 @@ def _records(path, kind, bbox=None, depth=0):
         return
     if path.suffix.lower() == '.csv':
         import pandas as pd
-        for encoding in ('utf-8-sig', 'cp1252'):
+        frame = None
+        for encoding in ('utf-8-sig', 'cp1252', 'latin1'):
             try:
                 frame = pd.read_csv(path, dtype=str, encoding=encoding, sep=None, engine='python').fillna('')
                 break
             except UnicodeDecodeError:
                 continue
+        if frame is None:
+            raise UnicodeDecodeError('csv', b'', 0, 1, f'Unable to decode CSV file: {path}')
         for row in frame.to_dict('records'):
             yield row, None
         return

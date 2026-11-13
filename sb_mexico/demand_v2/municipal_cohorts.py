@@ -92,7 +92,7 @@ def _assign_distribution(distribution, origins, sizes_by_origin, seed, flow=None
             cumulative=np.cumsum(flow[edges])
             phase=int(hashlib.sha256(repr((origins[i]['id'],key,size,seed)).encode()).hexdigest()[:13],16)/16**13
             positions=(np.arange(count)+phase)*cumulative[-1]/count
-            selected=np.searchsorted(cumulative,positions,side='right')
+            selected=np.minimum(np.searchsorted(cumulative,positions,side='right'),len(cumulative)-1)
             for e in np.asarray(edges)[selected]:
                 integer_flow[e]+=size
                 chunks.setdefault(int(e),[]).append(int(size))

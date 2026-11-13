@@ -46,13 +46,14 @@ DEFAULT_PORTS = [8080, 5050, 5000]
 TARGET_PATTERNS = [
     "tools/wizard.py",
     "tools\\wizard.py",
-    "wizard.py",
+    "tools.wizard",
     "tools/poi_studio.py",
     "tools\\poi_studio.py",
-    "poi_studio.py",
-    "build.py",
+    "tools.poi_studio",
+    "sb_mexico/build.py",
+    "sb_mexico\\build.py",
+    "sb_mexico.build",
     "cartography_runner",
-    "sb_mexico",
 ]
 
 # Procesos seguros que NUNCA deben cerrarse
@@ -306,10 +307,10 @@ def terminate_all_wizard_processes(
         if name in EXCLUDED_PROCESS_NAMES:
             continue
 
-        # Coincidencia con patrones de script
-        matches_pattern = any(p in cmd for p in TARGET_PATTERNS)
-        # O si es python corriendo dentro del directorio del repo
-        matches_python_repo = ("python" in name and "subway-builder-mexico" in cmd.lower())
+        # Coincidencia con patrones de script en procesos Python
+        matches_pattern = ("python" in name.lower()) and any(p in cmd for p in TARGET_PATTERNS)
+        # O si es python corriendo dentro del directorio del repo (solo con --all)
+        matches_python_repo = ("python" in name.lower() and "subway-builder-mexico" in cmd.lower())
 
         if matches_pattern or (include_all and matches_python_repo):
             pids_to_kill.add(pid)

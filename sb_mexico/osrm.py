@@ -329,7 +329,7 @@ def stop_osrm_daemon_wsl(city_code: str) -> None:
             try:
                 _ACTIVE_OSRM_PROC.kill()
             except Exception:
-                reason = 'request_or_response_error'
+                pass
         _ACTIVE_OSRM_PROC = None
 
 

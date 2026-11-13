@@ -285,10 +285,11 @@ def _resolve_city_path(rel_or_abs_path: str) -> str:
     """Resuelve la ruta a un archivo de ciudad de forma segura contra Path Traversal."""
     candidates = [
         os.path.abspath(os.path.join(ROOT_DIR, rel_or_abs_path)),
-        os.path.abspath(rel_or_abs_path),
-        os.path.abspath(os.path.join(ROOT_DIR, "cities", os.path.basename(rel_or_abs_path)))
+        os.path.abspath(os.path.join(ROOT_DIR, "cities", os.path.basename(rel_or_abs_path))),
     ]
-    if "cancun.yaml" in rel_or_abs_path:
+    if os.path.isabs(rel_or_abs_path):
+        candidates.insert(1, os.path.abspath(rel_or_abs_path))
+    if os.path.basename(rel_or_abs_path) == "cancun.yaml":
         candidates.append(os.path.abspath(os.path.join(ROOT_DIR, "cities", "cancun_riviera_maya.yaml")))
     resolved = None
     for p in candidates:
@@ -301,7 +302,8 @@ def _resolve_city_path(rel_or_abs_path: str) -> str:
 
     norm_root = os.path.normcase(os.path.realpath(ROOT_DIR))
     norm_target = os.path.normcase(os.path.realpath(resolved))
-    if not (norm_target.startswith(norm_root) and (resolved.endswith(".yaml") or resolved.endswith(".yml"))):
+    inside_root = (norm_target == norm_root or norm_target.startswith(norm_root + os.sep))
+    if not (inside_root and (resolved.endswith(".yaml") or resolved.endswith(".yml"))):
         raise PermissionError(f"Acceso denegado: ruta fuera del workspace o extensión inválida ({rel_or_abs_path})")
 
     return resolved
@@ -851,12 +853,11 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
 
         lines.append(f'  - id: {_yaml_quote(p_id)}')
         name_val = poi.get("name")
-        if isinstance(name_val, dict):
+        if isinstance(name_val, dict) and name_val:
             lines.append("    name:")
-            if "es" in name_val:
-                lines.append(f'      es: {_yaml_quote(name_val["es"])}')
-            if "en" in name_val:
-                lines.append(f'      en: {_yaml_quote(name_val["en"])}')
+            ordered_locales = [k for k in ("es", "en") if k in name_val] + [k for k in name_val if k not in ("es", "en")]
+            for loc_key in ordered_locales:
+                lines.append(f'      {loc_key}: {_yaml_quote(name_val[loc_key])}')
         elif isinstance(name_val, str) and name_val:
             lines.append(f'    name: {_yaml_quote(name_val)}')
 
@@ -869,6 +870,11 @@ def save_full_city_data(rel_or_abs_path: str, data: Dict[str, Any]) -> str:
         lines.append(f'    jobs: {jobs}')
         lines.append(f'    radius_m: {rad}')
         lines.append(f'    mode: {_yaml_quote(mode)}')
+        if poi.get("source"):
+            lines.append(f'    source: {_yaml_quote(poi["source"])}')
+        if isinstance(poi.get("sibling_point_ids"), list) and poi["sibling_point_ids"]:
+            sibs = ", ".join(_yaml_quote(s) for s in poi["sibling_point_ids"])
+            lines.append(f'    sibling_point_ids: [{sibs}]')
 
         if isinstance(poi.get("metadata"), dict) and poi["metadata"]:
             lines.append("    metadata:")
@@ -936,12 +942,16 @@ def create_new_project(name: str, code: str, creator: str = "Creador", data_dir:
     slug = re.sub(r'[-_]+', '_', slug).strip('-_') or clean_code.lower()
     yaml_name = f"{slug}.yaml"
     yaml_path = os.path.join(CITIES_DIR, yaml_name)
+    if os.path.exists(yaml_path):
+        raise ValueError(f"El proyecto '{yaml_name}' ya existe.")
 
     resolved_data_dir = data_dir.strip() if data_dir else os.path.join("data", slug).replace("\\", "/")
-    if not os.path.isabs(resolved_data_dir):
-        os.makedirs(os.path.join(ROOT_DIR, resolved_data_dir), exist_ok=True)
-    else:
-        os.makedirs(resolved_data_dir, exist_ok=True)
+    target_abs = os.path.abspath(resolved_data_dir if os.path.isabs(resolved_data_dir) else os.path.join(ROOT_DIR, resolved_data_dir))
+    norm_data = os.path.normcase(os.path.realpath(DATA_DIR))
+    norm_target = os.path.normcase(os.path.realpath(target_abs))
+    if not (norm_target == norm_data or norm_target.startswith(norm_data + os.sep)):
+        raise PermissionError(f"Acceso denegado: carpeta de datos fuera de data/ ({resolved_data_dir})")
+    os.makedirs(target_abs, exist_ok=True)
 
     initial_data = {
         "city": {
@@ -1044,7 +1054,7 @@ def open_file_location(target_path: str) -> Dict[str, Any]:
     # Seguridad: no permitir salir de ROOT_DIR
     norm_root = os.path.normcase(os.path.realpath(ROOT_DIR))
     norm_target = os.path.normcase(os.path.realpath(full_p))
-    if not norm_target.startswith(norm_root):
+    if not (norm_target == norm_root or norm_target.startswith(norm_root + os.sep)):
         raise PermissionError(f"Acceso denegado: ruta fuera del proyecto ({target_path})")
 
     if not os.path.exists(full_p):
@@ -1068,36 +1078,6 @@ def open_file_location(target_path: str) -> Dict[str, Any]:
         subprocess.Popen(["xdg-open", os.path.dirname(full_p) if os.path.isfile(full_p) else full_p])
 
     return {"status": "ok", "opened": full_p}
-
-
-def exclude_data_file(city_file: str, filename: str) -> Dict[str, Any]:
-    """Desvincula un archivo de la sesión/configuración del proyecto sin eliminarlo del disco."""
-    if not city_file or not filename:
-        raise ValueError("Parámetros 'file' y 'filename' requeridos")
-
-    cdata = load_city_data(city_file)
-    exclusions = cdata.get("data_exclusions", [])
-    clean_fn = os.path.basename(filename)
-    if clean_fn not in exclusions:
-        exclusions.append(clean_fn)
-    cdata["data_exclusions"] = exclusions
-    save_full_city_data(city_file, cdata)
-    return {"status": "ok", "excluded": clean_fn, "exclusions": exclusions}
-
-
-def relink_data_file(city_file: str, filename: str) -> Dict[str, Any]:
-    """Reactiva un archivo previamente desvinculado."""
-    if not city_file or not filename:
-        raise ValueError("Parámetros 'file' y 'filename' requeridos")
-
-    cdata = load_city_data(city_file)
-    exclusions = cdata.get("data_exclusions", [])
-    clean_fn = os.path.basename(filename)
-    if clean_fn in exclusions:
-        exclusions.remove(clean_fn)
-    cdata["data_exclusions"] = exclusions
-    save_full_city_data(city_file, cdata)
-    return {"status": "ok", "relinked": clean_fn, "exclusions": exclusions}
 
 
 def set_project_data_dir(city_file: str, new_dir: str) -> Dict[str, Any]:
@@ -1421,14 +1401,13 @@ def exclude_data_file(city_file: str, filename: str) -> Dict[str, Any]:
     Desvincula un archivo de datos añadiéndolo a 'data_exclusions' en el YAML de la ciudad.
     NO BORRA el archivo físico del disco.
     """
+    if not city_file or not filename:
+        raise ValueError("Parámetros 'file' y 'filename' requeridos")
+
     fpath = _resolve_city_path(city_file)
-    if not os.path.exists(fpath):
-        raise FileNotFoundError(f"Proyecto no encontrado: {city_file}")
-
-    with open(fpath, "r", encoding="utf-8") as f:
-        cdata = yaml.safe_load(f) or {}
-
-    exclusions = cdata.get("data_exclusions", [])
+    cdata = load_city_data(fpath)
+    raw_excl = cdata.get("data_exclusions")
+    exclusions = list(raw_excl) if isinstance(raw_excl, list) else []
     clean_fn = os.path.basename(filename).strip()
     if clean_fn and clean_fn not in exclusions:
         exclusions.append(clean_fn)
@@ -1442,14 +1421,13 @@ def relink_data_file(city_file: str, filename: str) -> Dict[str, Any]:
     """
     Vuelve a vincular un archivo previamente excluido eliminándolo de 'data_exclusions'.
     """
+    if not city_file or not filename:
+        raise ValueError("Parámetros 'file' y 'filename' requeridos")
+
     fpath = _resolve_city_path(city_file)
-    if not os.path.exists(fpath):
-        raise FileNotFoundError(f"Proyecto no encontrado: {city_file}")
-
-    with open(fpath, "r", encoding="utf-8") as f:
-        cdata = yaml.safe_load(f) or {}
-
-    exclusions = cdata.get("data_exclusions", [])
+    cdata = load_city_data(fpath)
+    raw_excl = cdata.get("data_exclusions")
+    exclusions = list(raw_excl) if isinstance(raw_excl, list) else []
     clean_fn = os.path.basename(filename).strip()
     if clean_fn in exclusions:
         exclusions.remove(clean_fn)
@@ -2001,8 +1979,16 @@ def validate_city_configuration(city_file: str) -> Dict[str, Any]:
 
         if "jobs" in poi and p_jobs is None:
             errors.append(f"POI '{p_id}': Demanda pendiente. Define 'jobs' en el editor de POIs antes de compilar.")
-        elif p_jobs is None or int(p_jobs) <= 0:
+        elif p_jobs is None:
             warnings.append(f"POI '{p_id}': Número de empleos ('jobs') nulo o menor a 1.")
+        else:
+            try:
+                parsed_jobs = int(p_jobs)
+            except (ValueError, TypeError):
+                errors.append(f"POI '{p_id}': Valor inválido para 'jobs' ({p_jobs!r}). Debe ser un número entero.")
+            else:
+                if parsed_jobs <= 0:
+                    warnings.append(f"POI '{p_id}': Número de empleos ('jobs') nulo o menor a 1.")
 
     # 6. Estado de Archivos de Datos
     status = inspect_data_files(city_name=name, city_code=code, city_file=city_file)
@@ -2184,6 +2170,16 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
         # Early server-side closes are unreliable through Windows loopback filters.
         # Requests remain bounded by frontend deadlines; idle threads are daemons.
         self.connection.settimeout(300)
+
+    def finish(self):
+        super().finish()
+        if getattr(self, 'close_connection', False):
+            try:
+                self.connection.shutdown(socket.SHUT_WR)
+                self.connection.settimeout(0.05)
+                self.connection.recv(4096)
+            except OSError:
+                pass
 
     def end_headers(self):
         self.send_header('X-Wizard-Instance', INSTANCE_ID)
@@ -2684,7 +2680,13 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
         else:
             self.serve_error("Ruta no encontrada", 404)
 
+    def _read_post_body(self, length: int) -> bytes:
+        body = self.rfile.read(length)
+        self._post_body_consumed = True
+        return body
+
     def do_POST(self):
+        self._post_body_consumed = False
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
@@ -2694,7 +2696,7 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 length = int(self.headers.get('Content-Length', 0))
                 if not 0 < length <= 16384:
                     raise ValueError('Solicitud de restauración inválida.')
-                request = json.loads(self.rfile.read(length).decode('utf-8'))
+                request = json.loads(self._read_post_body(length).decode('utf-8'))
                 self.serve_json(restore_toponymy_backup(_resolve_city_path(request['file'])))
             except Exception as error:
                 self.serve_error(str(error), 409)
@@ -2703,7 +2705,7 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 length = int(self.headers.get('Content-Length', 0))
                 if not 0 < length <= 16384:
                     raise ValueError('Solicitud de aplicación inválida.')
-                request = json.loads(self.rfile.read(length).decode('utf-8'))
+                request = json.loads(self._read_post_body(length).decode('utf-8'))
                 self.serve_json(apply_prepared_toponymy(_resolve_city_path(request['file']), request['job_id']))
             except Exception as error:
                 self.serve_error(str(error), 409)
@@ -2713,7 +2715,7 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 length = int(self.headers.get('Content-Length', 0))
                 if not 0 < length <= 32 * 1024 * 1024:
                     raise ValueError('Catálogo de etiquetas fuera de tamaño permitido.')
-                request = json.loads(self.rfile.read(length).decode('utf-8'))
+                request = json.loads(self._read_post_body(length).decode('utf-8'))
                 config = request['config']
                 if not enabled(config.get('toponymy')):
                     raise ValueError('Activa la preparación automática para calcular etiquetas.')
@@ -2727,9 +2729,10 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 length = int(self.headers.get('Content-Length', 0))
                 if not 0 < length <= MAX_BYTES:
                     raise ValueError('La fuente debe pesar entre 1 byte y 768 MB.')
+                raw_body = self._read_post_body(length)
                 resolved = _resolve_city_path(query.get('file', [''])[0])
                 result = import_source(resolved, query.get('kind', [''])[0],
-                                       query.get('name', [''])[0], self.rfile.read(length))
+                                       query.get('name', [''])[0], raw_body)
                 self.serve_json(dict(status='ok', **result))
             except Exception as error:
                 self.serve_error(str(error), 400)
@@ -2738,7 +2741,7 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                 length = int(self.headers.get('Content-Length', 0))
                 if not 0 < length <= 16384:
                     raise ValueError('Solicitud de descarga fuera de tamaño permitido')
-                request = json.loads(self.rfile.read(length).decode('utf-8'))
+                request = json.loads(self._read_post_body(length).decode('utf-8'))
                 manager = get_source_download_manager()
                 if path.endswith('/plan'):
                     result = manager.prepare_async(request['file'])
@@ -3097,8 +3100,18 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
                     self.serve_error("Se esperaba multipart/form-data", 400)
                     return
 
-                boundary = content_type.split("boundary=")[-1].strip().encode('utf-8')
-                body = self.rfile.read(content_len)
+                boundary = b""
+                for ct_part in content_type.split(";"):
+                    ct_key, ct_sep, ct_val = ct_part.strip().partition("=")
+                    if ct_sep and ct_key.lower() == "boundary":
+                        ct_val = ct_val.strip()
+                        if len(ct_val) >= 2 and ct_val[0] == '"' and ct_val[-1] == '"':
+                            ct_val = ct_val[1:-1]
+                        boundary = ct_val.encode("utf-8")
+                        break
+                if not boundary:
+                    self.serve_error("Boundary multipart inválido", 400)
+                    return
 
                 # Resolver destino de subcarpeta priorizando data_dir del proyecto
                 city_file_param = query.get("file", [""])[0]
@@ -3130,38 +3143,131 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
 
                 os.makedirs(target_dir, exist_ok=True)
 
-                parts = body.split(b"--" + boundary)
                 uploaded_files = []
+                dash_boundary = b"--" + boundary
+                buf = bytearray()
+                remaining = content_len
+                stream_eof = False
 
-                for part in parts:
-                    if b'filename="' in part:
-                        header_part, file_bytes = part.split(b"\r\n\r\n", 1)
-                        file_bytes = file_bytes.rstrip(b"\r\n")
+                def _fill(min_bytes: int = 1) -> None:
+                    nonlocal remaining, stream_eof
+                    while not stream_eof and len(buf) < min_bytes and remaining > 0:
+                        chunk = self.rfile.read(min(1024 * 1024, remaining))
+                        if not chunk:
+                            stream_eof = True
+                            break
+                        buf.extend(chunk)
+                        remaining -= len(chunk)
+                    if remaining <= 0:
+                        stream_eof = True
 
-                        headers_str = header_part.decode('utf-8', errors='ignore')
-                        fn_match = [line for line in headers_str.split("\r\n") if 'filename="' in line]
-                        if not fn_match:
-                            continue
-                        
-                        raw_fn = fn_match[0].split('filename="')[-1].split('"')[0]
-                        clean_fn = os.path.basename(raw_fn)
+                while True:
+                    pos = buf.find(dash_boundary)
+                    if pos != -1:
+                        del buf[:pos + len(dash_boundary)]
+                        break
+                    if stream_eof:
+                        raise ValueError("Boundary multipart no encontrado")
+                    keep = max(len(dash_boundary) - 1, 0)
+                    if len(buf) > keep:
+                        del buf[:len(buf) - keep]
+                    _fill(len(buf) + 1)
 
-                        if clean_fn:
-                            out_path = os.path.join(target_dir, clean_fn)
-                            with open(out_path, "wb") as out_f:
-                                out_f.write(file_bytes)
-                            
-                            try:
-                                rel_out = os.path.relpath(out_path, ROOT_DIR).replace("\\", "/")
-                            except ValueError:
-                                rel_out = out_path.replace("\\", "/")
+                while True:
+                    _fill(2)
+                    if buf.startswith(b"--"):
+                        break
+                    if buf.startswith(b"\r\n"):
+                        del buf[:2]
+                    elif buf.startswith(b"\n"):
+                        del buf[:1]
 
-                            uploaded_files.append({
-                                "filename": clean_fn,
-                                "size_mb": round(len(file_bytes) / (1024 * 1024), 2),
-                                "path": rel_out,
-                                "abs_path": out_path
-                            })
+                    hdr_end = -1
+                    hdr_sep_len = 4
+                    while True:
+                        idx_crlf = buf.find(b"\r\n\r\n")
+                        idx_lf = buf.find(b"\n\n")
+                        if idx_crlf != -1 and (idx_lf == -1 or idx_crlf <= idx_lf):
+                            hdr_end, hdr_sep_len = idx_crlf, 4
+                            break
+                        if idx_lf != -1:
+                            hdr_end, hdr_sep_len = idx_lf, 2
+                            break
+                        if stream_eof:
+                            break
+                        _fill(len(buf) + 1)
+                    if hdr_end == -1:
+                        break
+
+                    headers_str = bytes(buf[:hdr_end]).decode('utf-8', errors='ignore')
+                    del buf[:hdr_end + hdr_sep_len]
+
+                    clean_fn = ""
+                    for line in headers_str.splitlines():
+                        if 'filename="' in line:
+                            raw_fn = line.split('filename="', 1)[1].split('"', 1)[0]
+                            clean_fn = os.path.basename(raw_fn)
+                            break
+
+                    out_path = os.path.join(target_dir, clean_fn) if clean_fn else None
+                    out_f = open(out_path, "wb") if out_path else None
+                    written_bytes = 0
+                    part_ok = False
+                    try:
+                        search_from = 0
+                        while True:
+                            idx = buf.find(dash_boundary, search_from)
+                            if idx != -1:
+                                if idx >= 2 and buf[idx - 2:idx] == b"\r\n":
+                                    payload_end = idx - 2
+                                elif idx >= 1 and buf[idx - 1:idx] == b"\n":
+                                    payload_end = idx - 1
+                                elif idx == 0:
+                                    payload_end = 0
+                                else:
+                                    search_from = idx + 1
+                                    continue
+                                if out_f is not None and payload_end > 0:
+                                    out_f.write(buf[:payload_end])
+                                written_bytes += payload_end
+                                del buf[:idx + len(dash_boundary)]
+                                part_ok = True
+                                break
+
+                            if stream_eof:
+                                raise ValueError("Cuerpo multipart incompleto")
+
+                            keep = len(dash_boundary) + 2
+                            if len(buf) > keep:
+                                flush_len = len(buf) - keep
+                                if out_f is not None:
+                                    out_f.write(buf[:flush_len])
+                                written_bytes += flush_len
+                                del buf[:flush_len]
+                                search_from = 0
+                            _fill(len(buf) + 1)
+                    except Exception:
+                        if out_f is not None:
+                            out_f.close()
+                        if out_path and not part_ok and os.path.exists(out_path):
+                            os.remove(out_path)
+                        raise
+                    finally:
+                        if out_f is not None and not out_f.closed:
+                            out_f.close()
+
+                    if clean_fn and out_path:
+                        try:
+                            rel_out = os.path.relpath(out_path, ROOT_DIR).replace("\\", "/")
+                        except ValueError:
+                            rel_out = out_path.replace("\\", "/")
+
+                        uploaded_files.append({
+                            "filename": clean_fn,
+                            "size_mb": round(written_bytes / (1024 * 1024), 2),
+                            "path": rel_out,
+                            "abs_path": out_path
+                        })
 
                 try:
                     display_target = os.path.relpath(target_dir, ROOT_DIR).replace("\\", "/")
@@ -3340,7 +3446,7 @@ class WizardRequestHandler(BaseHTTPRequestHandler):
 
     def serve_error(self, message: str, status: int = 400):
         # Rejected POSTs may have an unread body. Never parse it as a new request.
-        if getattr(self, 'command', None) == 'POST':
+        if getattr(self, 'command', None) == 'POST' and not getattr(self, '_post_body_consumed', False):
             self.close_connection = True
         self.serve_json({"error": message}, status=status)
 

@@ -61,10 +61,11 @@ def _resolve_city_path(rel_or_abs_path: str) -> str:
     """Resuelve la ruta a un archivo de ciudad de forma flexible y segura contra Path Traversal."""
     candidates = [
         os.path.abspath(os.path.join(ROOT_DIR, rel_or_abs_path)),
-        os.path.abspath(rel_or_abs_path),
-        os.path.abspath(os.path.join(ROOT_DIR, "cities", os.path.basename(rel_or_abs_path)))
+        os.path.abspath(os.path.join(ROOT_DIR, "cities", os.path.basename(rel_or_abs_path))),
     ]
-    if "cancun.yaml" in rel_or_abs_path:
+    if os.path.isabs(rel_or_abs_path):
+        candidates.insert(1, os.path.abspath(rel_or_abs_path))
+    if os.path.basename(rel_or_abs_path) == "cancun.yaml":
         candidates.append(os.path.abspath(os.path.join(ROOT_DIR, "cities", "cancun_riviera_maya.yaml")))
     resolved = None
     for p in candidates:
@@ -78,7 +79,8 @@ def _resolve_city_path(rel_or_abs_path: str) -> str:
     # Seguridad: Restringir a archivos dentro del workspace y con extensión yaml
     norm_root = os.path.normcase(os.path.realpath(ROOT_DIR))
     norm_target = os.path.normcase(os.path.realpath(resolved))
-    if not (norm_target.startswith(norm_root) and (resolved.endswith(".yaml") or resolved.endswith(".yml"))):
+    inside_root = (norm_target == norm_root or norm_target.startswith(norm_root + os.sep))
+    if not (inside_root and (resolved.endswith(".yaml") or resolved.endswith(".yml"))):
         raise PermissionError(f"Acceso denegado: ruta fuera del workspace o extensión inválida ({rel_or_abs_path})")
 
     return resolved
@@ -105,6 +107,13 @@ def load_city_data(rel_or_abs_path: str) -> Dict[str, Any]:
     return apply_demand_defaults(data)
 
 
+def _safe_yaml_quote(val: Any) -> str:
+    """Escapa de forma segura valores escalares para YAML."""
+    if val is None:
+        return '""'
+    return json.dumps(str(val), ensure_ascii=False)
+
+
 def _format_affluence_zones_yaml(zones: List[Dict[str, Any]]) -> str:
     """Serializa la lista de zonas de afluencia a formato YAML canónico."""
     if not zones:
@@ -126,16 +135,16 @@ def _format_affluence_zones_yaml(zones: List[Dict[str, Any]]) -> str:
         z_color = str(az.get("color", "#F59E0B")).strip()
         z_target_mode = str(az.get("target_mode", "MULTIPLIER")).strip()
 
-        lines.append(f'  - id: "{z_id}"')
-        lines.append(f'    name: "{z_name}"')
-        lines.append(f'    type: "{z_type}"')
-        lines.append(f'    archetype: "{z_archetype}"')
+        lines.append(f'  - id: {_safe_yaml_quote(z_id)}')
+        lines.append(f'    name: {_safe_yaml_quote(z_name)}')
+        lines.append(f'    type: {_safe_yaml_quote(z_type)}')
+        lines.append(f'    archetype: {_safe_yaml_quote(z_archetype)}')
         lines.append(f'    multiplier: {z_mult:.2f}')
         lines.append(f'    reach_bonus: {z_reach:.2f}')
-        lines.append(f'    target_mode: "{z_target_mode}"')
+        lines.append(f'    target_mode: {_safe_yaml_quote(z_target_mode)}')
         if az.get("target_jobs") is not None and int(az.get("target_jobs", 0)) > 0:
             lines.append(f'    target_jobs: {int(az["target_jobs"])}')
-        lines.append(f'    color: "{z_color}"')
+        lines.append(f'    color: {_safe_yaml_quote(z_color)}')
         lines.append(f'    enabled: {"true" if z_enabled else "false"}')
 
         coords = az.get("coordinates")
@@ -232,11 +241,6 @@ def save_city_data(
 
     target_az = new_affluence_zones if new_affluence_zones is not None else current_data.get("affluence_zones", [])
 
-    def _safe_q(val: Any) -> str:
-        if val is None:
-            return '""'
-        return json.dumps(str(val), ensure_ascii=False)
-
     # 1. Formatear el bloque de POIs en YAML limpio
     pois_yaml_lines = ["pois:"]
     for poi in new_pois:
@@ -246,31 +250,35 @@ def save_city_data(
         rad = int(poi.get("radius_m", 750))
         mode = poi.get("mode", "MAX").upper()
 
-        pois_yaml_lines.append(f'  - id: {_safe_q(p_id)}')
+        pois_yaml_lines.append(f'  - id: {_safe_yaml_quote(p_id)}')
         name_val = poi.get("name")
-        if isinstance(name_val, dict):
+        if isinstance(name_val, dict) and name_val:
             pois_yaml_lines.append('    name:')
-            if "es" in name_val:
-                pois_yaml_lines.append(f'      es: {_safe_q(name_val["es"])}')
-            if "en" in name_val:
-                pois_yaml_lines.append(f'      en: {_safe_q(name_val["en"])}')
+            ordered_locales = [k for k in ("es", "en") if k in name_val] + [k for k in name_val if k not in ("es", "en")]
+            for loc_key in ordered_locales:
+                pois_yaml_lines.append(f'      {loc_key}: {_safe_yaml_quote(name_val[loc_key])}')
         elif isinstance(name_val, str) and name_val:
-            pois_yaml_lines.append(f'    name: {_safe_q(name_val)}')
+            pois_yaml_lines.append(f'    name: {_safe_yaml_quote(name_val)}')
 
         if poi.get("type"):
-            pois_yaml_lines.append(f'    type: {_safe_q(poi["type"])}')
+            pois_yaml_lines.append(f'    type: {_safe_yaml_quote(poi["type"])}')
         if poi.get("sub_type"):
-            pois_yaml_lines.append(f'    sub_type: {_safe_q(poi["sub_type"])}')
+            pois_yaml_lines.append(f'    sub_type: {_safe_yaml_quote(poi["sub_type"])}')
 
         pois_yaml_lines.append(f'    loc: [{loc[0]:.5f}, {loc[1]:.5f}]')
         pois_yaml_lines.append(f'    jobs: {jobs}')
         pois_yaml_lines.append(f'    radius_m: {rad}')
-        pois_yaml_lines.append(f'    mode: {_safe_q(mode)}')
+        pois_yaml_lines.append(f'    mode: {_safe_yaml_quote(mode)}')
+        if poi.get("source"):
+            pois_yaml_lines.append(f'    source: {_safe_yaml_quote(poi["source"])}')
+        if isinstance(poi.get("sibling_point_ids"), list) and poi["sibling_point_ids"]:
+            sibs = ", ".join(_safe_yaml_quote(s) for s in poi["sibling_point_ids"])
+            pois_yaml_lines.append(f'    sibling_point_ids: [{sibs}]')
 
         if isinstance(poi.get("metadata"), dict) and poi["metadata"]:
             pois_yaml_lines.append('    metadata:')
             for mk, mv in poi["metadata"].items():
-                pois_yaml_lines.append(f'      {mk}: {_safe_q(mv)}')
+                pois_yaml_lines.append(f'      {mk}: {_safe_yaml_quote(mv)}')
         pois_yaml_lines.append('')
 
     new_pois_block = "\n".join(pois_yaml_lines).rstrip() + "\n"

@@ -291,7 +291,7 @@ def _allocate_regular(points, config, mobility):
             beta=float(beta),beta_calibrated=calibrated,solver=solution.message,
             warm_start=warm_report,
             support_edges=len(rows),solver_iterations=int(solution.nit),
-            row_max_residual=float(np.max(np.abs(np.bincount(rows,weights=flow)-budgets))),
+            row_max_residual=float(np.max(np.abs(np.bincount(rows,weights=flow,minlength=len(budgets))-budgets))),
             destination_profile=profile,
             destination_targets_semantics='Fixed model weights normalized to retained ordinary budgets; not measured jobs; POIs reserved separately')
     from .cohorts import integerize
@@ -313,13 +313,13 @@ def _allocate_regular(points, config, mobility):
         support_edges=len(rows), solver=solution.message, objective=float(solution.fun),
         solver_iterations=int(solution.nit), scaled_max_gradient=float(np.max(np.abs(solution.jac))),
         normalized_max_gradient=float(np.max(np.abs(objective(parameters)[1]))),
-        row_max_residual=float(np.max(np.abs(np.bincount(rows, weights=flow)-budgets))),
+        row_max_residual=float(np.max(np.abs(np.bincount(rows, weights=flow, minlength=len(budgets))-budgets))),
         destination_profile=profile,
         destination_targets_semantics='Fixed normalized model weights; arrivals are not observed employment',
         redistributed_external=outside,
         cohorts=cohort_report,
         rounding_l1_persons=float(np.abs(integer_flow-flow).sum()),
-        integer_row_max_residual=float(np.max(np.abs(np.bincount(rows,weights=integer_flow)-budgets))),
+        integer_row_max_residual=float(np.max(np.abs(np.bincount(rows,weights=integer_flow,minlength=len(budgets))-budgets))),
         validation_integer=municipal_score(integer_flow, rows, cols, origins, destinations, mobility, 'validation_weight'),
         validation=municipal_score(flow, rows, cols, origins, destinations, mobility, 'validation_weight'))
     return cells, report

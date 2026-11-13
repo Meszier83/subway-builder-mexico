@@ -65,7 +65,7 @@ def round_jobs(flow,rows,cols,origins,destinations,distance,parts,inventories,se
             targets[jobs]+=supplies[local]*weights/mass
             cumulative=np.cumsum(weights)
             phase=int(hashlib.sha256(repr((origins[i]['id'],key,size,seed)).encode()).hexdigest()[:13],16)/16**13
-            selected=np.searchsorted(cumulative,(np.arange(supplies[local])+phase)*mass/supplies[local],side='right')
+            selected=np.minimum(np.searchsorted(cumulative,(np.arange(supplies[local])+phase)*mass/supplies[local],side='right'),len(cumulative)-1)
             for j in jobs[selected]:proposal[str(p),destination_ids[int(j)]]+=1
         # Remove accumulated floating-point error without changing proportions.
         targets*=int(supplies.sum())/targets.sum()

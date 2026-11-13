@@ -107,6 +107,13 @@ def execute_wizard_build(config_path, output_dir, data_dir, skip_map=False, labe
             name: file_hash(Path(__file__).parent / name) for name in (
                 'toponymy_layout.py', 'toponymy_tiles.py', 'toponymy_delivery.py', 'place_identity.py')}
     result['cartography_config']['data_dir'] = str(Path(data_dir).resolve())
+    demand_keys = {'code', 'bbox', 'urban_core_polygon', 'restrict_demand_to_urban_core',
+                   'grid_size', 'min_residents', 'min_jobs', 'residential_placement', 'country'}
+    result['demand_config'] = {key: value for key, value in config['city'].items() if key in demand_keys}
+    for section in ('macroeconomics', 'growth_factors', 'pois', 'exclusion_zones',
+                    'affluence_zones', 'isolated_zones', 'demand', 'routing', 'data_exclusions'):
+        result['demand_config'][section] = config.get(section)
+    result['demand_config']['data_dir'] = str(Path(data_dir).resolve())
     previous = None
     manifest = root / 'wizard-build.json'
     if manifest.exists():
@@ -115,24 +122,46 @@ def execute_wizard_build(config_path, output_dir, data_dir, skip_map=False, labe
         except (ValueError, OSError):
             pass
     write_manifest(root, result)
+    write_manifest(stage, result)
+
+    def _manifest_matches(directory, config_key):
+        cand_manifest = directory / 'wizard-build.json'
+        if not cand_manifest.is_file():
+            return False
+        try:
+            cand = json.loads(cand_manifest.read_text(encoding='utf-8'))
+        except (ValueError, OSError):
+            return False
+        return (cand.get(config_key) == result[config_key]
+                and cand.get('config_path') == str(config_path))
+
+    def _select_reusable_dir(required_file, config_key, prev_out):
+        prev_matches = (previous is not None
+                        and previous.get(config_key) == result[config_key]
+                        and previous.get('config_path') == str(config_path))
+        if prev_out and (prev_out / required_file).is_file():
+            if _manifest_matches(prev_out, config_key) or prev_matches:
+                return prev_out
+        wb_dir = root / 'wizard-builds'
+        if wb_dir.is_dir():
+            candidates = [
+                d for d in wb_dir.iterdir()
+                if d.is_dir() and d != stage and (d / required_file).is_file()
+                and _manifest_matches(d, config_key)
+            ]
+            if candidates:
+                return max(candidates, key=lambda d: d.stat().st_mtime)
+        if (root / required_file).is_file() and (previous is None or prev_matches):
+            return root
+        return stage
+
     try:
         prev_out = Path(previous['output_dir']) if previous and previous.get('output_dir') else None
         if not prev_out or not prev_out.is_dir():
-            wb_dir = root / 'wizard-builds'
-            if wb_dir.is_dir():
-                subdirs = [d for d in wb_dir.iterdir() if d.is_dir() and d != stage]
-                if subdirs:
-                    prev_out = max(subdirs, key=lambda d: d.stat().st_mtime)
+            prev_out = None
 
         if skip_demand:
-            demand_root = prev_out if prev_out and (prev_out / 'demand_data.json').is_file() else root
-            if not (demand_root / 'demand_data.json').is_file():
-                wb_dir = root / 'wizard-builds'
-                if wb_dir.is_dir():
-                    candidates = [d for d in wb_dir.iterdir() if d.is_dir() and d != stage and (d / 'demand_data.json').is_file()]
-                    if candidates:
-                        demand_root = max(candidates, key=lambda d: d.stat().st_mtime)
-
+            demand_root = _select_reusable_dir('demand_data.json', 'demand_config', prev_out)
             demand_files = [
                 'demand_data.json',
                 'demand_manifest.json',
@@ -145,11 +174,12 @@ def execute_wizard_build(config_path, output_dir, data_dir, skip_map=False, labe
                 '.demand-v2-routes.json',
             ]
             result['reused_demand'] = {}
-            for name in demand_files:
-                src = demand_root / name
-                if src.is_file():
-                    shutil.copy2(src, stage / name)
-                    result['reused_demand'][name] = file_hash(src)
+            if demand_root != stage:
+                for name in demand_files:
+                    src = demand_root / name
+                    if src.is_file():
+                        shutil.copy2(src, stage / name)
+                        result['reused_demand'][name] = file_hash(src)
 
         if labels_only:
             geom_files = ['roads.geojson', 'buildings_index.bin.gz', 'runways_taxiways.geojson', 'ocean_depth_index.json.gz']
@@ -160,34 +190,25 @@ def execute_wizard_build(config_path, output_dir, data_dir, skip_map=False, labe
                         shutil.copy2(src, stage / name)
 
         if skip_map:
-            # Reuse only this project's cartography. Record provenance separately
+            # Reuse only this project's matching cartography. Record provenance separately
             # from demand/package identity; asset presence alone does not prove age.
-            asset_root = prev_out if prev_out and (prev_out / f'{code}.pmtiles').is_file() else root
-            if not (asset_root / f'{code}.pmtiles').is_file():
-                wb_dir = root / 'wizard-builds'
-                if wb_dir.is_dir():
-                    candidates = [d for d in wb_dir.iterdir() if d.is_dir() and d != stage and (d / f'{code}.pmtiles').is_file()]
-                    if candidates:
-                        asset_root = max(candidates, key=lambda d: d.stat().st_mtime)
-
-            if previous and (previous.get('cartography_config') != result['cartography_config']
-                             or previous.get('config_path') != str(config_path)):
-                asset_root = stage  # Changed BBOX/map settings require fresh cartography.
+            asset_root = _select_reusable_dir(f'{code}.pmtiles', 'cartography_config', prev_out)
 
             assets = ['toponymy-layout.json', f'{code}.pmtiles', 'roads.geojson', 'buildings_index.bin.gz',
                       'runways_taxiways.geojson', 'ocean_depth_index.json.gz']
             result['reused_cartography'] = {}
-            for name in assets:
-                source = asset_root / name
-                if source.exists():
-                    shutil.copy2(source, stage / name)
-                    result['reused_cartography'][name] = file_hash(source)
-            if config.get('demand', {}).get('engine') == 'v2':
-                cache = asset_root / '.demand-v2-routes.json'
-                if cache.is_file():
-                    # Each entry is keyed by coordinates, network and geometry mode.
-                    shutil.copy2(cache, stage / cache.name)
-            result['cartography_provenance'] = ('previous Wizard build' if asset_root != root
+            if asset_root != stage:
+                for name in assets:
+                    source = asset_root / name
+                    if source.exists():
+                        shutil.copy2(source, stage / name)
+                        result['reused_cartography'][name] = file_hash(source)
+                if config.get('demand', {}).get('engine') == 'v2':
+                    cache = asset_root / '.demand-v2-routes.json'
+                    if cache.is_file():
+                        # Each entry is keyed by coordinates, network and geometry mode.
+                        shutil.copy2(cache, stage / cache.name)
+            result['cartography_provenance'] = ('previous Wizard build' if asset_root not in (root, stage)
                                                 else 'existing project assets; original vintage unverified')
         snapshot = stage / 'effective-city.yaml'
         config['data_dir'] = str(Path(data_dir).resolve())
@@ -213,10 +234,12 @@ def execute_wizard_build(config_path, output_dir, data_dir, skip_map=False, labe
             result['missing_map_files'] = [name for name in (f'{code}.pmtiles', 'roads.geojson')
                                            if not (stage / name).exists()]
         write_manifest(root, result)
+        write_manifest(stage, result)
         return result
     except Exception as error:
         result.update(status='error', error=str(error), package_path=None, package_hash=None)
         write_manifest(root, result)
+        write_manifest(stage, result)
         raise
 
 
